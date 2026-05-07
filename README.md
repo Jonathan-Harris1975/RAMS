@@ -1,4 +1,4 @@
-# Repository automation management service (RAMS)
+# Repo Management Suite (RMS)
 
 A clean-room, production-grade autonomous repository management service that exposes
 an HTTP API. Each endpoint triggers an independent, self-contained audit pipeline.
