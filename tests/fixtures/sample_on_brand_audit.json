@@ -1,0 +1,48 @@
+{
+  "generatedAt": "2026-05-05T00:00:00Z",
+  "pipeline": "on-brand",
+  "findings": [
+    {
+      "title": "Missing canonical tag on homepage",
+      "description": "index.html lacks a <link rel='canonical'> element in <head>, causing potential duplicate-content issues.",
+      "severity": "high",
+      "confidence": 0.97,
+      "fixClass": "html_fix",
+      "affectedPaths": ["index.html"],
+      "evidence": [
+        "<head> parsed — no <link rel='canonical'> found",
+        "Multiple query-string variants of the homepage are indexable"
+      ],
+      "requiredOutcome": "Add <link rel='canonical' href='https://jonathanharris.co.uk/'> inside <head> of index.html",
+      "sourceAudit": "on-brand"
+    },
+    {
+      "title": "Improve intro paragraph tone on blog post",
+      "description": "The intro paragraph could be rewritten to be more punchy and compelling to improve brand voice alignment.",
+      "severity": "low",
+      "confidence": 0.65,
+      "fixClass": "html_fix",
+      "affectedPaths": ["blog/posts/my-first-post.html"],
+      "evidence": [
+        "Opening sentence is passive voice",
+        "Brand guidelines specify active, direct language"
+      ],
+      "requiredOutcome": "Rewrite first paragraph to be more engaging and punchy",
+      "sourceAudit": "on-brand"
+    },
+    {
+      "title": "Partial header mismatch on contact page",
+      "description": "contact.html has a manually edited <header> that diverges from assets/partials/header.html — inject_partials will overwrite it.",
+      "severity": "medium",
+      "confidence": 0.91,
+      "fixClass": "partial_fix",
+      "affectedPaths": ["contact.html"],
+      "evidence": [
+        "contact.html header sha256 does not match partials/header.html",
+        "inject_partials.py --validate exits non-zero for contact.html"
+      ],
+      "requiredOutcome": "Replace contact.html header block with the canonical partial",
+      "sourceAudit": "on-brand"
+    }
+  ]
+}

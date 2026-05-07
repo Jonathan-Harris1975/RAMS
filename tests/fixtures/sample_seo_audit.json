@@ -1,0 +1,45 @@
+{
+  "generatedAt": "2026-05-05T00:00:00Z",
+  "pipeline": "seo-aeo-geo",
+  "findings": [
+    {
+      "title": "Missing JSON-LD schema on services page",
+      "description": "The /services route has no JSON-LD schema markup. Adding Service schema improves AEO eligibility.",
+      "severity": "high",
+      "confidence": 0.95,
+      "fixClass": "schema_fix",
+      "affectedPaths": ["routes/services.js"],
+      "evidence": [
+        "No <script type='application/ld+json'> found in services page response",
+        "Competitors ranking for the same queries all include Service schema"
+      ],
+      "requiredOutcome": "Add Service JSON-LD schema to the /services route response headers or template",
+      "sourceAudit": "seo-aeo-geo"
+    },
+    {
+      "title": "robots.txt disallows /api/ paths",
+      "description": "The robots.txt Disallow: /api/ rule blocks crawlers from discovering API endpoint pages referenced in the sitemap.",
+      "severity": "medium",
+      "confidence": 0.88,
+      "fixClass": "config_fix",
+      "affectedPaths": ["public/robots.txt"],
+      "evidence": [
+        "robots.txt line 4: Disallow: /api/",
+        "sitemap.xml references /api/v1/pricing which is blocked"
+      ],
+      "requiredOutcome": "Remove or narrow the /api/ Disallow rule to avoid blocking sitemap-listed pages",
+      "sourceAudit": "seo-aeo-geo"
+    },
+    {
+      "title": "Consider adding FAQ schema for common questions",
+      "description": "A FAQ schema block could appear in rich results for common question queries. Not a current defect — a future enhancement.",
+      "severity": "low",
+      "confidence": 0.60,
+      "fixClass": "future_guidance",
+      "affectedPaths": [],
+      "evidence": [],
+      "requiredOutcome": "Add FAQ schema in a future sprint once content is finalised",
+      "sourceAudit": "seo-aeo-geo"
+    }
+  ]
+}
