@@ -1,20 +1,36 @@
 """
 Patch applier for the Repo Management Suite.
 
-Applies a PatchPlan to a local repository clone using atomic operations:
-  - replace / insert_after: read → mutate → write
-  - create: write new file (fails if file already exists, unless --overwrite)
-  - delete: remove file
+Applies an AnchorPatch/v1 document to a local repository clone.
 
-All writes are performed only when dry_run=False.
-Raises PatchApplyError with context on any failure.
+Safety rules enforced before any file read or write:
+  1. Resolve os.path.realpath(target_repo / rel_path).
+  2. Ensure the resolved path starts with os.path.realpath(target_repo).
+  3. Check protected path prefixes via patch_protocol.is_protected().
+  4. anchorBefore must appear in file content when supplied.
+  5. For replace/delete, find must appear exactly once.
+  6. Writes are atomic: write to <file>.rms.tmp then os.replace().
+
+Supported operations:
+  replace       — find unique text, replace with new text
+  insert_after  — insert text immediately after the anchor string
+  delete        — remove a file entirely
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
+
+from repo_mgmt.patch_protocol import (
+    PathTraversalError,
+    ProtectedPathError,
+    PatchSchemaError,
+    is_protected,
+    validate_patch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,164 +39,190 @@ class PatchApplyError(Exception):
     """Raised when a patch operation cannot be applied cleanly."""
 
 
+# Protected path sets keyed by pipeline_id
+PROTECTED_PATHS: dict[str, frozenset[str]] = {
+    "mobile-ux": frozenset(
+        [
+            "blog/posts/",
+            "blog/posts.json",
+            "transcripts/",
+            "data/podcast-episodes.json",
+            "assets/js/podcast-transcripts.min.js",
+            "functions/transcripts/",
+        ]
+    ),
+    "on-brand": frozenset(),
+    "seo-aeo-geo": frozenset(),
+}
+
+
 def apply(
-    patch_plan: dict[str, Any],
-    repo_root: Path,
+    patch_doc: dict[str, Any],
+    target_repo: Path,
     dry_run: bool = True,
+    pipeline_id: str = "",
 ) -> list[str]:
     """
-    Apply all operations in *patch_plan* to *repo_root*.
+    Apply all changes in an AnchorPatch/v1 document to *target_repo*.
 
     Args:
-        patch_plan: Validated PatchPlan dict from patch_planner.plan().
-        repo_root: Absolute path to the local repository clone.
-        dry_run: If True, log what would happen but make no filesystem changes.
+        patch_doc: AnchorPatch/v1 dict (validated internally).
+        target_repo: Absolute path to the local repository root.
+        dry_run: If True, log intended changes without touching the filesystem.
+        pipeline_id: Pipeline being run (controls which paths are protected).
 
     Returns:
-        List of relative paths that were (or would be) modified.
+        List of repo-relative paths that were (or would be) modified.
 
     Raises:
-        PatchApplyError: If any operation fails (e.g. search string not found,
-                         file missing for replace, path traversal detected).
+        PathTraversalError: If any change path escapes the repo root.
+        ProtectedPathError: If any change path is in the protected set.
+        PatchApplyError: If a change cannot be applied cleanly.
     """
-    task_id = patch_plan.get("taskId", "<unknown>")
-    ops: list[dict[str, Any]] = patch_plan.get("operations", [])
+    try:
+        validate_patch(patch_doc)
+    except PatchSchemaError as exc:
+        raise PatchApplyError(f"Invalid patch document: {exc}") from exc
+
+    protected = PROTECTED_PATHS.get(pipeline_id, frozenset())
+    real_root = os.path.realpath(target_repo)
+    changes: list[dict[str, Any]] = patch_doc.get("changes", [])
     modified: list[str] = []
 
-    for i, op in enumerate(ops):
-        action: str = op["action"]
-        rel_path: str = op["path"]
+    for i, change in enumerate(changes):
+        rel_path: str = change["file"]
+        operation: str = change["operation"]
 
-        # Security: reject path traversal
-        abs_path = (repo_root / rel_path).resolve()
-        if not str(abs_path).startswith(str(repo_root.resolve())):
-            raise PatchApplyError(
-                f"[{task_id}] op {i}: path {rel_path!r} escapes repo root — rejected"
+        # ── Safety gate 1: path traversal ─────────────────────────────────
+        resolved = os.path.realpath(Path(real_root) / rel_path)
+        if not resolved.startswith(real_root):
+            raise PathTraversalError(
+                f"change[{i}] path {rel_path!r} resolves outside repo root — rejected"
             )
 
-        prefix = f"[{task_id}] op {i} ({action} {rel_path})"
+        # ── Safety gate 2: protected paths ─────────────────────────────────
+        if is_protected(rel_path, protected):
+            raise ProtectedPathError(
+                f"change[{i}] path {rel_path!r} is protected for pipeline {pipeline_id!r}"
+            )
 
-        if action == "replace":
-            _apply_replace(abs_path, op, prefix, dry_run)
-            modified.append(rel_path)
+        abs_path = Path(resolved)
+        prefix = f"change[{i}] ({operation} {rel_path})"
 
-        elif action == "insert_after":
-            _apply_insert_after(abs_path, op, prefix, dry_run)
-            modified.append(rel_path)
-
-        elif action == "create":
-            _apply_create(abs_path, op, prefix, dry_run)
-            modified.append(rel_path)
-
-        elif action == "delete":
+        if operation == "replace":
+            _apply_replace(abs_path, change, prefix, dry_run)
+        elif operation == "insert_after":
+            _apply_insert_after(abs_path, change, prefix, dry_run)
+        elif operation == "delete":
             _apply_delete(abs_path, prefix, dry_run)
-            modified.append(rel_path)
-
         else:
-            raise PatchApplyError(f"{prefix}: unknown action {action!r}")
+            raise PatchApplyError(f"{prefix}: unsupported operation {operation!r}")
+
+        modified.append(rel_path)
 
     mode = "DRY-RUN" if dry_run else "APPLIED"
-    logger.info("patch_applier [%s]: %s — %d ops on %d files", task_id, mode, len(ops), len(modified))
+    logger.info(
+        "patch_applier: %s — %d change(s) [pipeline=%s]",
+        mode, len(changes), pipeline_id or "<none>",
+    )
     return modified
 
 
-# ── Operation implementations ──────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────
 
-def _apply_replace(
-    abs_path: Path,
-    op: dict[str, Any],
-    prefix: str,
-    dry_run: bool,
-) -> None:
-    search: str = op["search"]
-    replacement: str = op.get("replacement", "")
 
+def _read_file(abs_path: Path, prefix: str) -> str:
+    """Read a file, raising PatchApplyError if missing."""
     if not abs_path.is_file():
         raise PatchApplyError(f"{prefix}: file not found: {abs_path}")
+    return abs_path.read_text(encoding="utf-8")
 
-    original = abs_path.read_text(encoding="utf-8")
-    count = original.count(search)
+
+def _atomic_write(abs_path: Path, content: str) -> None:
+    """Write *content* atomically via a .rms.tmp sibling."""
+    tmp_path = abs_path.with_suffix(abs_path.suffix + ".rms.tmp")
+    try:
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(content, encoding="utf-8")
+        os.replace(tmp_path, abs_path)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _apply_replace(
+    abs_path: Path, change: dict[str, Any], prefix: str, dry_run: bool
+) -> None:
+    """Apply a 'replace' change."""
+    anchor_before: str = change.get("anchorBefore", "")
+    find: str = change["find"]
+    replacement: str = change.get("replace", "")
+
+    original = _read_file(abs_path, prefix)
+
+    if anchor_before and anchor_before not in original:
+        raise PatchApplyError(
+            f"{prefix}: anchorBefore string not found in file\n"
+            f"  anchorBefore={anchor_before[:120]!r}"
+        )
+    count = original.count(find)
     if count == 0:
         raise PatchApplyError(
-            f"{prefix}: search string not found in {abs_path}\n"
-            f"  search={search[:120]!r}"
+            f"{prefix}: find string not found\n  find={find[:120]!r}"
         )
     if count > 1:
         raise PatchApplyError(
-            f"{prefix}: search string matches {count} locations in {abs_path} — "
-            "must be unique. Widen the search string."
+            f"{prefix}: find string matches {count} locations — must be unique\n"
+            f"  find={find[:120]!r}"
         )
 
-    new_content = original.replace(search, replacement, 1)
+    new_content = original.replace(find, replacement, 1)
     if dry_run:
         logger.info("%s: [dry-run] would replace 1 occurrence", prefix)
     else:
-        abs_path.write_text(new_content, encoding="utf-8")
+        _atomic_write(abs_path, new_content)
         logger.info("%s: replaced 1 occurrence", prefix)
 
 
 def _apply_insert_after(
-    abs_path: Path,
-    op: dict[str, Any],
-    prefix: str,
-    dry_run: bool,
+    abs_path: Path, change: dict[str, Any], prefix: str, dry_run: bool
 ) -> None:
-    search: str = op["search"]
-    replacement: str = op.get("replacement", "")
+    """Apply an 'insert_after' change."""
+    anchor_before: str = change.get("anchorBefore", "")
+    find: str = change["find"]
+    replacement: str = change.get("replace", "")
 
-    if not abs_path.is_file():
-        raise PatchApplyError(f"{prefix}: file not found: {abs_path}")
+    original = _read_file(abs_path, prefix)
 
-    original = abs_path.read_text(encoding="utf-8")
-    count = original.count(search)
+    if anchor_before and anchor_before not in original:
+        raise PatchApplyError(
+            f"{prefix}: anchorBefore string not found in file\n"
+            f"  anchorBefore={anchor_before[:120]!r}"
+        )
+    count = original.count(find)
     if count == 0:
         raise PatchApplyError(
-            f"{prefix}: anchor string not found in {abs_path}\n"
-            f"  search={search[:120]!r}"
+            f"{prefix}: find string not found\n  find={find[:120]!r}"
         )
     if count > 1:
         raise PatchApplyError(
-            f"{prefix}: anchor string matches {count} locations in {abs_path} — must be unique"
+            f"{prefix}: find string matches {count} locations — must be unique\n"
+            f"  find={find[:120]!r}"
         )
 
-    new_content = original.replace(search, search + replacement, 1)
+    new_content = original.replace(find, find + replacement, 1)
     if dry_run:
         logger.info("%s: [dry-run] would insert after anchor", prefix)
     else:
-        abs_path.write_text(new_content, encoding="utf-8")
+        _atomic_write(abs_path, new_content)
         logger.info("%s: inserted after anchor", prefix)
 
 
-def _apply_create(
-    abs_path: Path,
-    op: dict[str, Any],
-    prefix: str,
-    dry_run: bool,
-) -> None:
-    content: str = op.get("content", "")
-
-    if abs_path.exists():
-        raise PatchApplyError(
-            f"{prefix}: file already exists: {abs_path}. "
-            "Use 'replace' to modify existing files."
-        )
-
-    if dry_run:
-        logger.info("%s: [dry-run] would create file (%d chars)", prefix, len(content))
-    else:
-        abs_path.parent.mkdir(parents=True, exist_ok=True)
-        abs_path.write_text(content, encoding="utf-8")
-        logger.info("%s: created file (%d chars)", prefix, len(content))
-
-
-def _apply_delete(
-    abs_path: Path,
-    prefix: str,
-    dry_run: bool,
-) -> None:
+def _apply_delete(abs_path: Path, prefix: str, dry_run: bool) -> None:
+    """Apply a 'delete' change."""
     if not abs_path.exists():
         raise PatchApplyError(f"{prefix}: file not found: {abs_path}")
-
     if dry_run:
         logger.info("%s: [dry-run] would delete file", prefix)
     else:
