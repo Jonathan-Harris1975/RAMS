@@ -1,5 +1,4 @@
-# Repository automation management service
-(RAMS)
+# Repository automation management service(RAMS)
 
 
 A clean-room, production-grade autonomous repository management service that exposes
