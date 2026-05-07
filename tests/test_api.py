@@ -1,0 +1,94 @@
+"""Tests for repo_mgmt.api (FastAPI endpoints)."""
+
+from __future__ import annotations
+
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from repo_mgmt.api import app
+from repo_mgmt.report_writer import RunReport
+from tests.conftest import VALID_ENV
+
+
+def _mock_report(pipeline_id: str = "on-brand") -> RunReport:
+    return RunReport(
+        run_id="2026-05-05T03-00-00Z",
+        pipeline=pipeline_id,
+        dry_run=True,
+        started_at="2026-05-05T03:00:00Z",
+        finished_at="2026-05-05T03:00:01Z",
+        issues_total=0,
+        issues_applied=0,
+        issues_reverted=0,
+        issues_skipped=0,
+        issues_future_guidance=0,
+        issues_manual_review=0,
+    )
+
+
+@pytest.fixture
+def client(settings) -> TestClient:
+    """TestClient with all external dependencies mocked."""
+    mock_r2 = MagicMock()
+    with patch("repo_mgmt.api.load_settings", return_value=settings), \
+         patch("repo_mgmt.api.R2Client", return_value=mock_r2), \
+         patch("repo_mgmt.api.build_scheduler") as mock_sched, \
+         patch("repo_mgmt.api.pipeline_mod.run", return_value=_mock_report()):
+        mock_sched.return_value.start = MagicMock()
+        with TestClient(app) as c:
+            yield c
+
+
+class TestHealthEndpoint:
+    def test_health_returns_200(self, client: TestClient) -> None:
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "pipelines" in data
+        for pid in ("seo-aeo-geo", "mobile-ux", "on-brand"):
+            assert pid in data["pipelines"]
+
+
+class TestRunEndpoints:
+    @pytest.mark.parametrize("endpoint,pipeline_id", [
+        ("/rebuild/seo-aeo-geo/run", "seo-aeo-geo"),
+        ("/rebuild/mobile-ux/run", "mobile-ux"),
+        ("/rebuild/on-brand/run", "on-brand"),
+    ])
+    def test_post_returns_202(
+        self, client: TestClient, endpoint: str, pipeline_id: str
+    ) -> None:
+        response = client.post(endpoint)
+        assert response.status_code == 202
+        data = response.json()
+        assert "runId" in data
+        assert data["pipeline"] == pipeline_id
+        assert "dryRun" in data
+
+    def test_dry_run_override_in_body(self, client: TestClient) -> None:
+        response = client.post(
+            "/rebuild/on-brand/run",
+            json={"dry_run": False},
+        )
+        assert response.status_code == 202
+
+    def test_409_when_pipeline_running(self, client: TestClient) -> None:
+        lock = __import__("repo_mgmt.pipeline", fromlist=["pipeline"]).pipeline._pipeline_locks["on-brand"]
+        lock.acquire()
+        try:
+            response = client.post("/rebuild/on-brand/run")
+            assert response.status_code == 409
+            assert "already running" in response.json()["detail"]["error"]
+        finally:
+            lock.release()
+
+    def test_invalid_body_returns_422(self, client: TestClient) -> None:
+        response = client.post(
+            "/rebuild/on-brand/run",
+            json={"dry_run": "not-a-boolean"},
+        )
+        assert response.status_code == 422
