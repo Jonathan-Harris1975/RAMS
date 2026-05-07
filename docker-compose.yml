@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  rms-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: repo-management-suite:latest
+    container_name: rms-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount local repo clones so the service can read/write them
+      - type: bind
+        source: ${RMS_SEO_REPO_PATH}
+        target: /repos/seo
+        read_only: false
+      - type: bind
+        source: ${RMS_WEBSITE_REPO_PATH}
+        target: /repos/website
+        read_only: false
+    environment:
+      - RMS_SEO_REPO_PATH=/repos/seo
+      - RMS_WEBSITE_REPO_PATH=/repos/website
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
