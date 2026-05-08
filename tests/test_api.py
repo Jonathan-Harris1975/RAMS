@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from repo_mgmt.api import app
+from repo_mgmt.api import app, _running
 from repo_mgmt.report_writer import RunReport
 from tests.conftest import VALID_ENV
 
@@ -40,6 +40,16 @@ def client(settings) -> TestClient:
         mock_sched.return_value.start = MagicMock()
         with TestClient(app) as c:
             yield c
+
+
+@pytest.fixture(autouse=True)
+def reset_running(client) -> None:
+    """Ensure _running is cleared before and after every test."""
+    for k in _running:
+        _running[k] = False
+    yield
+    for k in _running:
+        _running[k] = False
 
 
 class TestHealthEndpoint:
@@ -77,14 +87,19 @@ class TestRunEndpoints:
         assert response.status_code == 202
 
     def test_409_when_pipeline_running(self, client: TestClient) -> None:
-        lock = __import__("repo_mgmt.pipeline", fromlist=["pipeline"]).pipeline._pipeline_locks["on-brand"]
-        lock.acquire()
+        """409 is returned when _running flag is already True for the pipeline."""
+        # Set _running directly — same pattern as test_api_endpoints.py
+        _running["on-brand"] = True
         try:
             response = client.post("/rebuild/on-brand/run")
             assert response.status_code == 409
-            assert "already running" in response.json()["detail"]["error"]
+            data = response.json()
+            # Response must be flat — NOT nested under 'detail'
+            assert "already running" in data["error"]
+            assert data.get("pipeline") == "on-brand"
+            assert "detail" not in data
         finally:
-            lock.release()
+            _running["on-brand"] = False
 
     def test_invalid_body_returns_422(self, client: TestClient) -> None:
         response = client.post(
