@@ -91,7 +91,7 @@ def run_pipeline(
 
     # --dry-run flag overrides env; otherwise use cfg default
     effective_dry_run = (
-        force_dry_run if force_dry_run is not None else pipeline._cfg.rms_dry_run
+        force_dry_run if force_dry_run is not None else pipeline.cfg.rms_dry_run
     )
     report = asyncio.run(pipeline.run(dry_run=effective_dry_run))
     _print_report(report)

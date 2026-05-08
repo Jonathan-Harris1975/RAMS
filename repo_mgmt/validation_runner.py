@@ -1,76 +1,30 @@
-"""
-Validation runner for the Repo Management Suite.
-
-Runs the pipeline's validation commands sequentially in the repository working
-directory.  Stops on the first non-zero exit code.  Never raises on command
-failure — the result is captured in ValidationResult.
-
-Returns the last 200 lines of combined stdout+stderr as output_tail.
-"""
-
+"""Canonical validation runner for RAMS."""
 from __future__ import annotations
-
-import logging
 import subprocess
-from dataclasses import dataclass
-
+from dataclasses import dataclass, field
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-
-_TIMEOUT_SECONDS: int = 300
-_TAIL_LINES: int = 200
-
-
+from typing import TYPE_CHECKING
+if TYPE_CHECKING: from repo_mgmt.config import Settings
+DEFAULT_TIMEOUT_SECONDS=300
 @dataclass
 class ValidationResult:
-    """Result of running one or more validation commands."""
     passed: bool
-    output_tail: str
-
-
-def run_commands(commands: list[str], cwd: Path) -> ValidationResult:
-    """
-    Run *commands* sequentially in *cwd*, stopping on first failure.
-
-    Args:
-        commands: Ordered list of shell command strings to execute.
-        cwd: Working directory (must be the target repo root).
-
-    Returns:
-        ValidationResult with passed=True only if all commands exit 0.
-    """
-    all_lines: list[str] = []
-
+    commands: list[str]=field(default_factory=list)
+    output_tail: str=''
+    return_code: int=0
+    failed_command: str|None=None
+def _tail_200(text:str)->str: return '\n'.join(text.splitlines()[-200:])
+def run_commands(commands:list[str], cwd:Path, timeout_seconds:int=DEFAULT_TIMEOUT_SECONDS)->ValidationResult:
+    tail=''
     for cmd in commands:
-        logger.info("validation_runner: running %r in %s", cmd, cwd)
         try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            timeout_msg = f"[TIMEOUT after {_TIMEOUT_SECONDS}s]: {cmd}"
-            logger.error("validation_runner: %s", timeout_msg)
-            all_lines.append(timeout_msg)
-            tail = "\n".join(all_lines[-_TAIL_LINES:])
-            return ValidationResult(passed=False, output_tail=tail)
-
-        combined = result.stdout + result.stderr
-        all_lines.extend(combined.splitlines())
-
-        if result.returncode != 0:
-            logger.warning(
-                "validation_runner: command exited %d: %r", result.returncode, cmd
-            )
-            tail = "\n".join(all_lines[-_TAIL_LINES:])
-            return ValidationResult(passed=False, output_tail=tail)
-
-        logger.info("validation_runner: command passed: %r", cmd)
-
-    tail = "\n".join(all_lines[-_TAIL_LINES:])
-    return ValidationResult(passed=True, output_tail=tail)
+            proc=subprocess.run(cmd,cwd=cwd,shell=True,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            out=exc.stdout or ''
+            if isinstance(out,bytes): out=out.decode('utf-8',errors='replace')
+            return ValidationResult(False,commands,_tail_200(out+f'\nTIMEOUT after {timeout_seconds}s'),124,cmd)
+        tail=_tail_200(proc.stdout or '')
+        if proc.returncode!=0: return ValidationResult(False,commands,tail,proc.returncode,cmd)
+    return ValidationResult(True,commands,tail,0,None)
+def run(pipeline_id:str, repo_root:Path, cfg:'Settings', dry_run:bool=True, timeout_seconds:int=DEFAULT_TIMEOUT_SECONDS)->ValidationResult:
+    return run_commands(cfg.validation_commands_for(pipeline_id), cwd=repo_root, timeout_seconds=timeout_seconds) # type: ignore[arg-type]

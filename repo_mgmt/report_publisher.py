@@ -83,6 +83,7 @@ class RunReport:
     tasks: list[dict[str, Any]] = field(default_factory=list)
     validation: ValidationSummary | None = None
     commits: list[CommitInfo] = field(default_factory=list)
+    error: str | None = None
 
 
 def make_run_id() -> str:
