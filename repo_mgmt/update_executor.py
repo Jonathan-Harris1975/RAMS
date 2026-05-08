@@ -22,13 +22,14 @@ async def run_task(issue:dict[str,Any], target_repo:Path, pipeline_id:str, cfg:'
         if not dry_run and git_mgr is not None: git_mgr.assert_write_allowed()
         modified=patch_applier.apply(patch_doc,target_repo,dry_run=dry_run,pipeline_id=pipeline_id); task['modified_files']=modified
         if dry_run: task['status']='planned'; return task
-        validation=validation_runner.run(pipeline_id,target_repo,cfg,dry_run=False)
-        task['validation']={'commands':validation.commands,'passed':validation.passed,'outputTail':validation.output_tail}
-        if not validation.passed:
-            task['validation_passed']=False
-            if cfg.rms_revert_on_validation_failure and git_mgr is not None: git_mgr.revert(); task['status']='reverted'
-            else: task['status']='validation_failed'
-            task['error']=f"validation failed: {validation.failed_command or '<unknown>'}"; return task
+        if cfg.rms_validate_after_each_task:
+            validation=validation_runner.run(pipeline_id,target_repo,cfg,dry_run=False)
+            task['validation']={'commands':validation.commands,'passed':validation.passed,'outputTail':validation.output_tail}
+            if not validation.passed:
+                task['validation_passed']=False
+                if cfg.rms_revert_on_validation_failure and git_mgr is not None: git_mgr.revert(); task['status']='reverted'
+                else: task['status']='validation_failed'
+                task['error']=f"validation failed: {validation.failed_command or '<unknown>'}"; return task
         if git_mgr is None: task['status']='manual_review'; task['error']='missing Git manager after validation'; return task
         git_mgr.stage_task_files(modified); msg=f"rms({pipeline_id}): {tid} - {task.get('title','fix')}"; sha=git_mgr.commit(msg); branch=getattr(git_mgr,'current_branch',lambda:'')(); git_mgr.push_branch(branch)
         task.update(status='committed', commit_sha=sha, commit_message=msg, validation_passed=True); return task

@@ -8,7 +8,16 @@ from repo_mgmt.config import PipelineId, Settings
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.report_publisher import CommitInfo, RunReport, ValidationSummary, make_run_id, publish
-logger=logging.getLogger(__name__); _pipeline_locks={p:threading.Lock() for p in ('seo-aeo-geo','mobile-ux','on-brand')}
+logger=logging.getLogger(__name__)
+# ── Concurrency gates ──────────────────────────────────────────────────────
+# Two independent gates exist by design:
+#   1. api.py `_running` dict  — HTTP layer; returns 409 to callers.
+#   2. `_pipeline_locks` below — internal layer; protects against scheduler-
+#      or CLI-triggered concurrent runs that bypass the HTTP gate.
+# Gate 2 is the authoritative lock for pipeline.run(). If `_running` is
+# cleared before the lock releases (e.g. on a crash), gate 2 prevents a
+# second run from proceeding. Both gates must be satisfied for a run to start.
+_pipeline_locks={p:threading.Lock() for p in ('seo-aeo-geo','mobile-ux','on-brand')}
 def is_running(pipeline_id:PipelineId)->bool: return _pipeline_locks[pipeline_id].locked()
 def _date()->str: return datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
 def _summary(tasks:list[dict[str,Any]], snapshots:int)->dict[str,int]:
@@ -25,6 +34,41 @@ class RmsPipeline:
     @classmethod
     def for_id(cls,pipeline_id:PipelineId,cfg:Settings,r2:Any,router:ModelRouter): return cls(pipeline_id,cfg,r2,router)
     async def run(self,dry_run:bool|None=None)->RunReport: return await _run_async(self.pipeline_id,self.cfg,self.r2,self.router,self.cfg.rms_dry_run if dry_run is None else dry_run)
+    @property
+    def audit_key(self) -> str:
+        """R2 key for this pipeline's latest audit snapshot."""
+        return f"audits/{self.pipeline_id}/latest.json"
+    @property
+    def target_repo(self):
+        """Absolute path to the target repository clone."""
+        return self.cfg.repo_path_for(self.pipeline_id)
+    @property
+    def validation_commands(self) -> list[str]:
+        """Ordered validation commands for this pipeline."""
+        return self.cfg.validation_commands_for(self.pipeline_id)
+    @property
+    def protected_paths(self) -> frozenset:
+        """Repo-relative path prefixes that this pipeline may not modify."""
+        from repo_mgmt.patch_applier import PROTECTED_PATHS
+        return PROTECTED_PATHS.get(self.pipeline_id, frozenset())
+    @property
+    def approved_fix_classes(self) -> frozenset:
+        """Fix classes this pipeline is permitted to apply."""
+        _approved: dict = {
+            "seo-aeo-geo": frozenset({
+                "route_fix", "config_fix", "schema_fix",
+                "prompt_template_update", "audit_output_fix", "middleware_fix",
+            }),
+            "mobile-ux": frozenset({
+                "html_fix", "css_fix", "meta_fix",
+                "viewport_fix", "accessibility_fix", "redirect_fix",
+            }),
+            "on-brand": frozenset({
+                "html_fix", "css_fix", "template_fix", "partial_fix",
+                "redirect_fix", "prompt_template_update", "schema_fix", "meta_fix",
+            }),
+        }
+        return _approved.get(self.pipeline_id, frozenset())
 async def _run_async(pipeline_id:PipelineId,cfg:Settings,r2:Any,router:ModelRouter,dry_run:bool)->RunReport:
     lock=_pipeline_locks[pipeline_id]; run_id=make_run_id(); target_repo=cfg.repo_path_for(pipeline_id); branch=''; tasks=[]; error=None; snapshots=0
     if not lock.acquire(False): return RunReport(runId=run_id,pipeline=pipeline_id,targetRepo=str(target_repo),branch='',dryRun=dry_run,summary=_summary([],0),tasks=[],validation=None,commits=[],error=f"pipeline {pipeline_id!r} already running")
@@ -34,7 +78,7 @@ async def _run_async(pipeline_id:PipelineId,cfg:Settings,r2:Any,router:ModelRout
         git_mgr=None
         if not dry_run and queues.code_fix:
             try:
-                branch=f"{cfg.rms_qa_branch_prefix}{pipeline_id}-{run_id}"; git_mgr=GitManager(target_repo,cfg.rms_qa_branch_prefix,cfg.rms_push_enabled); git_mgr.create_branch(branch)
+                branch=f"{cfg.rms_qa_branch_prefix}{pipeline_id}/{run_id}"; git_mgr=GitManager(target_repo,cfg.rms_qa_branch_prefix,cfg.rms_push_enabled); git_mgr.create_branch(branch)
             except Exception as exc:
                 error=f"Git branch setup failed; live code_fix writes skipped: {exc}"
                 for issue in selected:
