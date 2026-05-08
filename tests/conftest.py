@@ -56,13 +56,15 @@ def mock_router() -> MagicMock:
     """Return a MagicMock that mimics ModelRouter."""
     router = MagicMock()
     router.complete.return_value = json.dumps({
-        "taskId": "rms-on-brand-2026-05-05-001",
-        "operations": [
+        "patchProtocol": "AnchorPatch/v1",
+        "changes": [
             {
-                "action": "replace",
-                "path": "index.html",
-                "search": "<title>Old</title>",
-                "replacement": "<title>New</title>",
+                "file": "index.html",
+                "operation": "replace",
+                "anchorBefore": "<title>Old</title>",
+                "find": "<title>Old</title>",
+                "replace": "<title>New</title>",
+                "rationale": "Update the page title.",
             }
         ],
     })

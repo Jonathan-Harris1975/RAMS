@@ -88,3 +88,16 @@ class TestRevertToHead:
         repo = _make_mock_repo()
         revert_to_head(repo, dry_run=False)
         repo.git.reset.assert_called_once_with("--hard", "HEAD")
+
+
+
+def test_ensure_clean_branch_blocks_when_active_branch_is_main(tmp_path):
+    import subprocess
+    from repo_mgmt import git_ops
+    subprocess.run(['git','init','-b','main'],cwd=tmp_path,check=True,stdout=subprocess.PIPE)
+    subprocess.run(['git','config','user.email','test@example.com'],cwd=tmp_path,check=True)
+    subprocess.run(['git','config','user.name','Test'],cwd=tmp_path,check=True)
+    (tmp_path/'README.md').write_text('hello')
+    subprocess.run(['git','add','README.md'],cwd=tmp_path,check=True)
+    subprocess.run(['git','commit','-m','init'],cwd=tmp_path,check=True,stdout=subprocess.PIPE)
+    with pytest.raises(git_ops.BranchSafetyError): git_ops.ensure_clean_branch(tmp_path,'rms-qa/test')

@@ -59,3 +59,14 @@ def test_gitignore_respected(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
     index = build_static_index(tmp_path)
     assert not any("node_modules" in f for f in index["file_list"])
+
+
+def test_node_index_discovers_express_and_audit_routes(tmp_path):
+    (tmp_path/'package.json').write_text('{"scripts":{"test":"node --test"}}')
+    (tmp_path/'server.js').write_text("app.use('/api', router);\napp.post('/compose', handler);")
+    (tmp_path/'routes').mkdir(); (tmp_path/'routes'/'health.js').write_text("router.get('/health', handler);")
+    (tmp_path/'audits'/'routes').mkdir(parents=True); (tmp_path/'audits'/'routes'/'seo.js').write_text("router.post('/audits/seo-aeo-geo/run', handler);")
+    (tmp_path/'services'/'podcast').mkdir(parents=True); (tmp_path/'services'/'podcast'/'routes.js').write_text("router.post('/podcast/build', handler);")
+    from repo_mgmt.repo_index import build_node_index
+    idx=build_node_index(tmp_path)
+    assert '/compose' in idx['route_strings'] and '/audits/seo-aeo-geo/run' in idx['route_strings'] and '/podcast/build' in idx['route_strings']

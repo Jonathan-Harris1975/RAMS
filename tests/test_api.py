@@ -9,25 +9,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from repo_mgmt.api import app, _running
-from repo_mgmt.report_writer import RunReport
+from repo_mgmt.report_publisher import RunReport
 from tests.conftest import VALID_ENV
 
 
 def _mock_report(pipeline_id: str = "on-brand") -> RunReport:
     return RunReport(
-        run_id="2026-05-05T03-00-00Z",
+        runId="2026-05-05T03-00-00Z",
         pipeline=pipeline_id,
-        dry_run=True,
-        started_at="2026-05-05T03:00:00Z",
-        finished_at="2026-05-05T03:00:01Z",
-        issues_total=0,
-        issues_applied=0,
-        issues_reverted=0,
-        issues_skipped=0,
-        issues_future_guidance=0,
-        issues_manual_review=0,
+        targetRepo="/tmp/repo",
+        branch="",
+        dryRun=True,
+        summary={"snapshotsRead":0,"tasksGenerated":0,"codeFixesAttempted":0,"committed":0,"validationFailed":0,"futureGuidance":0,"manualReview":0},
+        tasks=[],
+        validation=None,
+        commits=[],
     )
-
 
 @pytest.fixture
 def client(settings) -> TestClient:
