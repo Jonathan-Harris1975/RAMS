@@ -3,14 +3,37 @@ Report publisher for the Repo Management Suite.
 
 Writes RunReport JSON in one of two modes:
 
-  dry_run=True  → local file only:
+  dry_run=True  -> local file only:
                     ./dry-run-<pipeline_id>-report.json
 
-  dry_run=False → two R2 objects:
-                    qa-suite/reports/<pipeline_id>/<runId>/report.json
-                    qa-suite/reports/<pipeline_id>/latest.json
+  dry_run=False -> two R2 objects:
+                    qa-suite/reports/<pipeline>/<runId>/report.json
+                    qa-suite/reports/<pipeline>/latest.json
 
-Uses R2_BUCKET_AUDITS and R2_PUBLIC_BASE_URL_AUDITS from config.
+RunReport schema (matches briefing §9):
+  {
+    "runId": str,
+    "pipeline": PipelineId,
+    "targetRepo": str,
+    "branch": str,
+    "dryRun": bool,
+    "summary": {
+      "snapshotsRead": int,
+      "tasksGenerated": int,
+      "codeFixesAttempted": int,
+      "committed": int,
+      "validationFailed": int,
+      "futureGuidance": int,
+      "manualReview": int
+    },
+    "tasks": list[NormalisedIssue],
+    "validation": {
+      "commands": list[str],
+      "passed": bool,
+      "outputTail": str
+    } | null,
+    "commits": [{"sha": str, "message": str, "files": list[str]}]
+  }
 """
 
 from __future__ import annotations
@@ -33,21 +56,17 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TaskReport:
-    """Per-task outcome within a RunReport."""
-    task_id: str
-    classification: str
-    status: str            # applied | reverted | skipped | future_guidance | manual_review
-    affected_paths: list[str] = field(default_factory=list)
-    patch_ops: int = 0
-    validation_passed: bool | None = None
-    commit_sha: str | None = None
-    error: str | None = None
+class CommitInfo:
+    """Per-commit metadata within a RunReport."""
+    sha: str
+    message: str
+    files: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ValidationSummary:
-    """Summary of the final validation run."""
+    """Validation section of a RunReport."""
+    commands: list[str]
     passed: bool
     output_tail: str = ""
 
@@ -58,12 +77,12 @@ class RunReport:
     runId: str
     pipeline: str
     targetRepo: str
-    branch: str | None
+    branch: str
     dryRun: bool
     summary: dict[str, int] = field(default_factory=dict)
-    tasks: list[TaskReport] = field(default_factory=list)
+    tasks: list[dict[str, Any]] = field(default_factory=list)
     validation: ValidationSummary | None = None
-    commits: list[str] = field(default_factory=list)
+    commits: list[CommitInfo] = field(default_factory=list)
 
 
 def make_run_id() -> str:
@@ -82,13 +101,12 @@ def publish(
     """
     Serialise *report* and write it to the appropriate destination.
 
-    Args:
-        report: Completed RunReport dataclass.
-        cfg: Validated RMS settings.
-        r2: Initialised R2Client (only used when dry_run=False).
+    dry_run=True  -> ./dry-run-<pipeline>-report.json (local)
+    dry_run=False -> R2: qa-suite/reports/<pipeline>/<runId>/report.json
+                         qa-suite/reports/<pipeline>/latest.json
 
     Returns:
-        Destination description string (local path or R2 key).
+        Destination description (local path or primary R2 key).
     """
     payload = _serialise(report)
 
@@ -103,8 +121,13 @@ def publish(
     run_key = f"{prefix}/{report.pipeline}/{report.runId}/report.json"
     latest_key = f"{prefix}/{report.pipeline}/latest.json"
 
-    r2.put_object(bucket=bucket, key=run_key, body=payload, content_type="application/json")
-    r2.put_object(bucket=bucket, key=latest_key, body=payload, content_type="application/json")
+    body_bytes = payload.encode("utf-8")
+    r2.put_object(
+        bucket=bucket, key=run_key, body=body_bytes, content_type="application/json"
+    )
+    r2.put_object(
+        bucket=bucket, key=latest_key, body=body_bytes, content_type="application/json"
+    )
 
     logger.info(
         "report_publisher: uploaded report to R2: %r and %r", run_key, latest_key
@@ -112,13 +135,37 @@ def publish(
     return run_key
 
 
+# ── Serialisation ──────────────────────────────────────────────────────────
+
+
 def _serialise(report: RunReport) -> str:
-    """Convert *report* to a JSON string, handling nested dataclasses."""
-    def _to_dict(obj: Any) -> Any:
-        if hasattr(obj, "__dataclass_fields__"):
-            return {k: _to_dict(v) for k, v in asdict(obj).items()}
+    """Convert *report* to canonical camelCase JSON."""
+
+    def _convert(obj: Any) -> Any:
+        if isinstance(obj, CommitInfo):
+            return {"sha": obj.sha, "message": obj.message, "files": obj.files}
+        if isinstance(obj, ValidationSummary):
+            return {
+                "commands": obj.commands,
+                "passed": obj.passed,
+                "outputTail": obj.output_tail,
+            }
+        if isinstance(obj, RunReport):
+            return {
+                "runId": obj.runId,
+                "pipeline": obj.pipeline,
+                "targetRepo": obj.targetRepo,
+                "branch": obj.branch,
+                "dryRun": obj.dryRun,
+                "summary": obj.summary,
+                "tasks": [_convert(t) for t in obj.tasks],
+                "validation": _convert(obj.validation) if obj.validation else None,
+                "commits": [_convert(c) for c in obj.commits],
+            }
+        if isinstance(obj, dict):
+            return {k: _convert(v) for k, v in obj.items()}
         if isinstance(obj, list):
-            return [_to_dict(i) for i in obj]
+            return [_convert(i) for i in obj]
         return obj
 
-    return json.dumps(_to_dict(report), indent=2)
+    return json.dumps(_convert(report), indent=2)

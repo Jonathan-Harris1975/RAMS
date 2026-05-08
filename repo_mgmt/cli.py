@@ -2,14 +2,16 @@
 Typer CLI for the Repo Management Suite.
 
 Usage:
-  rms dry-run seo-aeo-geo
-  rms dry-run mobile-ux
-  rms dry-run on-brand
-  rms run seo-aeo-geo          # respects env RMS_DRY_RUN
+  rms dry-run <pipeline>   — run in dry-run mode (no writes, no commits)
+  rms run <pipeline>       — run live (respects RMS_DRY_RUN or --dry-run flag)
+
+Console script:
+  rms = repo_mgmt.cli:app  (defined in pyproject.toml)
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -18,8 +20,6 @@ from typing import Optional
 import typer
 
 from repo_mgmt.config import PipelineId, load_settings, ConfigurationError
-from repo_mgmt.r2_client import R2Client
-from repo_mgmt import pipeline as pipeline_mod
 
 app = typer.Typer(name="rms", help="Repo Management Suite CLI")
 
@@ -35,69 +35,76 @@ _PIPELINES = ["seo-aeo-geo", "mobile-ux", "on-brand"]
 def _validate_pipeline(value: str) -> str:
     if value not in _PIPELINES:
         raise typer.BadParameter(
-            f"Unknown pipeline {value!r}. Valid options: {', '.join(_PIPELINES)}"
+            f"Unknown pipeline {value!r}. Valid: {', '.join(_PIPELINES)}"
         )
     return value
 
 
+def _build_pipeline(pipeline_id: str):
+    """Initialise all dependencies and return a ready RmsPipeline."""
+    from repo_mgmt.r2_client import R2Client
+    from repo_mgmt.model_router import ModelRouter
+    from repo_mgmt.pipeline import RmsPipeline
+
+    cfg = load_settings()
+    r2 = R2Client(cfg)
+    router = ModelRouter(cfg)
+    return RmsPipeline.for_id(pipeline_id, cfg, r2, router)  # type: ignore[arg-type]
+
+
 @app.command("dry-run")
 def dry_run(
-    pipeline_id: str = typer.Argument(..., callback=_validate_pipeline, help="Pipeline to run in dry-run mode"),
+    pipeline_id: str = typer.Argument(
+        ..., callback=_validate_pipeline, help="Pipeline to run in dry-run mode"
+    ),
 ) -> None:
-    """
-    Run a pipeline in dry-run mode (no writes, no commits, no pushes).
-    """
+    """Run a pipeline in dry-run mode (no writes, no commits, no pushes)."""
     typer.echo(f"[rms] dry-run: {pipeline_id}")
     try:
-        cfg = load_settings()
+        pipeline = _build_pipeline(pipeline_id)
     except ConfigurationError as exc:
         typer.secho(f"Configuration error: {exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    r2 = R2Client(cfg)
-    report = pipeline_mod.run(pipeline_id, cfg, r2, dry_run=True)  # type: ignore[arg-type]
+    report = asyncio.run(pipeline.run(dry_run=True))
     _print_report(report)
-    if report.error:
-        raise typer.Exit(code=1)
 
 
 @app.command("run")
 def run_pipeline(
-    pipeline_id: str = typer.Argument(..., callback=_validate_pipeline, help="Pipeline to run"),
-    dry_run: Optional[bool] = typer.Option(
+    pipeline_id: str = typer.Argument(
+        ..., callback=_validate_pipeline, help="Pipeline to run"
+    ),
+    force_dry_run: Optional[bool] = typer.Option(
         None,
         "--dry-run/--no-dry-run",
         help="Override RMS_DRY_RUN env var",
     ),
 ) -> None:
-    """
-    Run a pipeline, respecting RMS_DRY_RUN (or the --dry-run flag).
-    """
+    """Run a pipeline, respecting RMS_DRY_RUN (or the --dry-run flag)."""
     typer.echo(f"[rms] run: {pipeline_id}")
     try:
-        cfg = load_settings()
+        pipeline = _build_pipeline(pipeline_id)
     except ConfigurationError as exc:
         typer.secho(f"Configuration error: {exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    r2 = R2Client(cfg)
-    report = pipeline_mod.run(pipeline_id, cfg, r2, dry_run=dry_run)  # type: ignore[arg-type]
+    # --dry-run flag overrides env; otherwise use cfg default
+    effective_dry_run = (
+        force_dry_run if force_dry_run is not None else pipeline._cfg.rms_dry_run
+    )
+    report = asyncio.run(pipeline.run(dry_run=effective_dry_run))
     _print_report(report)
-    if report.error:
-        raise typer.Exit(code=1)
 
 
-def _print_report(report: "pipeline_mod.report_writer.RunReport") -> None:
+def _print_report(report: object) -> None:
     """Pretty-print a RunReport summary to stdout."""
     typer.echo("─" * 60)
-    typer.echo(f"  run_id   : {report.run_id}")
-    typer.echo(f"  pipeline : {report.pipeline}")
-    typer.echo(f"  dry_run  : {report.dry_run}")
-    typer.echo(f"  applied  : {report.issues_applied}")
-    typer.echo(f"  reverted : {report.issues_reverted}")
-    typer.echo(f"  skipped  : {report.issues_skipped}")
-    typer.echo(f"  guidance : {report.issues_future_guidance}")
-    typer.echo(f"  manual   : {report.issues_manual_review}")
-    if report.error:
-        typer.secho(f"  error    : {report.error}", fg=typer.colors.RED)
+    typer.echo(f"  runId    : {getattr(report, 'runId', '?')}")
+    typer.echo(f"  pipeline : {getattr(report, 'pipeline', '?')}")
+    typer.echo(f"  dryRun   : {getattr(report, 'dryRun', '?')}")
+    summary = getattr(report, "summary", {})
+    typer.echo(f"  committed: {summary.get('committed', 0)}")
+    typer.echo(f"  guidance : {summary.get('futureGuidance', 0)}")
+    typer.echo(f"  manual   : {summary.get('manualReview', 0)}")
     typer.echo("─" * 60)

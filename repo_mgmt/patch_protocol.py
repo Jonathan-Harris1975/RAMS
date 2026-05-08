@@ -1,7 +1,7 @@
 """
 AnchorPatch/v1 protocol for the Repo Management Suite.
 
-Defines the patch schema, schema validation, and path-safety helpers used
+Defines the patch schema, validation rules, and path-safety helpers used
 by both the patch applier and the normaliser pipeline guard.
 
 Schema example:
@@ -12,12 +12,23 @@ Schema example:
         "file": "repo-relative path",
         "operation": "replace | insert_after | delete",
         "anchorBefore": "unique string confirming file position",
-        "find": "exact text to match",
-        "replace": "replacement text",
+        "find": "exact text to match (required for replace/insert_after; optional for delete)",
+        "replace": "replacement text (required for replace/insert_after)",
         "rationale": "reason"
       }
     ]
   }
+
+Validation rules:
+  - patchProtocol must equal "AnchorPatch/v1"
+  - changes must be a JSON array
+  - file must be a non-empty repo-relative string
+  - operation must be one of: replace, insert_after, delete
+  - replace  requires non-empty find and replace
+  - insert_after requires non-empty find and replace
+  - delete:  find is OPTIONAL
+      - If find is empty  → whole file is deleted
+      - If find non-empty → that exact text is removed from the file
 """
 
 from __future__ import annotations
@@ -45,7 +56,7 @@ class PatchSchemaError(Exception):
     """Raised when an AnchorPatch/v1 document fails schema validation."""
 
 
-# ── Schema helpers ─────────────────────────────────────────────────────────
+# ── Schema validation ──────────────────────────────────────────────────────
 
 
 def validate_patch(doc: Any) -> dict[str, Any]:
@@ -92,31 +103,37 @@ def validate_patch(doc: Any) -> dict[str, Any]:
             )
 
         if operation in ("replace", "insert_after"):
+            # find is required and must be non-empty
             if not change.get("find") or not isinstance(change["find"], str):
                 raise PatchSchemaError(
-                    f"changes[{i}].find must be a non-empty string for operation={operation!r}"
+                    f"changes[{i}].find must be a non-empty string "
+                    f"for operation={operation!r}"
                 )
-
-        if operation == "replace":
+            # replace field required
             if "replace" not in change:
                 raise PatchSchemaError(
-                    f"changes[{i}].replace is required for operation='replace'"
+                    f"changes[{i}].replace is required for operation={operation!r}"
                 )
 
+        # delete: find is optional — empty find means delete the whole file
+
     return doc
+
+
+# ── Path safety helper ─────────────────────────────────────────────────────
 
 
 def is_protected(path: str, protected: frozenset[str]) -> bool:
     """
     Return True if *path* matches any entry in the *protected* set.
 
-    An entry in *protected* matches if:
-    - The path equals the entry exactly (file match), OR
-    - The path starts with the entry (prefix/directory match).
+    Matching rules (forward-slash normalised, case-sensitive):
+    - Exact match: path == entry
+    - Prefix match: path starts with entry (directory prefix)
 
     Args:
-        path: Repo-relative path string to test.
-        protected: Frozenset of protected path prefixes or exact names.
+        path: Repo-relative path string (forward-slash separated).
+        protected: Frozenset of protected path prefixes or exact file names.
 
     Returns:
         True if *path* is protected, False otherwise.

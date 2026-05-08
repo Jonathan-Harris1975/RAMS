@@ -1,122 +1,249 @@
 """
 Patch planner for the Repo Management Suite.
 
-For each code_fix NormalisedIssue, builds a prompt using the file context
-and calls the primary LLM to generate an AnchorPatch/v1 document.
+For each code_fix NormalisedIssue, loads file context, builds a prompt,
+calls the LLM, and parses the response into a validated plan dict.
 
-System prompt instructs the model to:
-  - Return only valid AnchorPatch/v1 JSON
-  - Make the smallest safe bounded patch
-  - Never add dependencies, never rename files
-  - Never touch protected paths
-  - Return empty changes when no safe patch is possible
+Plan format (returned by plan() and _parse_plan()):
+  {
+    "taskId": str,
+    "operations": [
+      {
+        "action": "replace" | "insert_after" | "delete" | "create",
+        "path": "repo-relative path",
+        "search": "unique text to find (required for replace/insert_after)",
+        "replacement": "replacement text (required for replace/insert_after)",
+        "content": "file content (required for create)",
+        "rationale": "reason"
+      }
+    ]
+  }
 
-Raises PatchPlanError if the model response cannot be parsed.
+System prompt instructs the model to return this exact JSON format.
+
+Public API:
+  plan(issue, target_repo, pipeline_id, settings, model_router) -> dict
+  _parse_plan(raw, task_id) -> dict
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from repo_mgmt.patch_protocol import PatchSchemaError, validate_patch
-
 if TYPE_CHECKING:
+    from repo_mgmt.config import Settings
     from repo_mgmt.model_router import ModelRouter
 
 logger = logging.getLogger(__name__)
 
-# ── System prompt (embedded verbatim as module constant) ───────────────────
+_MAX_FILE_BYTES = 256 * 1024  # 256 KB per file
+_VALID_ACTIONS = frozenset(["replace", "insert_after", "delete", "create"])
 
-SYSTEM_PROMPT = """You are a precise, minimal-footprint code-fix engineer integrated into an autonomous repository management pipeline.
 
-Your task: produce an AnchorPatch/v1 JSON document that resolves a single repository finding.
-
-Output rules (STRICT):
-1. Output ONLY valid JSON — absolutely no preamble, no markdown fences, no commentary, no trailing text.
-2. The root object must have exactly two keys: "patchProtocol" and "changes".
-3. "patchProtocol" must equal "AnchorPatch/v1".
-4. Each change must contain: "file", "operation", "find", "anchorBefore", "replace", "rationale".
-5. "operation" must be one of: "replace", "insert_after", "delete".
-6. "find" must be an exact verbatim substring of the target file — unique within the file.
-7. "anchorBefore" must be a short unique string that appears immediately before "find" in the file.
-8. Make the smallest possible change to achieve the requiredOutcome.
-9. Only include files listed in affectedPaths.
-10. Never add, remove, or rename files. Never add dependencies.
-11. Never touch protected paths.
-12. If no safe, bounded, deterministic patch is possible, return: {"patchProtocol": "AnchorPatch/v1", "changes": [], "reason": "<explain why>"}
-"""
+# ── Custom exception ───────────────────────────────────────────────────────
 
 
 class PatchPlanError(Exception):
-    """Raised when the model response cannot be parsed into a valid AnchorPatch/v1 document."""
+    """Raised when patch planning fails (model error, parse error, or invalid plan)."""
+
+
+# ── System prompt ──────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """You are a precise, minimal-footprint code-fix engineer integrated into an autonomous repository management pipeline.
+
+Your task: produce a JSON patch plan that resolves a single repository finding.
+
+Output rules (STRICT):
+1. Output ONLY valid JSON — no preamble, no markdown fences, no trailing text.
+2. The root object must have exactly two keys: "taskId" and "operations".
+3. Each operation must have: "action", "path", and optional "search", "replacement", "content", "rationale".
+4. "action" must be one of: "replace", "insert_after", "delete", "create".
+5. For "replace" and "insert_after": "search" must be a verbatim, unique substring of the file.
+6. For "create": "content" must contain the full file content.
+7. Make the smallest possible change to achieve the requiredOutcome.
+8. Only modify files listed in affectedPaths.
+9. If no safe, bounded patch is possible, return: {"taskId": "<id>", "operations": []}
+"""
+
+
+# ── Public API ─────────────────────────────────────────────────────────────
 
 
 def plan(
     issue: dict[str, Any],
-    context_files: dict[str, str],
+    target_repo: Path,
+    pipeline_id: str,
+    settings: "Settings",
     model_router: "ModelRouter",
 ) -> dict[str, Any]:
     """
-    Generate an AnchorPatch/v1 document for *issue*.
+    Generate a patch plan dict for a code_fix *issue*.
 
     Args:
         issue: NormalisedIssue dict with classification='code_fix'.
-        context_files: Dict mapping repo-relative path → file content.
+        target_repo: Absolute path to the local repository clone.
+        pipeline_id: Active pipeline identifier.
+        settings: Validated RMS settings.
         model_router: Initialised ModelRouter for LLM calls.
 
     Returns:
-        Validated AnchorPatch/v1 dict.  'changes' may be empty when no
-        safe patch can be made (reason key is populated in that case).
+        Validated plan dict with "taskId" and "operations" keys.
 
     Raises:
-        PatchPlanError: If the model response cannot be parsed or validated.
+        PatchPlanError: If the issue is not a code_fix, the LLM call fails,
+                        or the response cannot be parsed into a valid plan.
     """
-    user_prompt = _build_user_prompt(issue, context_files)
+    task_id: str = issue.get("taskId", "<unknown>")
+    classification = str(issue.get("classification", ""))
+
+    if classification != "code_fix":
+        raise PatchPlanError(
+            f"plan() called on non-code_fix issue (classification={classification!r})"
+        )
+
+    # Load file context from target_repo
+    affected_paths: list[str] = issue.get("affectedPaths", [])
+    context_files = _load_context(affected_paths, target_repo)
+
+    prompt = _build_prompt(issue, context_files, pipeline_id)
 
     try:
         raw = model_router.complete(
-            prompt=user_prompt,
+            prompt=prompt,
             system=SYSTEM_PROMPT,
             max_tokens=4096,
         )
     except Exception as exc:
-        raise PatchPlanError(f"Model call failed: {exc}") from exc
+        raise PatchPlanError(f"LLM call failed: {exc}") from exc
 
-    patch_doc = _parse_response(raw)
-
-    if patch_doc.get("changes"):
-        try:
-            validate_patch(patch_doc)
-        except PatchSchemaError as exc:
-            raise PatchPlanError(f"Model returned invalid AnchorPatch/v1 schema: {exc}") from exc
-
-    return patch_doc
+    return _parse_plan(raw, task_id)
 
 
-def _build_user_prompt(
-    issue: dict[str, Any],
-    context_files: dict[str, str],
-) -> str:
+def _parse_plan(raw: str, task_id: str) -> dict[str, Any]:
     """
-    Build the user prompt from the issue and its file context.
+    Parse and validate a raw LLM response into a plan dict.
 
     Args:
-        issue: NormalisedIssue dict.
-        context_files: Affected file contents.
+        raw: Raw response string from model_router.complete().
+        task_id: Task identifier — used to populate/verify the taskId field.
 
     Returns:
-        Formatted prompt string.
+        Validated plan dict with "taskId" and "operations" keys.
+
+    Raises:
+        PatchPlanError: With specific messages for:
+            - "not valid JSON"
+            - "no operations"
+            - "unknown action"
+            - "missing 'search'"
+            - "missing 'content'"
     """
+    # Strip markdown fences if present
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
+    cleaned = re.sub(r"```\s*$", "", cleaned.strip(), flags=re.MULTILINE)
+    cleaned = cleaned.strip()
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise PatchPlanError(
+            f"Model response is not valid JSON: {exc}\nRaw (first 400 chars): {raw[:400]}"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise PatchPlanError(
+            f"Plan JSON must be an object, got {type(data).__name__}"
+        )
+
+    # Ensure taskId is present
+    data.setdefault("taskId", task_id)
+
+    operations: Any = data.get("operations")
+    if not isinstance(operations, list):
+        raise PatchPlanError(
+            "'operations' must be a JSON array"
+        )
+
+    if len(operations) == 0:
+        raise PatchPlanError(
+            f"Plan for {task_id!r} has no operations — model returned an empty plan"
+        )
+
+    for i, op in enumerate(operations):
+        if not isinstance(op, dict):
+            raise PatchPlanError(f"operations[{i}] must be a JSON object")
+
+        action = op.get("action")
+        if action not in _VALID_ACTIONS:
+            raise PatchPlanError(
+                f"operations[{i}] has unknown action {action!r}. "
+                f"Valid actions: {sorted(_VALID_ACTIONS)}"
+            )
+
+        if action in ("replace", "insert_after"):
+            if not op.get("search"):
+                raise PatchPlanError(
+                    f"operations[{i}] action={action!r} is missing 'search' field"
+                )
+
+        if action == "create":
+            if "content" not in op:
+                raise PatchPlanError(
+                    f"operations[{i}] action='create' is missing 'content' field"
+                )
+
+    return data
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+
+def _load_context(affected_paths: list[str], repo_root: Path) -> dict[str, str]:
+    """Load the content of each affected file, skipping missing/oversized ones."""
+    real_root = os.path.realpath(repo_root)
+    context: dict[str, str] = {}
+
+    for rel in affected_paths:
+        resolved = os.path.realpath(Path(real_root) / rel)
+        if not resolved.startswith(real_root):
+            logger.warning("patch_planner: rejecting path outside repo: %r", rel)
+            continue
+        abs_path = Path(resolved)
+        if not abs_path.is_file():
+            logger.warning("patch_planner: file not found: %r", rel)
+            continue
+        if abs_path.stat().st_size > _MAX_FILE_BYTES:
+            logger.warning("patch_planner: skipping oversized file: %r", rel)
+            continue
+        try:
+            context[rel] = abs_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            logger.warning("patch_planner: cannot read %r: %s", rel, exc)
+
+    return context
+
+
+def _build_prompt(
+    issue: dict[str, Any],
+    context_files: dict[str, str],
+    pipeline_id: str,
+) -> str:
+    """Build the LLM user prompt from the issue and file context."""
     lines: list[str] = [
         f"taskId: {issue.get('taskId', '')}",
+        f"pipeline: {pipeline_id}",
         f"title: {issue.get('title', '')}",
         f"description: {issue.get('description', '')}",
         f"severity: {issue.get('severity', '')}",
         f"requiredOutcome: {issue.get('requiredOutcome', '')}",
+        f"allowedFixClass: {issue.get('allowedFixClass', '')}",
         f"affectedPaths: {issue.get('affectedPaths', [])}",
+        f"evidence: {issue.get('evidence', [])}",
         "",
         "File contents:",
     ]
@@ -126,41 +253,3 @@ def _build_user_prompt(
         lines.append("")
 
     return "\n".join(lines)
-
-
-def _parse_response(raw: str) -> dict[str, Any]:
-    """
-    Extract and parse JSON from the raw model response.
-
-    Strips markdown fences if present.  Returns empty-changes doc on
-    parse failure rather than raising, so the executor can record a
-    clean 'skipped' status.
-
-    Args:
-        raw: Raw string from model_router.complete().
-
-    Returns:
-        Parsed dict (may have empty 'changes' list).
-
-    Raises:
-        PatchPlanError: If the JSON cannot be parsed at all.
-    """
-    # Strip markdown fences
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r"```\s*$", "", cleaned.strip(), flags=re.MULTILINE)
-    cleaned = cleaned.strip()
-
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise PatchPlanError(
-            f"Model response is not valid JSON: {exc}\n"
-            f"Raw response (first 500 chars): {raw[:500]}"
-        ) from exc
-
-    if not isinstance(data, dict):
-        raise PatchPlanError(
-            f"Model response JSON must be an object, got {type(data).__name__}"
-        )
-
-    return data

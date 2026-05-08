@@ -7,21 +7,22 @@ Routes:
 
 PipelineId validation:
   Must be one of: seo-aeo-geo, mobile-ux, on-brand.
-  Unknown values produce a 422 Unprocessable Entity (FastAPI path validation),
-  not a 404.
+  Unknown values produce a 422 Unprocessable Entity (FastAPI path validation).
 
 Run behaviour:
   - Accepts optional JSON body { "dry_run": bool }.
-  - If omitted, RMS_DRY_RUN env default is used.
   - Returns 202 on acceptance, 409 if the same pipeline is already running.
-  - Background task sets _running[pipeline_id], runs the pipeline, then clears it.
-  - API runId and report runId are identical.
-  - Exceptions in the background task are caught and logged — server never crashes.
+  - _running[pipeline_id] is set True synchronously BEFORE the background task
+    is queued, closing the race window where two concurrent requests could both
+    see False and both return 202.
+  - Background task calls pipeline_mod.run() and clears _running in a finally block.
+
+Entry point:
+  serve() — called by the rms-api console script.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Annotated, Literal
@@ -29,6 +30,11 @@ from typing import Annotated, Literal
 from fastapi import BackgroundTasks, FastAPI, Path
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from repo_mgmt import pipeline as pipeline_mod
+from repo_mgmt.config import load_settings
+from repo_mgmt.r2_client import R2Client
+from repo_mgmt.scheduler import build_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +46,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# In-memory run-state (True while a pipeline is executing)
+# In-memory run-state.  Set synchronously before queuing background task.
 _running: dict[str, bool] = {
     "seo-aeo-geo": False,
     "mobile-ux": False,
     "on-brand": False,
 }
 
-# Validated pipeline type — FastAPI will return 422 for unknown values
 PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
 
 
@@ -59,24 +64,10 @@ class RunRequest(BaseModel):
     dry_run: bool | None = None
 
 
-class RunAccepted(BaseModel):
-    """202 Accepted response."""
-    runId: str
-    pipeline: str
-    dryRun: bool
-
-
-class HealthResponse(BaseModel):
-    """GET /health response."""
-    status: str
-    pipelines: dict[str, str]
-
-
-# ── Startup helpers ────────────────────────────────────────────────────────
+# ── Lazy singletons ────────────────────────────────────────────────────────
 
 _cfg = None
 _r2 = None
-_model_router = None
 
 
 def _get_cfg():
@@ -84,7 +75,6 @@ def _get_cfg():
     global _cfg
     if _cfg is None:
         try:
-            from repo_mgmt.config import load_settings
             _cfg = load_settings()
         except Exception as exc:
             logger.warning("api: config not fully loaded: %s", exc)
@@ -98,57 +88,31 @@ def _get_r2():
         cfg = _get_cfg()
         if cfg is not None:
             try:
-                from repo_mgmt.r2_client import R2Client
                 _r2 = R2Client(cfg)
             except Exception as exc:
-                logger.warning("api: R2Client init failed: %s", exc)
+                logger.warning("api: R2Client not initialised: %s", exc)
     return _r2
-
-
-def _get_model_router():
-    """Return the cached ModelRouter, creating lazily on first call."""
-    global _model_router
-    if _model_router is None:
-        cfg = _get_cfg()
-        if cfg is not None:
-            try:
-                from repo_mgmt.model_router import ModelRouter
-                _model_router = ModelRouter(cfg)
-            except Exception as exc:
-                logger.warning("api: ModelRouter init failed: %s", exc)
-    return _model_router
 
 
 # ── Background runner ──────────────────────────────────────────────────────
 
 
-async def _run_pipeline(
-    pipeline_id: str, dry_run: bool, run_id: str
-) -> None:
+def _run_pipeline_bg(pipeline_id: str, dry_run: bool) -> None:
     """
-    Background coroutine that executes one full pipeline run.
+    Background function that calls pipeline_mod.run() and clears _running.
 
-    Sets _running[pipeline_id]=True on entry, clears it in a finally block.
-    Never propagates exceptions to the caller — all errors are logged.
+    _running[pipeline_id] must already be True before this runs.
+    Clears it in a finally block regardless of outcome.
     """
-    _running[pipeline_id] = True
     try:
-        from repo_mgmt.pipeline import RmsPipeline
         cfg = _get_cfg()
         r2 = _get_r2()
-        router = _get_model_router()
-
-        if cfg is None or r2 is None or router is None:
-            logger.error(
-                "api: cannot run pipeline %r — dependencies not initialised", pipeline_id
-            )
+        if cfg is None or r2 is None:
+            logger.error("api: cannot run %r — config/R2 not ready", pipeline_id)
             return
-
-        pipeline = RmsPipeline.for_id(pipeline_id, cfg, r2, router)  # type: ignore[arg-type]
-        await pipeline.run(dry_run=dry_run, run_id=run_id)
-
+        pipeline_mod.run(pipeline_id, cfg, r2, dry_run=dry_run)  # type: ignore[arg-type]
     except Exception:
-        logger.exception("api: unhandled exception in pipeline %r run %s", pipeline_id, run_id)
+        logger.exception("api: unhandled error in pipeline %r", pipeline_id)
     finally:
         _running[pipeline_id] = False
 
@@ -156,17 +120,18 @@ async def _run_pipeline(
 # ── Routes ─────────────────────────────────────────────────────────────────
 
 
-@app.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
-    """
-    Return service health and per-pipeline run state.
-
-    Returns:
-        HealthResponse with status='ok' and per-pipeline state strings.
-    """
-    return HealthResponse(
-        status="ok",
-        pipelines={pid: ("running" if _running[pid] else "idle") for pid in _running},
+@app.get("/health")
+async def health() -> JSONResponse:
+    """Return service health and per-pipeline run state."""
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "ok",
+            "pipelines": {
+                pid: ("running" if _running[pid] else "idle")
+                for pid in _running
+            },
+        },
     )
 
 
@@ -179,37 +144,71 @@ async def trigger_run(
     """
     Trigger a pipeline run.
 
-    Args:
-        pipeline_id: One of seo-aeo-geo, mobile-ux, on-brand (validated by FastAPI).
-        body: Optional JSON body with dry_run override.
-
     Returns:
-        202 Accepted with runId, pipeline, dryRun fields.
-        409 Conflict if the pipeline is already running.
+        202 Accepted: {"runId": ..., "pipeline": ..., "dryRun": ...}
+        409 Conflict: {"error": "pipeline already running", "pipeline": ...}
+        422 Unprocessable Entity: unknown pipeline_id (handled by FastAPI).
     """
+    # Race-safe: check and set synchronously before queuing background work.
     if _running.get(pipeline_id):
         return JSONResponse(
             status_code=409,
-            content={
-                "error": "pipeline already running",
-                "pipeline": pipeline_id,
-            },
+            content={"error": "pipeline already running", "pipeline": pipeline_id},
         )
 
-    # Resolve dry_run: explicit body > env default
     cfg = _get_cfg()
     env_dry_run: bool = cfg.rms_dry_run if cfg is not None else True
-    dry_run: bool = body.dry_run if (body is not None and body.dry_run is not None) else env_dry_run
+    dry_run: bool = (
+        body.dry_run
+        if (body is not None and body.dry_run is not None)
+        else env_dry_run
+    )
 
     run_id = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
 
-    background_tasks.add_task(_run_pipeline, pipeline_id, dry_run, run_id)
+    # Set flag BEFORE queuing — closes the concurrency race window.
+    _running[pipeline_id] = True
+    background_tasks.add_task(_run_pipeline_bg, pipeline_id, dry_run)
 
     return JSONResponse(
         status_code=202,
-        content={
-            "runId": run_id,
-            "pipeline": pipeline_id,
-            "dryRun": dry_run,
-        },
+        content={"runId": run_id, "pipeline": pipeline_id, "dryRun": dry_run},
+    )
+
+
+# ── Entry point ────────────────────────────────────────────────────────────
+
+
+def serve() -> None:
+    """
+    Start the RMS FastAPI server using uvicorn.
+
+    Called by the rms-api console script:
+      rms-api = repo_mgmt.api:serve
+    """
+    import uvicorn
+
+    cfg = _get_cfg()
+    r2 = _get_r2()
+    host: str = cfg.rms_host if cfg is not None else "0.0.0.0"
+    port: int = cfg.rms_port if cfg is not None else 8000
+    log_level: str = cfg.log_level if cfg is not None else "info"
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    if cfg is not None and r2 is not None:
+        scheduler = build_scheduler(cfg, r2)
+        scheduler.start()
+        logger.info("rms-api: scheduler started with cron=%r", cfg.rms_schedule_cron)
+
+    logger.info("rms-api: starting on %s:%d (log_level=%s)", host, port, log_level)
+    uvicorn.run(
+        "repo_mgmt.api:app",
+        host=host,
+        port=port,
+        log_level=log_level,
+        reload=False,
     )

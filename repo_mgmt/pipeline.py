@@ -1,39 +1,33 @@
 """
 Pipeline orchestrator for the Repo Management Suite.
 
-RmsPipeline encapsulates all configuration for a single audit pipeline and
-runs the full cycle:
-  1. audit_reader    — fetch latest R2 audit snapshot
-  2. issue_normaliser — convert findings to NormalisedIssue list
-  3. task_ranker      — rank and cap the code_fix queue
-  4. update_executor  — apply each code_fix task
-  5. report_publisher — write RunReport to R2 or local disk
+Provides two APIs:
 
-Usage:
-    pipeline = RmsPipeline.for_id("on-brand", cfg, r2, model_router)
-    report   = await pipeline.run(dry_run=True)
+1. Legacy functional API (used by tests, CLI, and API endpoint):
+     report = run(pipeline_id, settings, r2, dry_run=True)
+     is_running(pipeline_id) -> bool
+     _pipeline_locks: dict[str, threading.Lock]
+
+2. Class-based API (used by scheduler/api for future extensibility):
+     pipeline = RmsPipeline.for_id(pipeline_id, cfg, r2, router)
+     report   = asyncio.run(pipeline.run(dry_run=True))
+
+Both return a repo_mgmt.report_writer.RunReport.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from repo_mgmt import audit_reader, issue_normaliser, update_executor
-from repo_mgmt.git_manager import GitManager
+from repo_mgmt import audit_reader, git_ops, issue_normaliser, validator
 from repo_mgmt.model_router import ModelRouter
-from repo_mgmt.report_publisher import (
-    RunReport,
-    TaskReport,
-    ValidationSummary,
-    make_run_id,
-    publish,
-)
+from repo_mgmt.patch_protocol import PathTraversalError, ProtectedPathError
+from repo_mgmt.report_writer import RunReport, TaskReport, make_run_id, write
 from repo_mgmt.task_ranker import rank
-from repo_mgmt.validation_runner import run_commands
 
 if TYPE_CHECKING:
     from repo_mgmt.config import PipelineId, Settings
@@ -41,89 +35,428 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Per-pipeline protected path sets  (also enforced by patch_applier)
+# ── Per-pipeline concurrency locks ─────────────────────────────────────────
+
+_pipeline_locks: dict[str, threading.Lock] = {
+    "seo-aeo-geo": threading.Lock(),
+    "mobile-ux":   threading.Lock(),
+    "on-brand":    threading.Lock(),
+}
+
+
+def is_running(pipeline_id: str) -> bool:
+    """Return True if the named pipeline lock is currently held."""
+    lock = _pipeline_locks.get(pipeline_id)
+    if lock is None:
+        return False
+    acquired = lock.acquire(blocking=False)
+    if acquired:
+        lock.release()
+        return False
+    return True
+
+
+# ── Protected and approved sets ────────────────────────────────────────────
+
 _PROTECTED: dict[str, frozenset[str]] = {
-    "mobile-ux": frozenset(
-        [
-            "blog/posts/",
-            "blog/posts.json",
-            "transcripts/",
-            "data/podcast-episodes.json",
-            "assets/js/podcast-transcripts.min.js",
-            "functions/transcripts/",
-        ]
-    ),
+    "mobile-ux": frozenset([
+        "blog/posts/",
+        "blog/posts.json",
+        "transcripts/",
+        "data/podcast-episodes.json",
+        "assets/js/podcast-transcripts.min.js",
+        "functions/transcripts/",
+    ]),
     "on-brand": frozenset(),
     "seo-aeo-geo": frozenset(),
 }
 
 _APPROVED_FIX_CLASSES: dict[str, frozenset[str]] = {
-    "seo-aeo-geo": frozenset(
-        ["route_fix", "config_fix", "schema_fix", "prompt_template_update",
-         "audit_output_fix", "middleware_fix"]
-    ),
-    "mobile-ux": frozenset(
-        ["html_fix", "css_fix", "meta_fix", "viewport_fix", "accessibility_fix",
-         "template_fix", "partial_fix"]
-    ),
-    "on-brand": frozenset(
-        ["html_fix", "template_fix", "schema_fix", "meta_fix", "partial_fix"]
-    ),
+    "seo-aeo-geo": frozenset([
+        "route_fix", "config_fix", "schema_fix",
+        "prompt_template_update", "audit_output_fix", "middleware_fix",
+    ]),
+    "mobile-ux": frozenset([
+        "html_fix", "css_fix", "meta_fix", "viewport_fix",
+        "accessibility_fix", "redirect_fix",
+    ]),
+    "on-brand": frozenset([
+        "html_fix", "css_fix", "template_fix", "partial_fix",
+        "redirect_fix", "prompt_template_update", "schema_fix", "meta_fix",
+    ]),
 }
 
 
+# ── Legacy synchronous functional API ─────────────────────────────────────
+
+
+def run(
+    pipeline_id: "PipelineId",
+    settings: "Settings",
+    r2: "R2Client",
+    dry_run: bool = True,
+) -> RunReport:
+    """
+    Run a single pipeline synchronously and return a RunReport.
+
+    Concurrency: acquires pipeline lock non-blocking; if lock is already held,
+    returns immediately with error='pipeline already running'.
+
+    Args:
+        pipeline_id: One of "seo-aeo-geo", "mobile-ux", "on-brand".
+        settings: Validated Settings instance.
+        r2: Initialised R2Client.
+        dry_run: If True, no filesystem writes or git commits are made.
+
+    Returns:
+        RunReport dataclass instance.
+    """
+    lock = _pipeline_locks.get(pipeline_id)
+    if lock is None:
+        return _empty_report(pipeline_id, dry_run, error=f"Unknown pipeline: {pipeline_id!r}")
+
+    acquired = lock.acquire(blocking=False)
+    if not acquired:
+        logger.warning("pipeline [%s]: already running — rejecting duplicate request", pipeline_id)
+        return _empty_report(
+            pipeline_id, dry_run, error="pipeline already running"
+        )
+
+    try:
+        return _execute(pipeline_id, settings, r2, dry_run)
+    finally:
+        lock.release()
+
+
+def _execute(
+    pipeline_id: str,
+    settings: "Settings",
+    r2: "R2Client",
+    dry_run: bool,
+) -> RunReport:
+    """Internal: run all pipeline stages and return a RunReport."""
+    run_id = make_run_id()
+    run_date = run_id[:10]
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    logger.info(
+        "pipeline [%s]: starting %s (dry_run=%s)", pipeline_id, run_id, dry_run
+    )
+
+    # 1. Read audit
+    try:
+        raw_audit: dict[str, Any] = audit_reader.read_latest(
+            pipeline_id, r2, settings.r2_bucket_audits  # type: ignore[arg-type]
+        )
+    except Exception as exc:
+        logger.error("pipeline [%s]: audit read failed: %s", pipeline_id, exc)
+        finished_at = datetime.now(timezone.utc).isoformat()
+        return RunReport(
+            run_id=run_id,
+            pipeline=pipeline_id,
+            dry_run=dry_run,
+            started_at=started_at,
+            finished_at=finished_at,
+            issues_total=0,
+            issues_applied=0,
+            issues_reverted=0,
+            issues_skipped=0,
+            issues_future_guidance=0,
+            issues_manual_review=0,
+            error=str(exc),
+        )
+
+    # 2. Normalise findings
+    issues = issue_normaliser.normalise(
+        audit=raw_audit,
+        pipeline_id=pipeline_id,  # type: ignore[arg-type]
+        run_date=run_date,
+        cfg=settings,
+    )
+
+    # 3. Rank into queues
+    queues = rank(issues, max_code_fix=settings.rms_max_issues_per_run)
+
+    task_reports: list[TaskReport] = []
+    issues_applied = 0
+    issues_reverted = 0
+    issues_skipped = 0
+
+    # Count non-code-fix tasks
+    issues_future_guidance = len(queues.future_guidance)
+    issues_manual_review = len(queues.manual_review)
+
+    # Add future_guidance and manual_review as TaskReports
+    for issue in queues.future_guidance:
+        task_reports.append(TaskReport(
+            task_id=issue["taskId"],
+            classification="future_guidance",
+            status=issue.get("status", "future_guidance"),
+            affected_paths=issue.get("affectedPaths", []),
+        ))
+    for issue in queues.manual_review:
+        task_reports.append(TaskReport(
+            task_id=issue["taskId"],
+            classification="manual_review",
+            status=issue.get("status", "manual_review"),
+            affected_paths=issue.get("affectedPaths", []),
+        ))
+
+    # 4. Initialise ModelRouter for patch planning
+    router = ModelRouter(settings)
+
+    target_repo = settings.repo_path_for(pipeline_id)  # type: ignore[arg-type]
+    protected = _PROTECTED.get(pipeline_id, frozenset())
+    validation_commands = settings.validation_commands_for(pipeline_id)  # type: ignore[arg-type]
+
+    # 5. Process code_fix tasks
+    branch_name: str | None = None
+    git_repo = None
+
+    if queues.code_fix and not dry_run and target_repo.is_dir():
+        branch_name = (
+            f"{settings.rms_qa_branch_prefix}{pipeline_id}/{run_id}"
+        )
+        try:
+            git_repo = git_ops.ensure_clean_branch(target_repo, branch_name)
+        except Exception as exc:
+            logger.error("pipeline [%s]: git branch error: %s", pipeline_id, exc)
+
+    for issue in queues.code_fix:
+        task_report = _execute_task(
+            issue=issue,
+            target_repo=target_repo,
+            pipeline_id=pipeline_id,
+            validation_commands=validation_commands,
+            protected=protected,
+            settings=settings,
+            router=router,
+            git_repo=git_repo,
+            dry_run=dry_run,
+        )
+        task_reports.append(task_report)
+
+        if task_report.status == "applied":
+            issues_applied += 1
+        elif task_report.status == "reverted":
+            issues_reverted += 1
+        else:
+            issues_skipped += 1
+
+    # 6. Publish report
+    finished_at = datetime.now(timezone.utc).isoformat()
+    report = RunReport(
+        run_id=run_id,
+        pipeline=pipeline_id,
+        dry_run=dry_run,
+        started_at=started_at,
+        finished_at=finished_at,
+        issues_total=len(issues),
+        issues_applied=issues_applied,
+        issues_reverted=issues_reverted,
+        issues_skipped=issues_skipped,
+        issues_future_guidance=issues_future_guidance,
+        issues_manual_review=issues_manual_review,
+        tasks=task_reports,
+        validation_commands=validation_commands,
+        branch=branch_name,
+        error=None,
+    )
+
+    try:
+        write(report, pipeline_id, settings, r2, dry_run=dry_run)  # type: ignore[arg-type]
+    except Exception as exc:
+        logger.error("pipeline [%s]: report write failed: %s", pipeline_id, exc)
+
+    logger.info(
+        "pipeline [%s]: finished %s — applied=%d reverted=%d",
+        pipeline_id, run_id, issues_applied, issues_reverted,
+    )
+    return report
+
+
+def _ops_to_anchor_patch(plan_dict: dict[str, Any]) -> dict[str, Any]:
+    """Convert patch_planner operations dict to AnchorPatch/v1 for patch_applier."""
+    changes = []
+    for op in plan_dict.get("operations", []):
+        action = op.get("action", "")
+        if action in ("replace", "insert_after"):
+            changes.append({
+                "file": op.get("path", ""),
+                "operation": action,
+                "anchorBefore": op.get("anchorBefore", ""),
+                "find": op.get("search", ""),
+                "replace": op.get("replacement", ""),
+                "rationale": op.get("rationale", ""),
+            })
+        elif action == "delete":
+            changes.append({
+                "file": op.get("path", ""),
+                "operation": "delete",
+                "anchorBefore": "",
+                "find": op.get("search", ""),
+                "replace": "",
+                "rationale": op.get("rationale", ""),
+            })
+        elif action == "create":
+            changes.append({
+                "file": op.get("path", ""),
+                "operation": "replace",
+                "anchorBefore": "",
+                "find": "",
+                "replace": op.get("content", ""),
+                "rationale": op.get("rationale", ""),
+            })
+    return {"patchProtocol": "AnchorPatch/v1", "changes": changes}
+
+
+def _execute_task(
+    *,
+    issue: dict[str, Any],
+    target_repo: Path,
+    pipeline_id: str,
+    validation_commands: list[str],
+    protected: frozenset[str],
+    settings: "Settings",
+    router: ModelRouter,
+    git_repo: Any,
+    dry_run: bool,
+) -> TaskReport:
+    """Execute one code_fix task and return a TaskReport."""
+    from repo_mgmt import patch_applier, patch_planner
+
+    task_id = issue.get("taskId", "<unknown>")
+    affected_paths: list[str] = issue.get("affectedPaths", [])
+
+    try:
+        plan_dict = patch_planner.plan(
+            issue=issue,
+            target_repo=target_repo,
+            pipeline_id=pipeline_id,
+            settings=settings,
+            model_router=router,
+        )
+        patch_doc = _ops_to_anchor_patch(plan_dict)
+
+        if not patch_doc.get("changes"):
+            return TaskReport(
+                task_id=task_id,
+                classification="code_fix",
+                status="skipped",
+                affected_paths=affected_paths,
+            )
+
+        if dry_run:
+            return TaskReport(
+                task_id=task_id,
+                classification="code_fix",
+                status="skipped",
+                affected_paths=affected_paths,
+                patch_plan_ops=len(patch_doc.get("changes", [])),
+            )
+
+        modified = patch_applier.apply(
+            patch_doc=patch_doc,
+            target_repo=target_repo,
+            dry_run=False,
+            pipeline_id=pipeline_id,
+        )
+
+        val_result = validator.run(
+            pipeline_id=pipeline_id,  # type: ignore[arg-type]
+            repo_root=target_repo,
+            cfg=settings,
+            dry_run=False,
+        )
+
+        if not val_result.passed:
+            if settings.rms_revert_on_validation_failure and git_repo is not None:
+                git_ops.revert_to_head(git_repo, dry_run=False)
+            return TaskReport(
+                task_id=task_id,
+                classification="code_fix",
+                status="reverted" if settings.rms_revert_on_validation_failure else "validation_failed",
+                affected_paths=affected_paths,
+                patch_plan_ops=len(patch_doc.get("changes", [])),
+                validation_passed=False,
+                error=f"validation failed: {val_result.failed_command}",
+            )
+
+        sha: str | None = None
+        if git_repo is not None:
+            sha = git_ops.stage_and_commit(
+                git_repo,
+                modified,
+                f"rms({pipeline_id}): {task_id} — {issue.get('title', 'fix')}",
+                dry_run=False,
+            )
+
+        return TaskReport(
+            task_id=task_id,
+            classification="code_fix",
+            status="applied",
+            affected_paths=affected_paths,
+            patch_plan_ops=len(patch_doc.get("changes", [])),
+            validation_passed=True,
+            commit_sha=sha,
+        )
+
+    except (PathTraversalError, ProtectedPathError) as exc:
+        logger.error("pipeline [%s]: safety gate: %s", pipeline_id, exc)
+        return TaskReport(
+            task_id=task_id,
+            classification="code_fix",
+            status="skipped",
+            affected_paths=affected_paths,
+            error=str(exc),
+        )
+    except Exception as exc:
+        logger.exception("pipeline [%s]: task %s failed", pipeline_id, task_id)
+        return TaskReport(
+            task_id=task_id,
+            classification="code_fix",
+            status="skipped",
+            affected_paths=affected_paths,
+            error=str(exc),
+        )
+
+
+def _empty_report(pipeline_id: str, dry_run: bool, error: str | None = None) -> RunReport:
+    """Return a zero-count RunReport with an optional error message."""
+    now = datetime.now(timezone.utc).isoformat()
+    return RunReport(
+        run_id=make_run_id(),
+        pipeline=pipeline_id,
+        dry_run=dry_run,
+        started_at=now,
+        finished_at=now,
+        issues_total=0,
+        issues_applied=0,
+        issues_reverted=0,
+        issues_skipped=0,
+        issues_future_guidance=0,
+        issues_manual_review=0,
+        error=error,
+    )
+
+
+# ── Class-based API (for scheduler / api layer) ────────────────────────────
+
+
 class RmsPipeline:
-    """Full audit-to-patch pipeline for a single pipeline identifier."""
+    """Thin wrapper for the functional API used by the scheduler and API layer."""
 
     def __init__(
         self,
         pipeline_id: "PipelineId",
         cfg: "Settings",
         r2: "R2Client",
-        model_router: "ModelRouter",
+        model_router: Any,
     ) -> None:
-        """
-        Initialise an RmsPipeline.
-
-        Args:
-            pipeline_id: One of 'seo-aeo-geo', 'mobile-ux', 'on-brand'.
-            cfg: Validated RMS settings.
-            r2: Initialised R2Client.
-            model_router: Initialised ModelRouter for LLM calls.
-        """
         self.pipeline_id = pipeline_id
         self._cfg = cfg
         self._r2 = r2
         self._model_router = model_router
-
-    # ── Properties ─────────────────────────────────────────────────────────
-
-    @property
-    def audit_key(self) -> str:
-        """R2 audit key for this pipeline."""
-        return f"audits/{self.pipeline_id}/latest.json"
-
-    @property
-    def target_repo(self) -> Path:
-        """Absolute path to the target repository."""
-        return self._cfg.repo_path_for(self.pipeline_id)
-
-    @property
-    def validation_commands(self) -> list[str]:
-        """Ordered validation commands for this pipeline."""
-        return self._cfg.validation_commands_for(self.pipeline_id)
-
-    @property
-    def protected_paths(self) -> frozenset[str]:
-        """Protected path prefixes for this pipeline."""
-        return _PROTECTED.get(self.pipeline_id, frozenset())
-
-    @property
-    def approved_fix_classes(self) -> frozenset[str]:
-        """Approved fix class names for this pipeline."""
-        return _APPROVED_FIX_CLASSES.get(self.pipeline_id, frozenset())
-
-    # ── Factory ────────────────────────────────────────────────────────────
 
     @classmethod
     def for_id(
@@ -131,185 +464,15 @@ class RmsPipeline:
         pipeline_id: "PipelineId",
         cfg: "Settings",
         r2: "R2Client",
-        model_router: "ModelRouter",
+        model_router: Any,
     ) -> "RmsPipeline":
-        """
-        Create an RmsPipeline for the given *pipeline_id*.
-
-        Args:
-            pipeline_id: Pipeline identifier.
-            cfg: Validated settings.
-            r2: Initialised R2Client.
-            model_router: Initialised ModelRouter.
-
-        Returns:
-            Ready-to-run RmsPipeline.
-        """
         return cls(pipeline_id, cfg, r2, model_router)
 
-    # ── Run ────────────────────────────────────────────────────────────────
-
-    async def run(
-        self,
-        dry_run: bool,
-        run_id: str | None = None,
-    ) -> RunReport:
-        """
-        Execute the full pipeline cycle.
-
-        Args:
-            dry_run: If True, plan and log changes without writing or committing.
-            run_id: Optional caller-supplied run identifier (ISO-UTC string).
-                    Generated automatically if not supplied.
-
-        Returns:
-            Completed RunReport.
-        """
-        if run_id is None:
-            run_id = make_run_id()
-
-        started = datetime.now(tz=timezone.utc).isoformat()
-        logger.info(
-            "pipeline [%s]: starting run %s (dry_run=%s)",
-            self.pipeline_id, run_id, dry_run,
-        )
-
-        # Step 1: read audit
-        raw_audit = await asyncio.get_event_loop().run_in_executor(
+    async def run(self, dry_run: bool, run_id: str | None = None) -> RunReport:
+        """Async wrapper — delegates to the synchronous functional run()."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
             None,
-            lambda: audit_reader.read_latest(
-                self.pipeline_id, self._r2, self._cfg.r2_bucket_audits
-            ),
+            lambda: run(self.pipeline_id, self._cfg, self._r2, dry_run),
         )
-
-        # Step 2: normalise
-        issues = issue_normaliser.normalise(
-            raw_findings=raw_audit.get("findings", []),
-            pipeline_id=self.pipeline_id,
-            cfg=self._cfg,
-            model_router=self._model_router,
-        )
-
-        # Step 3: rank
-        queues = rank(issues, max_code_fix=self._cfg.rms_max_issues_per_run)
-
-        task_reports: list[TaskReport] = []
-        commits: list[str] = []
-        branch_name: str | None = None
-
-        # Step 4: create git branch and run each code_fix task
-        git_mgr = GitManager(
-            target_repo=self.target_repo,
-            branch_prefix=self._cfg.rms_qa_branch_prefix,
-            push_enabled=self._cfg.rms_push_enabled,
-            revert_on_failure=self._cfg.rms_revert_on_validation_failure,
-        )
-
-        if queues.code_fix and not dry_run:
-            try:
-                branch_name = git_mgr.create_branch(self.pipeline_id, run_id)
-            except Exception as exc:
-                logger.error("pipeline [%s]: could not create branch: %s", self.pipeline_id, exc)
-
-        for issue in queues.code_fix:
-            task_report = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda i=issue: update_executor.run_task(
-                    issue=i,
-                    target_repo=self.target_repo,
-                    pipeline_id=self.pipeline_id,
-                    validation_commands=self.validation_commands,
-                    cfg=self._cfg,
-                    model_router=self._model_router,
-                    git_mgr=git_mgr,
-                    dry_run=dry_run,
-                ),
-            )
-            task_reports.append(task_report)
-            if task_report.commit_sha:
-                commits.append(task_report.commit_sha)
-
-        # Future guidance and manual review tasks become simple TaskReport entries
-        for issue in queues.future_guidance:
-            task_reports.append(
-                TaskReport(
-                    task_id=issue.get("taskId", "<unknown>"),
-                    classification="future_guidance",
-                    status="future_guidance",
-                    affected_paths=issue.get("affectedPaths", []),
-                )
-            )
-
-        for issue in queues.manual_review:
-            task_reports.append(
-                TaskReport(
-                    task_id=issue.get("taskId", "<unknown>"),
-                    classification="manual_review",
-                    status="manual_review",
-                    affected_paths=issue.get("affectedPaths", []),
-                )
-            )
-
-        # Step 5: final validation (only in live mode with commits)
-        val_summary: ValidationSummary | None = None
-        if commits and not dry_run:
-            val_result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: run_commands(self.validation_commands, cwd=self.target_repo),
-            )
-            val_summary = ValidationSummary(
-                passed=val_result.passed,
-                output_tail=val_result.output_tail,
-            )
-            if not val_result.passed:
-                logger.error(
-                    "pipeline [%s]: final validation failed", self.pipeline_id
-                )
-
-        # Step 6: push branch
-        if branch_name and commits and not dry_run:
-            try:
-                git_mgr.push_branch(branch_name)
-            except Exception as exc:
-                logger.warning("pipeline [%s]: push failed: %s", self.pipeline_id, exc)
-
-        # Build summary counters
-        summary = {
-            "total": len(issues),
-            "code_fix": len(queues.code_fix),
-            "applied": sum(1 for t in task_reports if t.status == "applied"),
-            "reverted": sum(1 for t in task_reports if t.status == "reverted"),
-            "skipped": sum(1 for t in task_reports if t.status == "skipped"),
-            "future_guidance": len(queues.future_guidance),
-            "manual_review": len(queues.manual_review),
-        }
-
-        report = RunReport(
-            runId=run_id,
-            pipeline=self.pipeline_id,
-            targetRepo=str(self.target_repo),
-            branch=branch_name,
-            dryRun=dry_run,
-            summary=summary,
-            tasks=task_reports,
-            validation=val_summary,
-            commits=commits,
-        )
-
-        # Step 7: publish report
-        try:
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: publish(report, self._cfg, self._r2),
-            )
-        except Exception as exc:
-            logger.error(
-                "pipeline [%s]: report publish failed: %s", self.pipeline_id, exc
-            )
-
-        logger.info(
-            "pipeline [%s]: finished run %s — applied=%d reverted=%d",
-            self.pipeline_id, run_id,
-            summary["applied"], summary["reverted"],
-        )
-        return report

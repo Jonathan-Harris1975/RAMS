@@ -4,19 +4,17 @@ APScheduler-based cron scheduler for the Repo Management Suite.
 Runs all three pipelines on the cron schedule defined in RMS_SCHEDULE_CRON
 (default: 0 3 * * * — 03:00 UTC daily).
 
-Designed to be started once alongside the FastAPI server.
+Each pipeline run is executed sequentially (no overlap) via asyncio.run.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-
-from repo_mgmt import pipeline
-from repo_mgmt.config import PipelineId
 
 if TYPE_CHECKING:
     from repo_mgmt.config import Settings
@@ -24,23 +22,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_ALL_PIPELINES: list[PipelineId] = ["seo-aeo-geo", "mobile-ux", "on-brand"]
+_ALL_PIPELINES = ["seo-aeo-geo", "mobile-ux", "on-brand"]
 
 
 def _run_all(cfg: "Settings", r2: "R2Client") -> None:
-    """Scheduled job: run all three pipelines sequentially."""
+    """
+    Scheduled job: run all three pipelines sequentially.
+
+    Uses RmsPipeline.for_id(...).run(...) via asyncio.run.
+    No overlapping runs — APScheduler is configured with replace_existing=True
+    and the job itself is synchronous from APScheduler's perspective.
+    """
+    from repo_mgmt.model_router import ModelRouter
+    from repo_mgmt.pipeline import RmsPipeline
+
+    router = ModelRouter(cfg)
     logger.info("scheduler: starting scheduled run of all pipelines")
+
     for pid in _ALL_PIPELINES:
         try:
-            report = pipeline.run(pid, cfg, r2)
+            pipeline = RmsPipeline.for_id(pid, cfg, r2, router)  # type: ignore[arg-type]
+            report = asyncio.run(pipeline.run(dry_run=cfg.rms_dry_run))
+            summary = getattr(report, "summary", {})
             logger.info(
-                "scheduler: [%s] completed — applied=%d reverted=%d",
+                "scheduler: [%s] completed — committed=%d futureGuidance=%d",
                 pid,
-                report.issues_applied,
-                report.issues_reverted,
+                summary.get("committed", 0),
+                summary.get("futureGuidance", 0),
             )
         except Exception as exc:
             logger.exception("scheduler: [%s] unexpected error: %s", pid, exc)
+
     logger.info("scheduler: scheduled run complete")
 
 
@@ -66,6 +78,7 @@ def build_scheduler(cfg: "Settings", r2: "R2Client") -> BackgroundScheduler:
         id="rms-all-pipelines",
         name="RMS: run all pipelines",
         replace_existing=True,
+        max_instances=1,  # prevent overlapping runs
     )
     logger.info(
         "scheduler: configured cron job with schedule %r", cfg.rms_schedule_cron
