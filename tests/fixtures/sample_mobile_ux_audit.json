@@ -1,1 +1,30 @@
-{"generatedAt":"2026-05-05T00:00:00Z","findings":[{"title":"Viewport meta tag missing","description":"The landing page does not define a responsive viewport.","severity":"high","confidence":0.91,"fixClass":"viewport_fix","affectedPaths":["index.html"],"evidence":["No viewport tag was found."],"requiredOutcome":"Add a standard responsive viewport meta tag.","sourceAudit":"mobile-ux"}]}
+{
+  "generatedAt": "2026-05-05T00:00:00Z",
+  "findings": [
+    {
+      "title": "Viewport meta tag missing",
+      "description": "The landing page does not define a responsive viewport.",
+      "severity": "high",
+      "confidence": 0.91,
+      "fixClass": "viewport_fix",
+      "affectedPaths": ["index.html"],
+      "evidence": ["No viewport tag was found."],
+      "requiredOutcome": "Add a standard responsive viewport meta tag.",
+      "sourceAudit": "mobile-ux"
+    },
+    {
+      "title": "Mobile layout overflow on blog post",
+      "description": "A blog post page has a horizontal overflow on narrow viewports. This finding must be blocked by the protected-path gate — blog/posts/ is off-limits for the mobile-ux pipeline.",
+      "severity": "medium",
+      "confidence": 0.82,
+      "fixClass": "html_fix",
+      "affectedPaths": ["blog/posts/my-first-post.html"],
+      "evidence": [
+        "Horizontal scroll detected at 375px viewport width",
+        "Overflow caused by an unconstrained image in the article body"
+      ],
+      "requiredOutcome": "Add overflow-x: hidden to the article container",
+      "sourceAudit": "mobile-ux"
+    }
+  ]
+}
