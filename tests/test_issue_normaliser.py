@@ -43,7 +43,8 @@ class TestNormalise:
             ]
         }
         issues = normalise(audit, "mobile-ux", "2026-05-05", settings)
-        assert issues[0]["status"] == "skipped_not_actionable"
+        # Protected-path findings are blocked and excluded from the output entirely.
+        assert issues == []
 
     def test_mobile_ux_allows_non_protected_paths(self, settings) -> None:
         audit = {
