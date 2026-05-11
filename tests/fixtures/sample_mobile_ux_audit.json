@@ -6,7 +6,7 @@
       "description": "The landing page does not define a responsive viewport.",
       "severity": "high",
       "confidence": 0.91,
-      "fixClass": "viewport_fix",
+      "fixClass": "html_fix",
       "affectedPaths": ["index.html"],
       "evidence": ["No viewport tag was found."],
       "requiredOutcome": "Add a standard responsive viewport meta tag.",
