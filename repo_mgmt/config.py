@@ -68,7 +68,6 @@ class Settings(BaseSettings):
     rms_create_pr: bool = False
     rms_validate_after_each_task: bool = True
     rms_revert_on_validation_failure: bool = True
-    rms_schedule_cron: str = "0 3 * * *"
 
     # ── API server ─────────────────────────────────────────────────────────
     rms_host: str = "0.0.0.0"

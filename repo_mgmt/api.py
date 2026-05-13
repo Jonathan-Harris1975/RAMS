@@ -20,7 +20,6 @@ from repo_mgmt.config import PipelineId, Settings, load_settings
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.pipeline import RmsPipeline
 from repo_mgmt.r2_client import R2Client
-from repo_mgmt.scheduler import build_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +166,6 @@ def serve() -> None:
     import uvicorn
 
     cfg = _get_cfg()
-    r2 = _get_r2()
     host = cfg.rms_host if cfg is not None else "0.0.0.0"
     port = cfg.rms_port if cfg is not None else 8000
     log_level = cfg.log_level if cfg is not None else "info"
@@ -177,11 +175,9 @@ def serve() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    if cfg is not None and r2 is not None:
-        scheduler = build_scheduler(cfg, r2)
-        scheduler.start()
-        logger.info("rms-api: scheduler started with cron=%r", cfg.rms_schedule_cron)
-
+    # Scheduled in-process cron execution has been removed. Koyeb/runtime
+    # deployments should be triggered externally via the fixed HTTP endpoints.
+    logger.info("rms-api: external triggering enabled; no in-process cron scheduler")
     logger.info("rms-api: starting on %s:%d (log_level=%s)", host, port, log_level)
     uvicorn.run(
         "repo_mgmt.api:app",
