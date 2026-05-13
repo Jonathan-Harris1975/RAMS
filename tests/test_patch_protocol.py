@@ -1,4 +1,5 @@
 """Tests for repo_mgmt.patch_protocol — AnchorPatch/v1 schema and path safety."""
+
 from __future__ import annotations
 
 import pytest
@@ -6,8 +7,6 @@ import pytest
 from repo_mgmt.patch_protocol import (
     PROTOCOL_VERSION,
     PatchSchemaError,
-    PathTraversalError,
-    ProtectedPathError,
     is_protected,
     validate_patch,
 )
@@ -55,6 +54,7 @@ def test_is_protected_empty_set() -> None:
 
 
 # ── validate_patch ─────────────────────────────────────────────────────────
+
 
 def _valid_doc() -> dict:
     return {

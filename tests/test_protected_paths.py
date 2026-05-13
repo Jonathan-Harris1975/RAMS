@@ -1,4 +1,5 @@
 """Tests for protected path enforcement at normaliser and applier gates."""
+
 from __future__ import annotations
 
 import pytest
@@ -13,6 +14,7 @@ ON_BRAND_PROTECTED = PROTECTED_PATHS["on-brand"]
 
 
 # ── is_protected assertions matching design brief ──────────────────────────
+
 
 def test_blog_posts_dir_protected() -> None:
     assert is_protected("blog/posts/2026-W16/index.html", MOBILE_UX_PROTECTED) is True
@@ -36,20 +38,23 @@ def test_header_partial_not_protected() -> None:
 
 # ── patch_applier gate ─────────────────────────────────────────────────────
 
+
 def test_applier_raises_for_mobile_ux_blog(tmp_path: Path) -> None:
     (tmp_path / "blog" / "posts").mkdir(parents=True)
     f = tmp_path / "blog" / "posts" / "index.html"
     f.write_text("<p>content</p>", encoding="utf-8")
     patch = {
         "patchProtocol": "AnchorPatch/v1",
-        "changes": [{
-            "file": "blog/posts/index.html",
-            "operation": "replace",
-            "anchorBefore": "<p>content</p>",
-            "find": "<p>content</p>",
-            "replace": "<p>new</p>",
-            "rationale": "test",
-        }],
+        "changes": [
+            {
+                "file": "blog/posts/index.html",
+                "operation": "replace",
+                "anchorBefore": "<p>content</p>",
+                "find": "<p>content</p>",
+                "replace": "<p>new</p>",
+                "rationale": "test",
+            }
+        ],
     }
     with pytest.raises(ProtectedPathError):
         apply(patch, tmp_path, dry_run=False, pipeline_id="mobile-ux")
@@ -61,14 +66,16 @@ def test_applier_does_not_raise_for_on_brand_blog(tmp_path: Path) -> None:
     f.write_text("<p>content</p>", encoding="utf-8")
     patch = {
         "patchProtocol": "AnchorPatch/v1",
-        "changes": [{
-            "file": "blog/posts/index.html",
-            "operation": "replace",
-            "anchorBefore": "<p>content</p>",
-            "find": "<p>content</p>",
-            "replace": "<p>new</p>",
-            "rationale": "test",
-        }],
+        "changes": [
+            {
+                "file": "blog/posts/index.html",
+                "operation": "replace",
+                "anchorBefore": "<p>content</p>",
+                "find": "<p>content</p>",
+                "replace": "<p>new</p>",
+                "rationale": "test",
+            }
+        ],
     }
     # on-brand has an empty protected set — no ProtectedPathError
     apply(patch, tmp_path, dry_run=False, pipeline_id="on-brand")

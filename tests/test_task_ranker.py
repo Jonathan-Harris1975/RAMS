@@ -1,11 +1,13 @@
 """Tests for repo_mgmt.task_ranker — scoring, sorting, and queue capping."""
+
 from __future__ import annotations
 
 from repo_mgmt.task_ranker import rank
 
 
-def _issue(task_id: str, severity: str, confidence: float,
-           classification: str = "code_fix") -> dict:
+def _issue(
+    task_id: str, severity: str, confidence: float, classification: str = "code_fix"
+) -> dict:
     return {
         "taskId": task_id,
         "severity": severity,
@@ -16,9 +18,9 @@ def _issue(task_id: str, severity: str, confidence: float,
 
 def test_score_uses_severity_times_confidence() -> None:
     issues = [
-        _issue("a", "high", 0.5),   # 3 * 0.5 = 1.5
+        _issue("a", "high", 0.5),  # 3 * 0.5 = 1.5
         _issue("b", "critical", 1.0),  # 4 * 1.0 = 4.0
-        _issue("c", "medium", 1.0),   # 2 * 1.0 = 2.0
+        _issue("c", "medium", 1.0),  # 2 * 1.0 = 2.0
     ]
     result = rank(issues, max_code_fix=10)
     ids = [i["taskId"] for i in result.code_fix]

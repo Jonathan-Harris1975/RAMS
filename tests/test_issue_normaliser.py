@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from repo_mgmt.issue_normaliser import normalise
 

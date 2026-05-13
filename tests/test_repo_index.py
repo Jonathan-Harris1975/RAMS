@@ -1,4 +1,5 @@
 """Tests for repo_mgmt.repo_index."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,16 +12,26 @@ def _make_static_repo(tmp_path: Path) -> Path:
     (tmp_path / "assets" / "partials").mkdir(parents=True)
     (tmp_path / "blog" / "posts").mkdir(parents=True)
     (tmp_path / "assets" / "css" / "site.css").write_text("body{}", encoding="utf-8")
-    (tmp_path / "assets" / "partials" / "header.html").write_text("<header/>", encoding="utf-8")
+    (tmp_path / "assets" / "partials" / "header.html").write_text(
+        "<header/>", encoding="utf-8"
+    )
     (tmp_path / "index.html").write_text("<html/>", encoding="utf-8")
-    (tmp_path / "blog" / "posts" / "post1.html").write_text("<article/>", encoding="utf-8")
+    (tmp_path / "blog" / "posts" / "post1.html").write_text(
+        "<article/>", encoding="utf-8"
+    )
     return tmp_path
 
 
 def test_static_index_has_expected_keys(tmp_path: Path) -> None:
     _make_static_repo(tmp_path)
     index = build_static_index(tmp_path)
-    for key in ("file_list", "by_extension", "html_pages", "css_files", "partial_files"):
+    for key in (
+        "file_list",
+        "by_extension",
+        "html_pages",
+        "css_files",
+        "partial_files",
+    ):
         assert key in index, f"Missing key: {key}"
 
 
@@ -45,7 +56,9 @@ def test_build_dispatcher_static(tmp_path: Path) -> None:
 
 def test_build_dispatcher_node(tmp_path: Path) -> None:
     (tmp_path / "pages").mkdir()
-    (tmp_path / "pages" / "index.tsx").write_text("export default () => null", encoding="utf-8")
+    (tmp_path / "pages" / "index.tsx").write_text(
+        "export default () => null", encoding="utf-8"
+    )
     index = build(tmp_path, "node")
     assert "route_strings" in index
     assert any("pages/" in r for r in index["route_strings"])
@@ -62,11 +75,24 @@ def test_gitignore_respected(tmp_path: Path) -> None:
 
 
 def test_node_index_discovers_express_and_audit_routes(tmp_path):
-    (tmp_path/'package.json').write_text('{"scripts":{"test":"node --test"}}')
-    (tmp_path/'server.js').write_text("app.use('/api', router);\napp.post('/compose', handler);")
-    (tmp_path/'routes').mkdir(); (tmp_path/'routes'/'health.js').write_text("router.get('/health', handler);")
-    (tmp_path/'audits'/'routes').mkdir(parents=True); (tmp_path/'audits'/'routes'/'seo.js').write_text("router.post('/audits/seo-aeo-geo/run', handler);")
-    (tmp_path/'services'/'podcast').mkdir(parents=True); (tmp_path/'services'/'podcast'/'routes.js').write_text("router.post('/podcast/build', handler);")
-    from repo_mgmt.repo_index import build_node_index
-    idx=build_node_index(tmp_path)
-    assert '/compose' in idx['route_strings'] and '/audits/seo-aeo-geo/run' in idx['route_strings'] and '/podcast/build' in idx['route_strings']
+    (tmp_path / "package.json").write_text('{"scripts":{"test":"node --test"}}')
+    (tmp_path / "server.js").write_text(
+        "app.use('/api', router);\napp.post('/compose', handler);"
+    )
+    (tmp_path / "routes").mkdir()
+    (tmp_path / "routes" / "health.js").write_text("router.get('/health', handler);")
+    (tmp_path / "audits" / "routes").mkdir(parents=True)
+    (tmp_path / "audits" / "routes" / "seo.js").write_text(
+        "router.post('/audits/seo-aeo-geo/run', handler);"
+    )
+    (tmp_path / "services" / "podcast").mkdir(parents=True)
+    (tmp_path / "services" / "podcast" / "routes.js").write_text(
+        "router.post('/podcast/build', handler);"
+    )
+
+    idx = build_node_index(tmp_path)
+    assert (
+        "/compose" in idx["route_strings"]
+        and "/audits/seo-aeo-geo/run" in idx["route_strings"]
+        and "/podcast/build" in idx["route_strings"]
+    )

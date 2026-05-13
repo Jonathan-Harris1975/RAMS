@@ -1,4 +1,5 @@
 """Tests for repo_mgmt.patch_applier - operations, safety gates, and atomic writes."""
+
 from __future__ import annotations
 
 import pytest
@@ -43,7 +44,9 @@ def test_replace_operation(tmp_path: Path) -> None:
 def test_replace_double_find_raises(tmp_path: Path) -> None:
     f = tmp_path / "page.html"
     f.write_text("anchor foo foo", encoding="utf-8")
-    patch = _make_patch("page.html", "replace", find="foo", replace="bar", anchor="anchor")
+    patch = _make_patch(
+        "page.html", "replace", find="foo", replace="bar", anchor="anchor"
+    )
     with pytest.raises(Exception, match="unique"):
         apply(patch, tmp_path, dry_run=False)
 
@@ -51,7 +54,9 @@ def test_replace_double_find_raises(tmp_path: Path) -> None:
 def test_replace_find_missing_raises(tmp_path: Path) -> None:
     f = tmp_path / "page.html"
     f.write_text("anchor hello world", encoding="utf-8")
-    patch = _make_patch("page.html", "replace", find="NOMATCH", replace="x", anchor="anchor")
+    patch = _make_patch(
+        "page.html", "replace", find="NOMATCH", replace="x", anchor="anchor"
+    )
     with pytest.raises(Exception, match="not found"):
         apply(patch, tmp_path, dry_run=False)
 
@@ -73,7 +78,9 @@ def test_insert_after_operation(tmp_path: Path) -> None:
 def test_delete_operation_removes_matched_text(tmp_path: Path) -> None:
     f = tmp_path / "old.txt"
     f.write_text("hello remove-me world", encoding="utf-8")
-    patch = _make_patch("old.txt", "delete", find="remove-me ", anchor="hello remove-me world")
+    patch = _make_patch(
+        "old.txt", "delete", find="remove-me ", anchor="hello remove-me world"
+    )
     apply(patch, tmp_path, dry_run=False)
     assert f.exists()
     assert f.read_text(encoding="utf-8") == "hello world"
@@ -177,7 +184,9 @@ def test_not_protected_on_brand_blog(tmp_path: Path) -> None:
 def test_no_tmp_file_left_after_write(tmp_path: Path) -> None:
     f = tmp_path / "a.html"
     f.write_text("hello", encoding="utf-8")
-    patch = _make_patch("a.html", "replace", find="hello", replace="world", anchor="hello")
+    patch = _make_patch(
+        "a.html", "replace", find="hello", replace="world", anchor="hello"
+    )
     apply(patch, tmp_path, dry_run=False)
     tmp_files = list(tmp_path.glob("*.rms.tmp"))
     assert tmp_files == [], f"Unexpected .rms.tmp files: {tmp_files}"

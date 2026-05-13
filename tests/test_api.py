@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from repo_mgmt.api import app, _running
 from repo_mgmt.report_publisher import RunReport
-from tests.conftest import VALID_ENV
 
 
 def _mock_report(pipeline_id: str = "on-brand") -> RunReport:
@@ -20,20 +18,31 @@ def _mock_report(pipeline_id: str = "on-brand") -> RunReport:
         targetRepo="/tmp/repo",
         branch="",
         dryRun=True,
-        summary={"snapshotsRead":0,"tasksGenerated":0,"codeFixesAttempted":0,"committed":0,"validationFailed":0,"futureGuidance":0,"manualReview":0},
+        summary={
+            "snapshotsRead": 0,
+            "tasksGenerated": 0,
+            "codeFixesAttempted": 0,
+            "committed": 0,
+            "validationFailed": 0,
+            "futureGuidance": 0,
+            "manualReview": 0,
+        },
         tasks=[],
         validation=None,
         commits=[],
     )
 
+
 @pytest.fixture
 def client(settings) -> TestClient:
     """TestClient with all external dependencies mocked."""
     mock_r2 = MagicMock()
-    with patch("repo_mgmt.api.load_settings", return_value=settings), \
-         patch("repo_mgmt.api.R2Client", return_value=mock_r2), \
-         patch("repo_mgmt.api.build_scheduler") as mock_sched, \
-         patch("repo_mgmt.api.pipeline_mod.run", return_value=_mock_report()):
+    with (
+        patch("repo_mgmt.api.load_settings", return_value=settings),
+        patch("repo_mgmt.api.R2Client", return_value=mock_r2),
+        patch("repo_mgmt.api.build_scheduler") as mock_sched,
+        patch("repo_mgmt.api.pipeline_mod.run", return_value=_mock_report()),
+    ):
         mock_sched.return_value.start = MagicMock()
         with TestClient(app) as c:
             yield c
@@ -61,11 +70,14 @@ class TestHealthEndpoint:
 
 
 class TestRunEndpoints:
-    @pytest.mark.parametrize("endpoint,pipeline_id", [
-        ("/rebuild/seo-aeo-geo/run", "seo-aeo-geo"),
-        ("/rebuild/mobile-ux/run", "mobile-ux"),
-        ("/rebuild/on-brand/run", "on-brand"),
-    ])
+    @pytest.mark.parametrize(
+        "endpoint,pipeline_id",
+        [
+            ("/rebuild/seo-aeo-geo/run", "seo-aeo-geo"),
+            ("/rebuild/mobile-ux/run", "mobile-ux"),
+            ("/rebuild/on-brand/run", "on-brand"),
+        ],
+    )
     def test_post_returns_202(
         self, client: TestClient, endpoint: str, pipeline_id: str
     ) -> None:

@@ -34,6 +34,7 @@ class TestSettingsValidation:
 
     def test_dry_run_parseable_false(self) -> None:
         from tests.conftest import VALID_ENV
+
         env = {**VALID_ENV, "RMS_DRY_RUN": "false"}
         with patch.dict(os.environ, env, clear=False):
             cfg = Settings()
@@ -58,12 +59,14 @@ class TestSettingsValidation:
 
     def test_repo_path_for_seo(self, settings: Settings) -> None:
         from pathlib import Path
+
         p = settings.repo_path_for("seo-aeo-geo")
         assert isinstance(p, Path)
         assert str(p) == "/tmp/fake-seo-repo"
 
     def test_repo_path_for_website_pipelines(self, settings: Settings) -> None:
         from pathlib import Path
+
         for pid in ("mobile-ux", "on-brand"):
             p = settings.repo_path_for(pid)  # type: ignore[arg-type]
             assert isinstance(p, Path)

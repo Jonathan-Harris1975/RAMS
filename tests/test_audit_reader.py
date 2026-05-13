@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-import pytest
 
 from repo_mgmt import audit_reader
 from repo_mgmt.r2_client import R2Error

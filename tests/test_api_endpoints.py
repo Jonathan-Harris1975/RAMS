@@ -4,6 +4,7 @@ Tests for repo_mgmt.api — FastAPI endpoint contracts.
 Uses TestClient from starlette (bundled with FastAPI) and mocks the
 background pipeline so tests complete without real config or R2.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -33,6 +34,7 @@ client = TestClient(app, raise_server_exceptions=False)
 
 # ── GET /health ────────────────────────────────────────────────────────────
 
+
 def test_health_returns_200() -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
@@ -48,6 +50,7 @@ def test_health_response_shape() -> None:
 
 
 # ── POST /rebuild/{pipeline_id}/run ───────────────────────────────────────
+
 
 def test_trigger_on_brand_returns_202() -> None:
     resp = client.post("/rebuild/on-brand/run")
@@ -108,25 +111,33 @@ def test_api_response_run_id_is_passed_to_pipeline(monkeypatch) -> None:
 
     class FakePipeline:
         async def run(self, dry_run: bool, run_id: str) -> RunReport:
-            seen['run_id'] = run_id
-            seen['dry_run'] = dry_run
+            seen["run_id"] = run_id
+            seen["dry_run"] = dry_run
             return RunReport(
                 runId=run_id,
-                pipeline='mobile-ux',
-                targetRepo='/tmp/site',
-                branch=f'rms-qa/mobile-ux/{run_id}',
+                pipeline="mobile-ux",
+                targetRepo="/tmp/site",
+                branch=f"rms-qa/mobile-ux/{run_id}",
                 dryRun=dry_run,
-                summary={'snapshotsRead':0,'tasksGenerated':0,'codeFixesAttempted':0,'committed':0,'validationFailed':0,'futureGuidance':0,'manualReview':0},
+                summary={
+                    "snapshotsRead": 0,
+                    "tasksGenerated": 0,
+                    "codeFixesAttempted": 0,
+                    "committed": 0,
+                    "validationFailed": 0,
+                    "futureGuidance": 0,
+                    "manualReview": 0,
+                },
                 tasks=[],
                 validation=None,
                 commits=[],
             )
 
-    monkeypatch.setattr(api_mod, '_get_pipeline', lambda pipeline_id: FakePipeline())
-    monkeypatch.setattr(api_mod, '_get_cfg', lambda: None)
+    monkeypatch.setattr(api_mod, "_get_pipeline", lambda pipeline_id: FakePipeline())
+    monkeypatch.setattr(api_mod, "_get_cfg", lambda: None)
 
-    resp = client.post('/rebuild/mobile-ux/run', json={'dry_run': True})
+    resp = client.post("/rebuild/mobile-ux/run", json={"dry_run": True})
     data = resp.json()
     assert resp.status_code == 202
-    assert data['runId'] == seen['run_id']
-    assert seen['dry_run'] is True
+    assert data["runId"] == seen["run_id"]
+    assert seen["dry_run"] is True

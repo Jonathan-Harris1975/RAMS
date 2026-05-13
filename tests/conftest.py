@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -55,19 +54,21 @@ def mock_r2() -> MagicMock:
 def mock_router() -> MagicMock:
     """Return a MagicMock that mimics ModelRouter."""
     router = MagicMock()
-    router.complete.return_value = json.dumps({
-        "patchProtocol": "AnchorPatch/v1",
-        "changes": [
-            {
-                "file": "index.html",
-                "operation": "replace",
-                "anchorBefore": "<title>Old</title>",
-                "find": "<title>Old</title>",
-                "replace": "<title>New</title>",
-                "rationale": "Update the page title.",
-            }
-        ],
-    })
+    router.complete.return_value = json.dumps(
+        {
+            "patchProtocol": "AnchorPatch/v1",
+            "changes": [
+                {
+                    "file": "index.html",
+                    "operation": "replace",
+                    "anchorBefore": "<title>Old</title>",
+                    "find": "<title>Old</title>",
+                    "replace": "<title>New</title>",
+                    "rationale": "Update the page title.",
+                }
+            ],
+        }
+    )
     router.triage.return_value = '{"editorial": false}'
     return router
 
