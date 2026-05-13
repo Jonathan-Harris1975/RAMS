@@ -34,10 +34,6 @@ The following open-source libraries are used by this project.
 - **License**: BSD-3-Clause
 - **URL**: https://github.com/gitpython-developers/GitPython
 
-### APScheduler
-- **License**: MIT
-- **URL**: https://github.com/agronholm/apscheduler
-
 ### Typer
 - **License**: MIT
 - **URL**: https://github.com/tiangolo/typer

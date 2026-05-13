@@ -60,6 +60,9 @@ rms-api
 # Or with uvicorn directly
 uvicorn repo_mgmt.api:app --host 0.0.0.0 --port 8000
 
+# Pipelines are triggered externally; no in-process cron worker is started.
+curl -X POST http://localhost:8000/rebuild/mobile-ux/run -H "Content-Type: application/json" -d '{"dry_run":true}'
+
 # Dry-run a specific pipeline via CLI
 rms dry-run seo-aeo-geo
 rms dry-run mobile-ux
