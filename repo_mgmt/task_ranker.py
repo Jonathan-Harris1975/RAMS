@@ -32,6 +32,7 @@ _SEVERITY_WEIGHTS: dict[str, int] = {
 @dataclass
 class RankedQueues:
     """Three sorted queues produced by rank()."""
+
     code_fix: list[dict[str, Any]] = field(default_factory=list)
     manual_review: list[dict[str, Any]] = field(default_factory=list)
     future_guidance: list[dict[str, Any]] = field(default_factory=list)

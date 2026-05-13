@@ -12,14 +12,16 @@ Console script:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 import typer
 
-from repo_mgmt.config import PipelineId, load_settings, ConfigurationError
+from repo_mgmt.config import ConfigurationError, PipelineId, load_settings
+
+if TYPE_CHECKING:
+    from repo_mgmt.pipeline import RmsPipeline
 
 app = typer.Typer(name="rms", help="Repo Management Suite CLI")
 
@@ -29,7 +31,7 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-_PIPELINES = ["seo-aeo-geo", "mobile-ux", "on-brand"]
+_PIPELINES: tuple[PipelineId, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
 
 
 def _validate_pipeline(value: str) -> str:
@@ -40,7 +42,7 @@ def _validate_pipeline(value: str) -> str:
     return value
 
 
-def _build_pipeline(pipeline_id: str):
+def _build_pipeline(pipeline_id: str) -> "RmsPipeline":
     """Initialise all dependencies and return a ready RmsPipeline."""
     from repo_mgmt.r2_client import R2Client
     from repo_mgmt.model_router import ModelRouter
@@ -49,7 +51,7 @@ def _build_pipeline(pipeline_id: str):
     cfg = load_settings()
     r2 = R2Client(cfg)
     router = ModelRouter(cfg)
-    return RmsPipeline.for_id(pipeline_id, cfg, r2, router)  # type: ignore[arg-type]
+    return RmsPipeline.for_id(cast(PipelineId, pipeline_id), cfg, r2, router)
 
 
 @app.command("dry-run")

@@ -7,10 +7,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from repo_mgmt import context_builder, patch_applier, patch_planner, validation_runner
-from repo_mgmt.patch_protocol import PathTraversalError, ProtectedPathError, validate_patch
+from repo_mgmt.patch_protocol import (
+    PathTraversalError,
+    ProtectedPathError,
+    validate_patch,
+)
 
 if TYPE_CHECKING:
-    from repo_mgmt.config import Settings
+    from repo_mgmt.config import PipelineId, Settings
     from repo_mgmt.git_manager import GitManager
     from repo_mgmt.model_router import ModelRouter
 
@@ -20,7 +24,7 @@ logger = logging.getLogger(__name__)
 async def run_task(
     issue: dict[str, Any],
     target_repo: Path,
-    pipeline_id: str,
+    pipeline_id: "PipelineId",
     cfg: "Settings",
     model_router: "ModelRouter",
     git_mgr: "GitManager | None",
@@ -43,7 +47,9 @@ async def run_task(
             return task
 
         context_builder.load_context(task.get("affectedPaths", []), target_repo)
-        patch_doc = patch_planner.plan(task, target_repo, pipeline_id, cfg, model_router)
+        patch_doc = patch_planner.plan(
+            task, target_repo, pipeline_id, cfg, model_router
+        )
         validate_patch(patch_doc)
         task["patch"] = patch_doc
 
@@ -78,7 +84,9 @@ async def run_task(
         task["modified_files"] = modified
 
         if cfg.rms_validate_after_each_task:
-            validation = validation_runner.run(pipeline_id, target_repo, cfg, dry_run=False)
+            validation = validation_runner.run(
+                pipeline_id, target_repo, cfg, dry_run=False
+            )
             task["validation"] = {
                 "commands": validation.commands,
                 "passed": validation.passed,

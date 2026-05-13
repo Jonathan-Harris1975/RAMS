@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal
 
 from fastapi import BackgroundTasks, Body, FastAPI, Path
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from repo_mgmt import pipeline as pipeline_mod
+from repo_mgmt import pipeline as pipeline_mod  # noqa: F401
 from repo_mgmt.config import PipelineId, Settings, load_settings
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.pipeline import RmsPipeline
@@ -138,11 +138,14 @@ async def trigger_run(
     body: RunRequest = Body(default=RunRequest()),
 ) -> JSONResponse:
     """Trigger a pipeline run and return the single source-of-truth run ID."""
-    typed_pipeline_id = cast(PipelineId, pipeline_id)
+    typed_pipeline_id: PipelineId = pipeline_id
     if _running.get(typed_pipeline_id):
         return JSONResponse(
             status_code=409,
-            content={"error": "pipeline already running", "pipeline": typed_pipeline_id},
+            content={
+                "error": "pipeline already running",
+                "pipeline": typed_pipeline_id,
+            },
         )
 
     cfg = _get_cfg()

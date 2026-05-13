@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     )
 
     # ── Behaviour defaults ─────────────────────────────────────────────────
-    rms_dry_run: bool = True          # SAFE DEFAULT — never omit
+    rms_dry_run: bool = True  # SAFE DEFAULT — never omit
     rms_max_issues_per_run: int = 5
     rms_report_prefix: str = "qa-suite/reports"
     rms_qa_branch_prefix: str = "rms-qa/"

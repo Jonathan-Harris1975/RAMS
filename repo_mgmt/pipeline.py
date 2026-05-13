@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from repo_mgmt import audit_reader, issue_normaliser, task_ranker, update_executor
@@ -46,7 +47,9 @@ def _summary(tasks: list[dict[str, Any]], snapshots: int) -> dict[str, int]:
         ),
         "committed": sum(1 for task in tasks if task.get("status") == "committed"),
         "validationFailed": sum(
-            1 for task in tasks if task.get("status") in {"validation_failed", "reverted"}
+            1
+            for task in tasks
+            if task.get("status") in {"validation_failed", "reverted"}
         ),
         "futureGuidance": sum(
             1
@@ -71,7 +74,9 @@ def _validation_summary(
         validation = task.get("validation")
         if validation:
             return ValidationSummary(
-                commands=validation.get("commands", cfg.validation_commands_for(pipeline_id)),
+                commands=validation.get(
+                    "commands", cfg.validation_commands_for(pipeline_id)
+                ),
                 passed=bool(validation.get("passed")),
                 output_tail=str(validation.get("outputTail", "")),
             )
@@ -139,7 +144,7 @@ class RmsPipeline:
         return f"audits/{self.pipeline_id}/latest.json"
 
     @property
-    def target_repo(self):
+    def target_repo(self) -> Path:
         """Absolute path to the target repository clone."""
         return self.cfg.repo_path_for(self.pipeline_id)
 
@@ -237,7 +242,9 @@ async def _run_async(
         git_mgr = None
         if not dry_run and queues.code_fix:
             try:
-                git_mgr = GitManager(target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled)
+                git_mgr = GitManager(
+                    target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled
+                )
                 git_mgr.create_branch(branch)
             except Exception as exc:
                 error = f"Git branch setup failed; live code_fix writes skipped: {exc}"

@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CommitInfo:
     """Per-commit metadata within a RunReport."""
+
     sha: str
     message: str
     files: list[str] = field(default_factory=list)
@@ -66,6 +67,7 @@ class CommitInfo:
 @dataclass
 class ValidationSummary:
     """Validation section of a RunReport."""
+
     commands: list[str]
     passed: bool
     output_tail: str = ""
@@ -74,6 +76,7 @@ class ValidationSummary:
 @dataclass
 class RunReport:
     """Top-level report for a single pipeline run."""
+
     runId: str
     pipeline: str
     targetRepo: str

@@ -51,20 +51,34 @@ _MOBILE_UX_PROTECTED: frozenset[str] = frozenset(
 _APPROVED_FIX_CLASSES: dict[str, frozenset[str]] = {
     "seo-aeo-geo": frozenset(
         [
-            "route_fix", "config_fix", "schema_fix",
-            "prompt_template_update", "audit_output_fix", "middleware_fix",
+            "route_fix",
+            "config_fix",
+            "schema_fix",
+            "prompt_template_update",
+            "audit_output_fix",
+            "middleware_fix",
         ]
     ),
     "mobile-ux": frozenset(
         [
-            "html_fix", "css_fix", "meta_fix", "viewport_fix",
-            "accessibility_fix", "redirect_fix",
+            "html_fix",
+            "css_fix",
+            "meta_fix",
+            "viewport_fix",
+            "accessibility_fix",
+            "redirect_fix",
         ]
     ),
     "on-brand": frozenset(
         [
-            "html_fix", "css_fix", "template_fix", "partial_fix",
-            "redirect_fix", "prompt_template_update", "schema_fix", "meta_fix",
+            "html_fix",
+            "css_fix",
+            "template_fix",
+            "partial_fix",
+            "redirect_fix",
+            "prompt_template_update",
+            "schema_fix",
+            "meta_fix",
         ]
     ),
 }
@@ -303,6 +317,7 @@ def _is_editorial(
             return True
         return _triage_editorial(finding, model_router)
     return False
+
 
 def _is_blog_or_transcript_path(paths: list[str]) -> bool:
     """Return True if any affected path is under blog/ or transcripts/."""

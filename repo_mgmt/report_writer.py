@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TaskReport:
     """Per-task outcome within a RunReport."""
+
     task_id: str
     classification: str
     status: str  # applied | reverted | skipped | future_guidance | manual_review
@@ -57,6 +58,7 @@ class TaskReport:
 @dataclass
 class RunReport:
     """Top-level report produced by a single pipeline run."""
+
     run_id: str
     pipeline: str
     dry_run: bool
@@ -95,10 +97,7 @@ def write(
         The R2 key where the report was (or would be) uploaded.
     """
     key = (
-        f"{cfg.rms_report_prefix.rstrip('/')}/"
-        f"{pipeline_id}/"
-        f"{report.run_id}/"
-        f"report.json"
+        f"{cfg.rms_report_prefix.rstrip('/')}/{pipeline_id}/{report.run_id}/report.json"
     )
 
     payload: dict[str, Any] = _to_dict(report)
@@ -107,7 +106,9 @@ def write(
     if dry_run:
         logger.info(
             "report_writer [%s]: dry-run — would upload %d-byte report to %r",
-            pipeline_id, len(body), key,
+            pipeline_id,
+            len(body),
+            key,
         )
         return key
 
@@ -119,7 +120,9 @@ def write(
     )
     logger.info(
         "report_writer [%s]: uploaded %d-byte report to %r",
-        pipeline_id, len(body), key,
+        pipeline_id,
+        len(body),
+        key,
     )
     return key
 

@@ -139,7 +139,9 @@ def _require_unique(text: str, needle: str, label: str, prefix: str) -> None:
     """Require *needle* to occur exactly once in *text*."""
     count = text.count(needle)
     if count == 0:
-        raise PatchApplyError(f"{prefix}: {label} string not found\n  {label}={needle[:120]!r}")
+        raise PatchApplyError(
+            f"{prefix}: {label} string not found\n  {label}={needle[:120]!r}"
+        )
     if count > 1:
         raise PatchApplyError(
             f"{prefix}: {label} string matches {count} locations - must be unique\n"

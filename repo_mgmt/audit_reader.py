@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 # Mapping from pipeline ID to R2 audit key
 _AUDIT_KEY_MAP: dict[str, str] = {
     "seo-aeo-geo": "audits/seo-aeo-geo/latest.json",
-    "mobile-ux":   "audits/mobile-ux/latest.json",
-    "on-brand":    "audits/on-brand/latest.json",
+    "mobile-ux": "audits/mobile-ux/latest.json",
+    "on-brand": "audits/on-brand/latest.json",
 }
 
 
