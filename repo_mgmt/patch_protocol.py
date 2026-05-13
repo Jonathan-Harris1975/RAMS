@@ -1,34 +1,10 @@
 """
 AnchorPatch/v1 protocol for the Repo Management Suite.
 
-Defines the patch schema, validation rules, and path-safety helpers used
-by both the patch applier and the normaliser pipeline guard.
-
-Schema example:
-  {
-    "patchProtocol": "AnchorPatch/v1",
-    "changes": [
-      {
-        "file": "repo-relative path",
-        "operation": "replace | insert_after | delete",
-        "anchorBefore": "unique string confirming file position",
-        "find": "exact text to match (required for replace/insert_after; optional for delete)",
-        "replace": "replacement text (required for replace/insert_after)",
-        "rationale": "reason"
-      }
-    ]
-  }
-
-Validation rules:
-  - patchProtocol must equal "AnchorPatch/v1"
-  - changes must be a JSON array
-  - file must be a non-empty repo-relative string
-  - operation must be one of: replace, insert_after, delete
-  - replace  requires non-empty find and replace
-  - insert_after requires non-empty find and replace
-  - delete:  find is OPTIONAL
-      - If find is empty  → whole file is deleted
-      - If find non-empty → that exact text is removed from the file
+The protocol is intentionally bounded: every change names a repo-relative
+file, proves its position with a non-empty anchorBefore string, and uses an
+exact find string for text replacement or deletion. AnchorPatch/v1 does not
+support whole-file deletion.
 """
 
 from __future__ import annotations
@@ -39,9 +15,6 @@ from typing import Any
 PROTOCOL_VERSION = "AnchorPatch/v1"
 
 _VALID_OPERATIONS = frozenset(["replace", "insert_after", "delete"])
-
-
-# ── Custom exceptions ──────────────────────────────────────────────────────
 
 
 class PathTraversalError(Exception):
@@ -56,7 +29,12 @@ class PatchSchemaError(Exception):
     """Raised when an AnchorPatch/v1 document fails schema validation."""
 
 
-# ── Schema validation ──────────────────────────────────────────────────────
+def _require_non_empty_string(change: dict[str, Any], key: str, index: int) -> str:
+    """Return a required non-empty string field or raise PatchSchemaError."""
+    value = change.get(key)
+    if not isinstance(value, str) or not value:
+        raise PatchSchemaError(f"changes[{index}].{key} must be a non-empty string")
+    return value
 
 
 def validate_patch(doc: Any) -> dict[str, Any]:
@@ -64,10 +42,10 @@ def validate_patch(doc: Any) -> dict[str, Any]:
     Validate an AnchorPatch/v1 document and return it normalised.
 
     Args:
-        doc: Parsed JSON object (expected to be a dict).
+        doc: Parsed JSON object expected to be a mapping.
 
     Returns:
-        The validated patch dict.
+        The validated patch document.
 
     Raises:
         PatchSchemaError: If the document does not conform to AnchorPatch/v1.
@@ -87,56 +65,39 @@ def validate_patch(doc: Any) -> dict[str, Any]:
     if not isinstance(changes, list):
         raise PatchSchemaError("'changes' must be a JSON array")
 
-    for i, change in enumerate(changes):
+    for index, change in enumerate(changes):
         if not isinstance(change, dict):
-            raise PatchSchemaError(f"changes[{i}] must be a JSON object")
+            raise PatchSchemaError(f"changes[{index}] must be a JSON object")
 
         file_path = change.get("file")
-        if not file_path or not isinstance(file_path, str):
-            raise PatchSchemaError(f"changes[{i}].file must be a non-empty string")
+        if not isinstance(file_path, str) or not file_path:
+            raise PatchSchemaError(f"changes[{index}].file must be a non-empty string")
 
         operation = change.get("operation")
         if operation not in _VALID_OPERATIONS:
             raise PatchSchemaError(
-                f"changes[{i}].operation must be one of "
+                f"changes[{index}].operation must be one of "
                 f"{sorted(_VALID_OPERATIONS)}, got {operation!r}"
             )
 
-        if operation in ("replace", "insert_after"):
-            # find is required and must be non-empty
-            if not change.get("find") or not isinstance(change["find"], str):
-                raise PatchSchemaError(
-                    f"changes[{i}].find must be a non-empty string "
-                    f"for operation={operation!r}"
-                )
-            # replace field required
-            if "replace" not in change:
-                raise PatchSchemaError(
-                    f"changes[{i}].replace is required for operation={operation!r}"
-                )
+        _require_non_empty_string(change, "anchorBefore", index)
 
-        # delete: find is optional — empty find means delete the whole file
+        if operation in ("replace", "insert_after", "delete"):
+            _require_non_empty_string(change, "find", index)
+
+        if operation in ("replace", "insert_after") and "replace" not in change:
+            raise PatchSchemaError(
+                f"changes[{index}].replace is required for operation={operation!r}"
+            )
 
     return doc
-
-
-# ── Path safety helper ─────────────────────────────────────────────────────
 
 
 def is_protected(path: str, protected: frozenset[str]) -> bool:
     """
     Return True if *path* matches any entry in the *protected* set.
 
-    Matching rules (forward-slash normalised, case-sensitive):
-    - Exact match: path == entry
-    - Prefix match: path starts with entry (directory prefix)
-
-    Args:
-        path: Repo-relative path string (forward-slash separated).
-        protected: Frozenset of protected path prefixes or exact file names.
-
-    Returns:
-        True if *path* is protected, False otherwise.
+    Matching is case-sensitive and uses forward-slash repo-relative paths.
     """
     for entry in protected:
         if path == entry or path.startswith(entry):

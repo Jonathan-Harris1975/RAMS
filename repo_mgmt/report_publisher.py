@@ -152,7 +152,7 @@ def _serialise(report: RunReport) -> str:
                 "outputTail": obj.output_tail,
             }
         if isinstance(obj, RunReport):
-            return {
+            data = {
                 "runId": obj.runId,
                 "pipeline": obj.pipeline,
                 "targetRepo": obj.targetRepo,
@@ -163,6 +163,9 @@ def _serialise(report: RunReport) -> str:
                 "validation": _convert(obj.validation) if obj.validation else None,
                 "commits": [_convert(c) for c in obj.commits],
             }
+            if obj.error is not None:
+                data["error"] = obj.error
+            return data
         if isinstance(obj, dict):
             return {k: _convert(v) for k, v in obj.items()}
         if isinstance(obj, list):

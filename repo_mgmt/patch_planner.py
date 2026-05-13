@@ -16,8 +16,7 @@ repository management system. You receive:
 \u2013 the full contents of each affected file
 \u2013 the AnchorPatch/v1 protocol specification
 Your response MUST be a single valid JSON object conforming to
-AnchorPatch/v1. No prose, no markdown fences, no explanation
-outside the JSON.
+AnchorPatch/v1. Do not return taskId or operations. No prose, no markdown fences, no explanation outside the JSON.
 Rules:
 1. Only include files listed in affectedPaths.
 2. anchorBefore must appear exactly once in the current file.

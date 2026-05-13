@@ -1,44 +1,28 @@
 """
 FastAPI application for the Repo Management Suite.
 
-Routes:
-  GET  /health
-  POST /rebuild/{pipeline_id}/run
-
-PipelineId validation:
-  Must be one of: seo-aeo-geo, mobile-ux, on-brand.
-  Unknown values produce a 422 Unprocessable Entity (FastAPI path validation).
-
-Run behaviour:
-  - Accepts optional JSON body { "dry_run": bool }.
-  - Returns 202 on acceptance, 409 if the same pipeline is already running.
-  - _running[pipeline_id] is set True synchronously BEFORE the background task
-    is queued, closing the race window where two concurrent requests could both
-    see False and both return 202.
-  - Background task calls pipeline_mod.run() and clears _running in a finally block.
-
-Entry point:
-  serve() — called by the rms-api console script.
+The API exposes fixed rebuild endpoints for the three independent pipelines and
+keeps per-pipeline in-memory singletons plus running flags for concurrency.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
-from fastapi import BackgroundTasks, FastAPI, Path
+from fastapi import BackgroundTasks, Body, FastAPI, Path
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from repo_mgmt import pipeline as pipeline_mod
-from repo_mgmt.config import load_settings
+from repo_mgmt.config import PipelineId, Settings, load_settings
+from repo_mgmt.model_router import ModelRouter
+from repo_mgmt.pipeline import RmsPipeline
 from repo_mgmt.r2_client import R2Client
 from repo_mgmt.scheduler import build_scheduler
 
 logger = logging.getLogger(__name__)
-
-# ── App ────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Repo Management Suite",
@@ -46,32 +30,29 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# In-memory run-state.  Set synchronously before queuing background task.
-_running: dict[str, bool] = {
-    "seo-aeo-geo": False,
-    "mobile-ux": False,
-    "on-brand": False,
-}
-
 PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
+_PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
 
+_pipelines: dict[PipelineId, RmsPipeline] = {}
+_running: dict[PipelineId, bool] = {pipeline_id: False for pipeline_id in _PIPELINE_IDS}
 
-# ── Request / response models ──────────────────────────────────────────────
+_cfg: Settings | None = None
+_r2: R2Client | None = None
 
 
 class RunRequest(BaseModel):
     """Optional body for POST /rebuild/{pipeline_id}/run."""
+
     dry_run: bool | None = None
 
 
-# ── Lazy singletons ────────────────────────────────────────────────────────
+def _make_run_id() -> str:
+    """Return a UTC run identifier safe for branch names and R2 keys."""
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
 
-_cfg = None
-_r2 = None
 
-
-def _get_cfg():
-    """Return the cached Settings, loading lazily on first call."""
+def _get_cfg() -> Settings | None:
+    """Return cached Settings, loading lazily on first use."""
     global _cfg
     if _cfg is None:
         try:
@@ -81,8 +62,8 @@ def _get_cfg():
     return _cfg
 
 
-def _get_r2():
-    """Return the cached R2Client, creating lazily on first call."""
+def _get_r2() -> R2Client | None:
+    """Return the cached R2 client, creating it lazily when config is ready."""
     global _r2
     if _r2 is None:
         cfg = _get_cfg()
@@ -94,30 +75,45 @@ def _get_r2():
     return _r2
 
 
-# ── Background runner ──────────────────────────────────────────────────────
+def _get_pipeline(pipeline_id: PipelineId) -> RmsPipeline | None:
+    """Return the singleton RmsPipeline for *pipeline_id*, if dependencies load."""
+    cfg = _get_cfg()
+    r2 = _get_r2()
+    if cfg is None or r2 is None:
+        return None
+
+    pipeline = _pipelines.get(pipeline_id)
+    if pipeline is None or pipeline.cfg is not cfg or pipeline.r2 is not r2:
+        pipeline = RmsPipeline.for_id(pipeline_id, cfg, r2, ModelRouter(cfg))
+        _pipelines[pipeline_id] = pipeline
+    return pipeline
 
 
-def _run_pipeline_bg(pipeline_id: str, dry_run: bool) -> None:
+async def _run_pipeline_bg(pipeline_id: PipelineId, dry_run: bool, run_id: str) -> None:
     """
-    Background function that calls pipeline_mod.run() and clears _running.
+    Await a pipeline run in the FastAPI background task and clear state safely.
 
-    _running[pipeline_id] must already be True before this runs.
-    Clears it in a finally block regardless of outcome.
+    Exceptions are logged and swallowed so a failed run never crashes the API
+    server. The caller-generated run ID is passed through to the RunReport.
     """
+    _running[pipeline_id] = True
     try:
-        cfg = _get_cfg()
-        r2 = _get_r2()
-        if cfg is None or r2 is None:
-            logger.error("api: cannot run %r — config/R2 not ready", pipeline_id)
+        pipeline = _get_pipeline(pipeline_id)
+        if pipeline is None:
+            logger.error("api: cannot run %r - config/R2 not ready", pipeline_id)
             return
-        pipeline_mod.run(pipeline_id, cfg, r2, dry_run=dry_run)  # type: ignore[arg-type]
+        report = await pipeline.run(dry_run=dry_run, run_id=run_id)
+        logger.info(
+            "api: pipeline %s finished runId=%s summary=%s error=%s",
+            pipeline_id,
+            report.runId,
+            report.summary,
+            report.error,
+        )
     except Exception:
         logger.exception("api: unhandled error in pipeline %r", pipeline_id)
     finally:
         _running[pipeline_id] = False
-
-
-# ── Routes ─────────────────────────────────────────────────────────────────
 
 
 @app.get("/health")
@@ -128,8 +124,8 @@ async def health() -> JSONResponse:
         content={
             "status": "ok",
             "pipelines": {
-                pid: ("running" if _running[pid] else "idle")
-                for pid in _running
+                pipeline_id: ("running" if _running[pipeline_id] else "idle")
+                for pipeline_id in _running
             },
         },
     )
@@ -138,61 +134,40 @@ async def health() -> JSONResponse:
 @app.post("/rebuild/{pipeline_id}/run", status_code=202)
 async def trigger_run(
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
-    body: RunRequest | None = None,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
+    background_tasks: BackgroundTasks,
+    body: RunRequest = Body(default=RunRequest()),
 ) -> JSONResponse:
-    """
-    Trigger a pipeline run.
-
-    Returns:
-        202 Accepted: {"runId": ..., "pipeline": ..., "dryRun": ...}
-        409 Conflict: {"error": "pipeline already running", "pipeline": ...}
-        422 Unprocessable Entity: unknown pipeline_id (handled by FastAPI).
-    """
-    # Race-safe: check and set synchronously before queuing background work.
-    if _running.get(pipeline_id):
+    """Trigger a pipeline run and return the single source-of-truth run ID."""
+    typed_pipeline_id = cast(PipelineId, pipeline_id)
+    if _running.get(typed_pipeline_id):
         return JSONResponse(
             status_code=409,
-            content={"error": "pipeline already running", "pipeline": pipeline_id},
+            content={"error": "pipeline already running", "pipeline": typed_pipeline_id},
         )
 
     cfg = _get_cfg()
-    env_dry_run: bool = cfg.rms_dry_run if cfg is not None else True
-    dry_run: bool = (
-        body.dry_run
-        if (body is not None and body.dry_run is not None)
-        else env_dry_run
-    )
+    env_dry_run = cfg.rms_dry_run if cfg is not None else True
+    dry_run = body.dry_run if body.dry_run is not None else env_dry_run
+    run_id = _make_run_id()
 
-    run_id = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-
-    # Set flag BEFORE queuing — closes the concurrency race window.
-    _running[pipeline_id] = True
-    background_tasks.add_task(_run_pipeline_bg, pipeline_id, dry_run)
+    _running[typed_pipeline_id] = True
+    background_tasks.add_task(_run_pipeline_bg, typed_pipeline_id, dry_run, run_id)
 
     return JSONResponse(
         status_code=202,
-        content={"runId": run_id, "pipeline": pipeline_id, "dryRun": dry_run},
+        content={"runId": run_id, "pipeline": typed_pipeline_id, "dryRun": dry_run},
     )
 
 
-# ── Entry point ────────────────────────────────────────────────────────────
-
-
 def serve() -> None:
-    """
-    Start the RMS FastAPI server using uvicorn.
-
-    Called by the rms-api console script:
-      rms-api = repo_mgmt.api:serve
-    """
+    """Start the RMS FastAPI server using uvicorn."""
     import uvicorn
 
     cfg = _get_cfg()
     r2 = _get_r2()
-    host: str = cfg.rms_host if cfg is not None else "0.0.0.0"
-    port: int = cfg.rms_port if cfg is not None else 8000
-    log_level: str = cfg.log_level if cfg is not None else "info"
+    host = cfg.rms_host if cfg is not None else "0.0.0.0"
+    port = cfg.rms_port if cfg is not None else 8000
+    log_level = cfg.log_level if cfg is not None else "info"
 
     logging.basicConfig(
         level=logging.INFO,

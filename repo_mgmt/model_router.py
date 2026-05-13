@@ -1,12 +1,8 @@
 """
 Model router for the Repo Management Suite.
 
-Routes LLM requests to OpenRouter with:
-  - HTTP-Referer: repo-management-suite header on every request
-  - Primary model first; retry once with secondary on 429 or 5xx
-  - Triage model for issue_normaliser editorial classification only
-  - 90-second timeout on all requests
-  - Raises ModelError if both models fail
+Routes LLM requests to OpenRouter with primary-model execution and a single
+secondary-model fallback only for retryable HTTP statuses: 429 or 5xx.
 """
 
 from __future__ import annotations
@@ -27,26 +23,31 @@ _REFERER = "repo-management-suite"
 
 
 class ModelError(Exception):
-    """Raised when all model routing attempts are exhausted."""
+    """Raised when a model call fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool = False,
+    ) -> None:
+        """Initialise the error with retry metadata."""
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
 
 
 class ModelRouter:
-    """Routes LLM calls through OpenRouter with primary/secondary fallback."""
+    """Routes LLM calls through OpenRouter with constrained fallback."""
 
     def __init__(self, cfg: "Settings") -> None:
-        """
-        Initialise ModelRouter from settings.
-
-        Args:
-            cfg: Validated RMS settings containing OpenRouter credentials.
-        """
+        """Initialise the router from validated settings."""
         self._api_base = cfg.openrouter_api_base.rstrip("/")
         self._api_key = cfg.openrouter_api_key
         self._primary = cfg.openrouter_primary_model
         self._secondary = cfg.openrouter_secondary_model
         self._triage_model = cfg.openrouter_triage_model
-
-    # ── Public API ─────────────────────────────────────────────────────────
 
     def complete(
         self,
@@ -54,56 +55,29 @@ class ModelRouter:
         system: str = "",
         max_tokens: int = 4096,
     ) -> str:
-        """
-        Send *prompt* to the primary model; fall back to secondary on 429/5xx.
-
-        Args:
-            prompt: User-turn text.
-            system: Optional system prompt text.
-            max_tokens: Maximum tokens to generate.
-
-        Returns:
-            Raw assistant response text.
-
-        Raises:
-            ModelError: If both primary and secondary models fail.
-        """
+        """Send *prompt* to the primary model with retryable fallback only."""
         try:
             return self._call(self._primary, prompt, system, max_tokens)
         except ModelError as first_err:
+            if not first_err.retryable:
+                raise
             logger.warning(
-                "model_router: primary model failed (%s) — retrying with secondary", first_err
+                "model_router: primary retryable failure (%s) - retrying secondary",
+                first_err,
             )
 
         try:
             return self._call(self._secondary, prompt, system, max_tokens)
         except ModelError as second_err:
             raise ModelError(
-                f"Both primary and secondary models failed. "
-                f"Last error: {second_err}"
+                f"Both primary and secondary models failed. Last error: {second_err}",
+                status_code=second_err.status_code,
+                retryable=second_err.retryable,
             ) from second_err
 
-    def triage(
-        self,
-        prompt: str,
-        max_tokens: int = 256,
-    ) -> str:
-        """
-        Send *prompt* to the triage model for lightweight classification.
-
-        Args:
-            prompt: Classification prompt (expect JSON response).
-            max_tokens: Maximum tokens for the triage response.
-
-        Returns:
-            Raw assistant response text.
-
-        Raises:
-            ModelError: If the triage model call fails.
-        """
+    def triage(self, prompt: str, max_tokens: int = 256) -> str:
+        """Send *prompt* to the triage model for classification."""
         return self._call(self._triage_model, prompt, "", max_tokens)
-
-    # ── Internal ───────────────────────────────────────────────────────────
 
     def _call(
         self,
@@ -112,21 +86,7 @@ class ModelRouter:
         system: str,
         max_tokens: int,
     ) -> str:
-        """
-        POST to OpenRouter /chat/completions for *model*.
-
-        Args:
-            model: Full OpenRouter model identifier string.
-            prompt: User message content.
-            system: System message content (omitted when empty).
-            max_tokens: Token limit for the completion.
-
-        Returns:
-            Assistant response text.
-
-        Raises:
-            ModelError: On HTTP error or retryable status code.
-        """
+        """POST to OpenRouter /chat/completions for *model*."""
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -153,12 +113,16 @@ class ModelRouter:
 
         if response.status_code in _RETRY_STATUSES:
             raise ModelError(
-                f"Retryable HTTP {response.status_code} from {model}: {response.text[:200]}"
+                f"Retryable HTTP {response.status_code} from {model}: {response.text[:200]}",
+                status_code=response.status_code,
+                retryable=True,
             )
 
         if response.status_code >= 400:
             raise ModelError(
-                f"HTTP {response.status_code} from {model}: {response.text[:200]}"
+                f"HTTP {response.status_code} from {model}: {response.text[:200]}",
+                status_code=response.status_code,
+                retryable=False,
             )
 
         data = response.json()

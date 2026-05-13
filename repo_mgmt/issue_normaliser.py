@@ -6,7 +6,7 @@ Converts raw audit findings into NormalisedIssue dicts, applying:
   - Deterministic task IDs: rms-<pipeline>-<YYYY-MM-DD>-<seq:003d>
   - Classification logic (code_fix / future_guidance / manual_review / skipped)
   - Editorial guard for on-brand blog/transcript findings
-  - Protected-path gate for mobile-ux (-> skipped_not_actionable)
+  - Protected-path gate for mobile-ux (excluded from executable output)
   - Approved fix-class enforcement per pipeline
 
 API:
@@ -79,6 +79,13 @@ _EDITORIAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_STRUCTURAL_RE = re.compile(
+    r"\b(schema|metadata|meta|template|partial|html|tag|attribute|markup|"
+    r"broken|malformed|missing required|incorrect metadata|canonical|"
+    r"structured data)\b",
+    re.IGNORECASE,
+)
+
 # On-brand: allowed code_fix classes for blog/transcript structural defects
 _ONBRAND_STRUCTURAL_CLASSES: frozenset[str] = frozenset(
     ["html_fix", "template_fix", "schema_fix", "meta_fix", "partial_fix"]
@@ -122,8 +129,6 @@ def normalise(
     seq = 0  # 1-based sequential counter per normalise() call
 
     for finding in raw_findings:
-        seq += 1
-        task_id = f"rms-{pipeline_id}-{run_date}-{seq:03d}"
         affected_paths: list[str] = finding.get("affectedPaths", [])
         fix_class: str = str(finding.get("fixClass", ""))
         severity: str = str(finding.get("severity", "low")).lower()
@@ -135,29 +140,18 @@ def normalise(
         # ── Mobile-ux protected path gate (normaliser layer) ──────────────
         if pipeline_id == "mobile-ux":
             if any(is_protected(p, _MOBILE_UX_PROTECTED) for p in affected_paths):
-                results.append(
-                    _build(
-                        task_id=task_id,
-                        pipeline_id=pipeline_id,
-                        finding=finding,
-                        classification="skipped",
-                        status="skipped_not_actionable",
-                        affected_paths=affected_paths,
-                        fix_class=fix_class,
-                        severity=severity,
-                        confidence=confidence,
-                        evidence=evidence,
-                        source_audit=source_audit,
-                        required_outcome=required_outcome,
-                        allowed_fix_class=fix_class,
-                        validation_commands=validation_commands,
-                    )
+                logger.info(
+                    "issue_normaliser: excluded protected mobile-ux finding paths=%s",
+                    affected_paths,
                 )
                 continue
 
+        seq += 1
+        task_id = f"rms-{pipeline_id}-{run_date}-{seq:03d}"
+
         # ── On-brand editorial guard ───────────────────────────────────────
         if pipeline_id == "on-brand" and _is_blog_or_transcript_path(affected_paths):
-            if _is_editorial(finding):
+            if _is_editorial(finding, model_router):
                 results.append(
                     _build(
                         task_id=task_id,
@@ -177,30 +171,6 @@ def normalise(
                     )
                 )
                 continue
-
-            # For genuinely ambiguous cases, ask triage model (if available)
-            if model_router is not None and _is_ambiguous_for_triage(finding):
-                editorial = _triage_editorial(finding, model_router)
-                if editorial:
-                    results.append(
-                        _build(
-                            task_id=task_id,
-                            pipeline_id=pipeline_id,
-                            finding=finding,
-                            classification="future_guidance",
-                            status="future_guidance",
-                            affected_paths=affected_paths,
-                            fix_class=fix_class,
-                            severity=severity,
-                            confidence=confidence,
-                            evidence=evidence,
-                            source_audit=source_audit,
-                            required_outcome=required_outcome,
-                            allowed_fix_class=fix_class,
-                            validation_commands=validation_commands,
-                        )
-                    )
-                    continue
 
             # Structural/metadata: allowed only for specific structural classes
             if fix_class not in _ONBRAND_STRUCTURAL_CLASSES:
@@ -305,20 +275,34 @@ def _build(
     }
 
 
-def _is_editorial(finding: dict[str, Any]) -> bool:
+def _is_editorial(
+    finding: dict[str, Any],
+    model_router: "ModelRouter | None" = None,
+) -> bool:
     """
-    Return True if *finding* is an editorial quality issue.
+    Return True when *finding* is an editorial quality issue.
 
-    Uses deterministic keyword/rule checks only.  Never calls a model.
-    Model triage is done separately in _triage_editorial for genuinely
-    ambiguous cases (structural + editorial signals).
+    Clear editorial findings are handled deterministically. Clear structural or
+    metadata findings return False. Ambiguous blog/transcript cases use the
+    triage model when one is supplied and fail closed to editorial guidance when
+    triage is unavailable.
     """
     title = str(finding.get("title", ""))
     description = str(finding.get("description", ""))
     category = str(finding.get("category", ""))
     combined = f"{title} {description} {category}"
-    return bool(_EDITORIAL_RE.search(combined))
+    has_editorial = bool(_EDITORIAL_RE.search(combined))
+    has_structural = bool(_STRUCTURAL_RE.search(combined))
 
+    if has_editorial and not has_structural:
+        return True
+    if has_structural and not has_editorial:
+        return False
+    if has_editorial and has_structural:
+        if model_router is None:
+            return True
+        return _triage_editorial(finding, model_router)
+    return False
 
 def _is_blog_or_transcript_path(paths: list[str]) -> bool:
     """Return True if any affected path is under blog/ or transcripts/."""
