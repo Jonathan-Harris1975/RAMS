@@ -40,10 +40,8 @@ def client(settings) -> TestClient:
     with (
         patch("repo_mgmt.api.load_settings", return_value=settings),
         patch("repo_mgmt.api.R2Client", return_value=mock_r2),
-        patch("repo_mgmt.api.build_scheduler") as mock_sched,
         patch("repo_mgmt.api.pipeline_mod.run", return_value=_mock_report()),
     ):
-        mock_sched.return_value.start = MagicMock()
         with TestClient(app) as c:
             yield c
 
