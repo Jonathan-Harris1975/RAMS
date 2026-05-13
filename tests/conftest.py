@@ -68,7 +68,7 @@ def mock_router() -> MagicMock:
             }
         ],
     })
-    router.triage.return_value = "STRUCTURAL"
+    router.triage.return_value = '{"editorial": false}'
     return router
 
 

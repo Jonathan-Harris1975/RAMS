@@ -110,7 +110,42 @@ def test_validate_patch_missing_find_for_replace() -> None:
         validate_patch(doc)
 
 
-def test_validate_patch_delete_no_find_required() -> None:
+def test_validate_patch_delete_requires_find_and_anchor() -> None:
+    doc = {
+        "patchProtocol": "AnchorPatch/v1",
+        "changes": [
+            {
+                "file": "old.txt",
+                "operation": "delete",
+                "anchorBefore": "anchor",
+                "find": "remove me",
+                "replace": "",
+                "rationale": "remove text",
+            }
+        ],
+    }
+    validate_patch(doc)
+
+
+def test_validate_patch_delete_without_find_rejected() -> None:
+    doc = {
+        "patchProtocol": "AnchorPatch/v1",
+        "changes": [
+            {
+                "file": "old.txt",
+                "operation": "delete",
+                "anchorBefore": "anchor",
+                "find": "",
+                "replace": "",
+                "rationale": "remove text",
+            }
+        ],
+    }
+    with pytest.raises(PatchSchemaError, match="find"):
+        validate_patch(doc)
+
+
+def test_validate_patch_delete_without_anchor_rejected() -> None:
     doc = {
         "patchProtocol": "AnchorPatch/v1",
         "changes": [
@@ -118,11 +153,18 @@ def test_validate_patch_delete_no_find_required() -> None:
                 "file": "old.txt",
                 "operation": "delete",
                 "anchorBefore": "",
-                "find": "",
+                "find": "remove me",
                 "replace": "",
-                "rationale": "remove file",
+                "rationale": "remove text",
             }
         ],
     }
-    # delete does not require find — should not raise
-    validate_patch(doc)
+    with pytest.raises(PatchSchemaError, match="anchorBefore"):
+        validate_patch(doc)
+
+
+def test_validate_patch_replace_without_anchor_rejected() -> None:
+    doc = _valid_doc()
+    doc["changes"][0]["anchorBefore"] = ""
+    with pytest.raises(PatchSchemaError, match="anchorBefore"):
+        validate_patch(doc)

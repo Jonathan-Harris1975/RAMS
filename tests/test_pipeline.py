@@ -33,3 +33,10 @@ class TestPipelineRun:
             gm.return_value.create_branch.side_effect=RuntimeError('no branch'); report=pipeline_mod.run('on-brand',settings,mock_r2,dry_run=False)
         run_task.assert_not_called(); assert report.tasks[0]['status']=='manual_review' and 'Git branch setup failed' in (report.error or '')
     def test_validation_runner_is_active_pipeline_validation_path(self): assert hasattr(pipeline_mod.update_executor,'validation_runner')
+    def test_run_id_is_used_for_report_branch_and_publish_path(self,settings,mock_r2,mock_router,tmp_path,monkeypatch):
+        monkeypatch.chdir(tmp_path); mock_r2.get_object.return_value=b'{}'; fixed='2026-05-05T03-00-00Z'
+        with patch('repo_mgmt.pipeline.ModelRouter', return_value=mock_router), patch('repo_mgmt.pipeline.publish', return_value='dest') as pub:
+            report=pipeline_mod.run('mobile-ux',settings,mock_r2,dry_run=True,run_id=fixed)
+        published=pub.call_args.args[0]
+        assert report.runId==fixed and published.runId==fixed
+        assert report.branch.endswith(f'/mobile-ux/{fixed}')

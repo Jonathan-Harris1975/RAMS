@@ -45,7 +45,7 @@ def test_applier_raises_for_mobile_ux_blog(tmp_path: Path) -> None:
         "changes": [{
             "file": "blog/posts/index.html",
             "operation": "replace",
-            "anchorBefore": "",
+            "anchorBefore": "<p>content</p>",
             "find": "<p>content</p>",
             "replace": "<p>new</p>",
             "rationale": "test",
@@ -64,7 +64,7 @@ def test_applier_does_not_raise_for_on_brand_blog(tmp_path: Path) -> None:
         "changes": [{
             "file": "blog/posts/index.html",
             "operation": "replace",
-            "anchorBefore": "",
+            "anchorBefore": "<p>content</p>",
             "find": "<p>content</p>",
             "replace": "<p>new</p>",
             "rationale": "test",

@@ -98,3 +98,35 @@ def test_dry_run_defaults_to_true_when_omitted() -> None:
     data = resp.json()
     # Safe default is True when no config is present
     assert isinstance(data["dryRun"], bool)
+
+
+def test_api_response_run_id_is_passed_to_pipeline(monkeypatch) -> None:
+    from repo_mgmt import api as api_mod
+    from repo_mgmt.report_publisher import RunReport
+
+    seen = {}
+
+    class FakePipeline:
+        async def run(self, dry_run: bool, run_id: str) -> RunReport:
+            seen['run_id'] = run_id
+            seen['dry_run'] = dry_run
+            return RunReport(
+                runId=run_id,
+                pipeline='mobile-ux',
+                targetRepo='/tmp/site',
+                branch=f'rms-qa/mobile-ux/{run_id}',
+                dryRun=dry_run,
+                summary={'snapshotsRead':0,'tasksGenerated':0,'codeFixesAttempted':0,'committed':0,'validationFailed':0,'futureGuidance':0,'manualReview':0},
+                tasks=[],
+                validation=None,
+                commits=[],
+            )
+
+    monkeypatch.setattr(api_mod, '_get_pipeline', lambda pipeline_id: FakePipeline())
+    monkeypatch.setattr(api_mod, '_get_cfg', lambda: None)
+
+    resp = client.post('/rebuild/mobile-ux/run', json={'dry_run': True})
+    data = resp.json()
+    assert resp.status_code == 202
+    assert data['runId'] == seen['run_id']
+    assert seen['dry_run'] is True

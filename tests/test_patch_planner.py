@@ -5,7 +5,7 @@ from repo_mgmt.patch_protocol import PathTraversalError
 def _patch(changes=None): return {'patchProtocol':'AnchorPatch/v1','changes':changes if changes is not None else []}
 class TestParsePlan:
     def test_valid_anchor_patch_parses_directly(self):
-        doc=_patch([{'file':'index.html','operation':'replace','find':'Old','replace':'New'}]); assert _parse_plan(json.dumps(doc),'t')==doc
+        doc=_patch([{'file':'index.html','operation':'replace','anchorBefore':'<title>Old</title>','find':'Old','replace':'New'}]); assert _parse_plan(json.dumps(doc),'t')==doc
     def test_empty_changes_are_safe_noop(self): assert _parse_plan(json.dumps(_patch([])),'t')['changes']==[]
     def test_rejects_markdown_fences_as_not_strict_json(self):
         with pytest.raises(PatchPlanError): _parse_plan('```json\n{}\n```','t')

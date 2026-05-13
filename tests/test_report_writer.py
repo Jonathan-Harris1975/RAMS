@@ -7,3 +7,11 @@ def test_dry_run_writes_local_json(tmp_path,monkeypatch,settings,mock_r2):
     monkeypatch.chdir(tmp_path); dest=publish(_report(True),settings,mock_r2); data=json.loads(Path(dest).read_text()); assert set(data)=={'runId','pipeline','targetRepo','branch','dryRun','summary','tasks','validation','commits'}; assert data['validation']['outputTail']=='ok'
 def test_live_writes_report_and_latest(settings,mock_r2):
     dest=publish(_report(False),settings,mock_r2); keys=[c.kwargs['key'] for c in mock_r2.put_object.call_args_list]; assert dest.endswith('/report.json'); assert f'{settings.rms_report_prefix}/on-brand/run-1/report.json' in keys; assert f'{settings.rms_report_prefix}/on-brand/latest.json' in keys
+
+def test_report_error_is_serialised(tmp_path, monkeypatch, settings, mock_r2):
+    monkeypatch.chdir(tmp_path)
+    report = _report(True)
+    report.error = 'boom'
+    dest = publish(report, settings, mock_r2)
+    data = json.loads(Path(dest).read_text())
+    assert data['error'] == 'boom'
