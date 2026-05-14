@@ -31,7 +31,9 @@ jobs:
 
       - name: Run tests
         env:
-          # Minimal env so Settings() validation passes in tests
+          # Minimal env so Settings() validation passes in tests.
+          # The directories are created below so health/admission tests see
+          # dependency readiness rather than phantom missing paths.
           R2_ENDPOINT: "https://test.r2.cloudflarestorage.com"
           R2_ACCESS_KEY_ID: "test-key"
           R2_SECRET_ACCESS_KEY: "test-secret"
@@ -42,7 +44,11 @@ jobs:
           RMS_SEO_REPO_PATH: "/tmp/fake-seo"
           RMS_WEBSITE_REPO_PATH: "/tmp/fake-website"
           RMS_DRY_RUN: "true"
-        run: pytest tests/ -v --tb=short
+          RMS_LIVE_WRITE_ENABLED: "false"
+        run: |
+          mkdir -p /tmp/fake-seo /tmp/fake-website
+          python -m compileall -q repo_mgmt tests
+          python -m pytest tests/ -v --tb=short
 
   lint:
     name: Lint
@@ -53,7 +59,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install linters
-        run: pip install ruff mypy
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install ruff mypy
       - name: Ruff check
         run: ruff check repo_mgmt/ tests/
       - name: Mypy
