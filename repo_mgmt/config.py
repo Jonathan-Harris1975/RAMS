@@ -79,11 +79,26 @@ class Settings(BaseSettings):
     openrouter_triage_model: str = ""
 
     # ── Target repo paths ──────────────────────────────────────────────────
-    rms_seo_repo_path: str = ""
+    # Current architecture:
+    #   seo-aeo-geo -> website repo
+    #   mobile-ux   -> website repo
+    #   on-brand    -> AIMS / AI-management-suite repo
     rms_website_repo_path: str = ""
+    rms_aims_repo_path: str = ""
+    rms_seo_repo_path: str = ""  # legacy alias; no longer used for SEO routing
+
+    # ── Optional Koyeb/runtime repo bootstrap ──────────────────────────────
+    rms_repo_bootstrap_enabled: bool = False
+    rms_repo_base_dir: str = "/tmp/rams-repos"
+    rms_website_repo_url: str = ""
+    rms_website_repo_branch: str = "main"
+    rms_aims_repo_url: str = ""
+    rms_aims_repo_branch: str = "main"
+    github_token: str | None = None
 
     # ── Per-target validation commands (split on " && ") ──────────────────
-    rms_seo_validation_commands: str = "npm test && npm run build"
+    rms_aims_validation_commands: str = "npm test && npm run build"
+    rms_seo_validation_commands: str = "npm test && npm run build"  # legacy alias
     rms_website_validation_commands: str = (
         "python3 scripts/inject_partials.py --validate"
         " && python3 scripts/sync_redirects.py --check"
@@ -127,6 +142,7 @@ class Settings(BaseSettings):
         "rms_validate_after_each_task",
         "rms_revert_on_validation_failure",
         "rms_single_worker_mode",
+        "rms_repo_bootstrap_enabled",
         mode="before",
     )
     @classmethod
@@ -165,9 +181,16 @@ class Settings(BaseSettings):
             "OPENROUTER_PRIMARY_MODEL": self.openrouter_primary_model,
             "OPENROUTER_SECONDARY_MODEL": self.openrouter_secondary_model,
             "OPENROUTER_TRIAGE_MODEL": self.openrouter_triage_model,
-            "RMS_SEO_REPO_PATH": self.rms_seo_repo_path,
             "RMS_WEBSITE_REPO_PATH": self.rms_website_repo_path,
+            "RMS_AIMS_REPO_PATH": self.aims_repo_path_value,
         }
+        if self.rms_repo_bootstrap_enabled:
+            required.update(
+                {
+                    "RMS_WEBSITE_REPO_URL": self.rms_website_repo_url,
+                    "RMS_AIMS_REPO_URL": self.rms_aims_repo_url,
+                }
+            )
         for name, value in required.items():
             if not str(value).strip():
                 missing.append(name)
@@ -197,19 +220,28 @@ class Settings(BaseSettings):
             and self.rms_live_write_enabled is True
         )
 
+    @property
+    def aims_repo_path_value(self) -> str:
+        """Return the AIMS repo path, using the legacy SEO path only as a fallback."""
+        return self.rms_aims_repo_path or self.rms_seo_repo_path
+
     def validation_commands_for(self, pipeline: PipelineId) -> list[str]:
         """Return the ordered validation commands for the given pipeline."""
-        if pipeline == "seo-aeo-geo":
-            raw = self.rms_seo_validation_commands
-        else:
+        if pipeline in {"seo-aeo-geo", "mobile-ux"}:
             raw = self.rms_website_validation_commands
+        elif pipeline == "on-brand":
+            raw = self.rms_aims_validation_commands or self.rms_seo_validation_commands
+        else:
+            raise ConfigurationError(f"Unknown pipeline: {pipeline}")
         return [cmd.strip() for cmd in raw.split("&&") if cmd.strip()]
 
     def repo_path_for(self, pipeline: PipelineId) -> Path:
         """Return the absolute repo path for the given pipeline."""
-        if pipeline == "seo-aeo-geo":
-            return Path(self.rms_seo_repo_path)
-        return Path(self.rms_website_repo_path)
+        if pipeline in {"seo-aeo-geo", "mobile-ux"}:
+            return Path(self.rms_website_repo_path)
+        if pipeline == "on-brand":
+            return Path(self.aims_repo_path_value)
+        raise ConfigurationError(f"Unknown pipeline: {pipeline}")
 
     def report_dir(self) -> Path:
         """Return the configured local report directory."""

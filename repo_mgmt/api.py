@@ -26,6 +26,7 @@ from repo_mgmt.git_manager import GitManager
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.pipeline import RmsPipeline
 from repo_mgmt.r2_client import R2Client
+from repo_mgmt.repo_bootstrap import BootstrapResult, bootstrap_repositories
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,8 @@ _r2: R2Client | None = None
 _r2_error: str | None = None
 _r2_verified: bool | None = None
 _r2_verify_error: str | None = None
+_bootstrap_attempted: bool = False
+_bootstrap_results: list[BootstrapResult] = []
 
 
 class RunRequest(BaseModel):
@@ -208,22 +211,66 @@ def _repo_ready(path: FilePath) -> bool:
     return path.exists() and path.is_dir()
 
 
+def _ensure_repos_bootstrapped(cfg: Settings) -> list[BootstrapResult]:
+    """Run repo bootstrap once per process when explicitly enabled."""
+    global _bootstrap_attempted, _bootstrap_results
+    if not _bootstrap_attempted:
+        _bootstrap_attempted = True
+        try:
+            _bootstrap_results = bootstrap_repositories(cfg)
+        except Exception as exc:
+            logger.exception("api: repo bootstrap failed")
+            _bootstrap_results = [
+                BootstrapResult(
+                    label="all",
+                    path="",
+                    attempted=True,
+                    ready=False,
+                    action="failed",
+                    error=str(exc),
+                )
+            ]
+    return _bootstrap_results
+
+
+def _bootstrap_details(cfg: Settings | None) -> dict[str, object]:
+    """Return public bootstrap readiness information without secrets."""
+    if cfg is None:
+        return {"enabled": False, "attempted": False, "results": []}
+    results = _bootstrap_results
+    return {
+        "enabled": cfg.rms_repo_bootstrap_enabled,
+        "attempted": _bootstrap_attempted,
+        "results": [result.__dict__ for result in results],
+    }
+
+
 def _dependency_details() -> dict[str, object]:
     """Build public dependency readiness booleans and non-secret errors."""
     cfg = _get_cfg()
     r2 = _get_r2() if cfg is not None else None
-    seo_ready = False
     website_ready = False
+    aims_ready = False
     validation_runtime = _validation_runtime_details()
+    pipeline_repo_paths: dict[str, str] = {}
     if cfg is not None:
-        seo_ready = _repo_ready(cfg.repo_path_for("seo-aeo-geo"))
-        website_ready = _repo_ready(cfg.repo_path_for("on-brand"))
+        website_path = cfg.repo_path_for("seo-aeo-geo")
+        aims_path = cfg.repo_path_for("on-brand")
+        website_ready = _repo_ready(website_path)
+        aims_ready = _repo_ready(aims_path)
+        pipeline_repo_paths = {
+            "seo-aeo-geo": str(website_path),
+            "mobile-ux": str(cfg.repo_path_for("mobile-ux")),
+            "on-brand": str(aims_path),
+        }
     deps: dict[str, object] = {
         "config_loaded": cfg is not None,
         "r2_configured": _r2_configured(cfg),
         "r2_verified": _verify_r2() if cfg is not None and r2 is not None else False,
-        "seo_repo_ready": seo_ready,
         "website_repo_ready": website_ready,
+        "aims_repo_ready": aims_ready,
+        "pipeline_repo_paths": pipeline_repo_paths,
+        "repo_bootstrap": _bootstrap_details(cfg),
         "validation_runtime_ready": bool(validation_runtime["ready"]),
         "model_router_ready": _model_router_ready(cfg),
         "single_worker_mode": configured_worker_count() == 1,
@@ -297,12 +344,18 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
             "model-router configuration unavailable",
             {"dependencies": _dependency_details()},
         )
+    _ensure_repos_bootstrapped(cfg)
     target_repo = cfg.repo_path_for(pipeline_id)
     if not _repo_ready(target_repo):
         raise AdmissionError(
             503,
             "target repo path unavailable",
-            {"pipeline": pipeline_id, "repoReady": False},
+            {
+                "pipeline": pipeline_id,
+                "repoReady": False,
+                "repoPath": str(target_repo),
+                "repoBootstrap": _bootstrap_details(cfg),
+            },
         )
 
     effective_dry_run = cfg.rms_dry_run if requested is None else requested

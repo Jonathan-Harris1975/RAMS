@@ -41,12 +41,20 @@ _MOBILE_UX_PROTECTED: frozenset[str] = frozenset(
 _APPROVED_FIX_CLASSES: dict[str, frozenset[str]] = {
     "seo-aeo-geo": frozenset(
         [
-            "route_fix",
-            "config_fix",
+            "html_fix",
+            "css_fix",
+            "meta_fix",
             "schema_fix",
-            "prompt_template_update",
-            "audit_output_fix",
-            "middleware_fix",
+            "structured_data_fix",
+            "canonical_fix",
+            "redirect_fix",
+            "crawler_fix",
+            "sitemap_fix",
+            "robots_fix",
+            "llms_fix",
+            "accessibility_fix",
+            "template_fix",
+            "partial_fix",
         ]
     ),
     "mobile-ux": frozenset(
@@ -61,13 +69,17 @@ _APPROVED_FIX_CLASSES: dict[str, frozenset[str]] = {
     ),
     "on-brand": frozenset(
         [
+            "route_fix",
+            "config_fix",
+            "schema_fix",
+            "prompt_template_update",
+            "audit_output_fix",
+            "middleware_fix",
             "html_fix",
             "css_fix",
             "template_fix",
             "partial_fix",
             "redirect_fix",
-            "prompt_template_update",
-            "schema_fix",
             "meta_fix",
         ]
     ),
