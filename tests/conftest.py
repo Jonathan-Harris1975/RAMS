@@ -47,6 +47,7 @@ def mock_r2() -> MagicMock:
     r2.get_object.return_value = b"{}"
     r2.put_object.return_value = None
     r2.object_exists.return_value = False
+    r2.verify_bucket.return_value = True
     return r2
 
 

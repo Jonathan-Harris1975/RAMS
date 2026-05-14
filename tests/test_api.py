@@ -20,6 +20,8 @@ def reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
     api_mod._cfg_error = None
     api_mod._r2 = None
     api_mod._r2_error = None
+    api_mod._r2_verified = None
+    api_mod._r2_verify_error = None
     api_mod._pipelines.clear()
     for pipeline_id in api_mod._running:
         api_mod._running[pipeline_id] = False
@@ -86,7 +88,9 @@ class FakePipeline:
                 "manualReview": 0,
             },
             tasks=[],
-            validation=None,
+            validation=api_mod.pipeline_mod.ValidationSummary(
+                commands=[], passed=False, output_tail="not_run: validation did not run"
+            ),
             commits=[],
         )
 
@@ -98,6 +102,7 @@ def install_valid_api(
 ) -> MagicMock:
     """Patch config, R2, and optional pipeline construction for an API test."""
     mock_r2 = MagicMock()
+    mock_r2.verify_bucket.return_value = True
     monkeypatch.setattr(api_mod, "load_settings", lambda: settings)
     monkeypatch.setattr(api_mod, "R2Client", lambda cfg: mock_r2)
     if fake_pipeline is not None:
@@ -136,14 +141,16 @@ def test_readiness_reports_dependency_readiness(
     data = response.json()
     assert response.status_code == 200
     assert data["status"] == "ready"
-    assert data["dependencies"] == {
-        "config_loaded": True,
-        "r2_ready": True,
-        "model_router_ready": True,
-        "seo_repo_ready": True,
-        "website_repo_ready": True,
-        "single_worker_mode": True,
-    }
+    deps = data["dependencies"]
+    assert deps["config_loaded"] is True
+    assert deps["r2_configured"] is True
+    assert deps["r2_verified"] is True
+    assert deps["model_router_ready"] is True
+    assert deps["seo_repo_ready"] is True
+    assert deps["website_repo_ready"] is True
+    assert deps["validation_runtime_ready"] is True
+    assert deps["single_worker_mode"] is True
+    assert deps["runtime"]["node"].startswith("v")
 
 
 def test_readiness_degraded_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -228,6 +235,24 @@ def test_missing_r2_returns_503_and_schedules_no_background(
     monkeypatch.setattr(api_mod, "_get_pipeline", lambda pipeline_id: fake_pipeline)
     with TestClient(api_mod.app) as client:
         response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 503
+    assert "R2" in response.json()["error"]
+    assert fake_pipeline.calls == []
+
+
+def test_unverified_r2_returns_503_and_readiness_degraded(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    mock_r2 = install_valid_api(monkeypatch, settings, fake_pipeline)
+    mock_r2.verify_bucket.return_value = False
+    with TestClient(api_mod.app) as client:
+        readiness = client.get("/readiness")
+        response = client.post("/rebuild/on-brand/run")
+    assert readiness.json()["status"] == "degraded"
+    assert readiness.json()["dependencies"]["r2_configured"] is True
+    assert readiness.json()["dependencies"]["r2_verified"] is False
     assert response.status_code == 503
     assert "R2" in response.json()["error"]
     assert fake_pipeline.calls == []
