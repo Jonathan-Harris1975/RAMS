@@ -151,17 +151,36 @@ def normalise(
         source_audit: str = str(finding.get("sourceAudit", pipeline_id))
         required_outcome: str = str(finding.get("requiredOutcome", ""))
 
+        seq += 1
+        task_id = f"rms-{pipeline_id}-{run_date}-{seq:03d}"
+
         # ── Mobile-ux protected path gate (normaliser layer) ──────────────
         if pipeline_id == "mobile-ux":
             if any(is_protected(p, _MOBILE_UX_PROTECTED) for p in affected_paths):
+                reason = "mobile-ux finding targets protected content path; skipped"
                 logger.info(
-                    "issue_normaliser: excluded protected mobile-ux finding paths=%s",
+                    "issue_normaliser: skipped protected mobile-ux finding paths=%s",
                     affected_paths,
                 )
+                skipped = _build(
+                    task_id=task_id,
+                    pipeline_id=pipeline_id,
+                    finding=finding,
+                    classification="skipped",
+                    status="skipped_not_actionable",
+                    affected_paths=affected_paths,
+                    fix_class=fix_class,
+                    severity=severity,
+                    confidence=confidence,
+                    evidence=evidence + [reason],
+                    source_audit=source_audit,
+                    required_outcome=required_outcome,
+                    allowed_fix_class="",
+                    validation_commands=validation_commands,
+                )
+                skipped["skipReason"] = reason
+                results.append(skipped)
                 continue
-
-        seq += 1
-        task_id = f"rms-{pipeline_id}-{run_date}-{seq:03d}"
 
         # ── On-brand editorial guard ───────────────────────────────────────
         if pipeline_id == "on-brand" and _is_blog_or_transcript_path(affected_paths):

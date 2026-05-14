@@ -1,7 +1,9 @@
 """
-Report writer for the Repo Management Suite.
+Deprecated compatibility report writer for the Repo Management Suite.
 
-Serialises a RunReport to JSON and uploads it to Cloudflare R2.
+Canonical durable report publishing now lives in repo_mgmt.report_publisher.
+This module is retained for legacy callers and tests only. It serialises a
+legacy RunReport to JSON and uploads it to Cloudflare R2.
 
 Report key format:
   <rms_report_prefix>/<pipeline_id>/<run_id>/report.json

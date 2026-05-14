@@ -64,6 +64,12 @@ def validate_patch(doc: Any) -> dict[str, Any]:
     changes = doc.get("changes")
     if not isinstance(changes, list):
         raise PatchSchemaError("'changes' must be a JSON array")
+    if not changes:
+        reason = doc.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise PatchSchemaError(
+                "empty AnchorPatch/v1 changes require a non-empty reason"
+            )
 
     for index, change in enumerate(changes):
         if not isinstance(change, dict):

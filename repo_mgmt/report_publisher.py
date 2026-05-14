@@ -1,40 +1,4 @@
-"""
-Report publisher for the Repo Management Suite.
-
-Writes RunReport JSON in one of two modes:
-
-  dry_run=True  -> local file only:
-                    ./dry-run-<pipeline_id>-report.json
-
-  dry_run=False -> two R2 objects:
-                    qa-suite/reports/<pipeline>/<runId>/report.json
-                    qa-suite/reports/<pipeline>/latest.json
-
-RunReport schema (matches briefing §9):
-  {
-    "runId": str,
-    "pipeline": PipelineId,
-    "targetRepo": str,
-    "branch": str,
-    "dryRun": bool,
-    "summary": {
-      "snapshotsRead": int,
-      "tasksGenerated": int,
-      "codeFixesAttempted": int,
-      "committed": int,
-      "validationFailed": int,
-      "futureGuidance": int,
-      "manualReview": int
-    },
-    "tasks": list[NormalisedIssue],
-    "validation": {
-      "commands": list[str],
-      "passed": bool,
-      "outputTail": str
-    } | null,
-    "commits": [{"sha": str, "message": str, "files": list[str]}]
-  }
-"""
+"""Durable report publisher for the Repo Management Suite."""
 
 from __future__ import annotations
 
@@ -50,9 +14,6 @@ if TYPE_CHECKING:
     from repo_mgmt.r2_client import R2Client
 
 logger = logging.getLogger(__name__)
-
-
-# ── Data models ────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -74,6 +35,16 @@ class ValidationSummary:
 
 
 @dataclass
+class PublishStatus:
+    """Durability metadata for report publication attempts."""
+
+    destination: str = "not_attempted"
+    ok: bool = False
+    error: str | None = None
+    fallback_path: str | None = None
+
+
+@dataclass
 class RunReport:
     """Top-level report for a single pipeline run."""
 
@@ -87,6 +58,7 @@ class RunReport:
     validation: ValidationSummary | None = None
     commits: list[CommitInfo] = field(default_factory=list)
     error: str | None = None
+    publish_status: PublishStatus = field(default_factory=PublishStatus)
 
 
 def make_run_id() -> str:
@@ -94,29 +66,19 @@ def make_run_id() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
 
 
-# ── Publisher ──────────────────────────────────────────────────────────────
-
-
-def publish(
-    report: RunReport,
-    cfg: "Settings",
-    r2: "R2Client",
-) -> str:
+def publish(report: RunReport, cfg: "Settings", r2: "R2Client") -> str:
     """
     Serialise *report* and write it to the appropriate destination.
 
-    dry_run=True  -> ./dry-run-<pipeline>-report.json (local)
-    dry_run=False -> R2: qa-suite/reports/<pipeline>/<runId>/report.json
-                         qa-suite/reports/<pipeline>/latest.json
-
-    Returns:
-        Destination description (local path or primary R2 key).
+    Dry-run writes locally under cfg.rms_report_dir. Live mode writes the run
+    report and latest pointer to R2. R2 errors are deliberately propagated so
+    callers can record a fallback report and log the stack trace.
     """
-    payload = _serialise(report)
-
     if report.dryRun:
-        local_path = Path(f"dry-run-{report.pipeline}-report.json")
-        local_path.write_text(payload, encoding="utf-8")
+        local_path = _local_report_path(report, cfg, prefix="dry-run")
+        report.publish_status = PublishStatus(destination=str(local_path), ok=True)
+        payload = _serialise(report)
+        _write_text(local_path, payload)
         logger.info("report_publisher: [dry-run] wrote %s", local_path)
         return str(local_path)
 
@@ -124,6 +86,8 @@ def publish(
     prefix = cfg.rms_report_prefix
     run_key = f"{prefix}/{report.pipeline}/{report.runId}/report.json"
     latest_key = f"{prefix}/{report.pipeline}/latest.json"
+    report.publish_status = PublishStatus(destination=run_key, ok=True)
+    payload = _serialise(report)
 
     body_bytes = payload.encode("utf-8")
     r2.put_object(
@@ -139,7 +103,35 @@ def publish(
     return run_key
 
 
-# ── Serialisation ──────────────────────────────────────────────────────────
+def write_local_fallback(
+    report: RunReport,
+    cfg: "Settings",
+    reason: str,
+) -> str:
+    """Write a local fallback report after a failed publish attempt."""
+    fallback_path = _local_report_path(report, cfg, prefix="fallback")
+    report.publish_status = PublishStatus(
+        destination="local_fallback",
+        ok=False,
+        error=reason,
+        fallback_path=str(fallback_path),
+    )
+    _write_text(fallback_path, _serialise(report))
+    logger.error("report_publisher: wrote fallback report to %s", fallback_path)
+    return str(fallback_path)
+
+
+def _local_report_path(report: RunReport, cfg: "Settings", *, prefix: str) -> Path:
+    """Build a local report path containing pipeline and run ID."""
+    safe_pipeline = report.pipeline.replace("/", "-")
+    safe_run_id = report.runId.replace("/", "-")
+    return cfg.report_dir() / f"{prefix}-{safe_pipeline}-{safe_run_id}-report.json"
+
+
+def _write_text(path: Path, payload: str) -> None:
+    """Create parent directories and write UTF-8 JSON payload."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload, encoding="utf-8")
 
 
 def _serialise(report: RunReport) -> str:
@@ -154,6 +146,13 @@ def _serialise(report: RunReport) -> str:
                 "passed": obj.passed,
                 "outputTail": obj.output_tail,
             }
+        if isinstance(obj, PublishStatus):
+            data: dict[str, Any] = {"destination": obj.destination, "ok": obj.ok}
+            if obj.error is not None:
+                data["error"] = obj.error
+            if obj.fallback_path is not None:
+                data["fallbackPath"] = obj.fallback_path
+            return data
         if isinstance(obj, RunReport):
             data = {
                 "runId": obj.runId,
@@ -165,6 +164,7 @@ def _serialise(report: RunReport) -> str:
                 "tasks": [_convert(t) for t in obj.tasks],
                 "validation": _convert(obj.validation) if obj.validation else None,
                 "commits": [_convert(c) for c in obj.commits],
+                "publishStatus": _convert(obj.publish_status),
             }
             if obj.error is not None:
                 data["error"] = obj.error

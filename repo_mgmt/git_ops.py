@@ -1,4 +1,9 @@
-"""Legacy git operations kept safe without importing GitPython."""
+"""Deprecated compatibility Git helpers.
+
+Canonical live-write Git safety now lives in repo_mgmt.git_manager. This module
+is retained only for legacy callers and tests; new production code must not use
+its broad revert helper.
+"""
 
 from __future__ import annotations
 import subprocess

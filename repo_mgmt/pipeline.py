@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from repo_mgmt import audit_reader, issue_normaliser, task_ranker, update_executor
-from repo_mgmt.config import PipelineId, Settings
+from repo_mgmt.config import PipelineId, Settings, configured_worker_count
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.report_publisher import (
@@ -19,6 +19,7 @@ from repo_mgmt.report_publisher import (
     ValidationSummary,
     make_run_id,
     publish,
+    write_local_fallback,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,8 @@ def _summary(tasks: list[dict[str, Any]], snapshots: int) -> dict[str, int]:
         "validationFailed": sum(
             1
             for task in tasks
-            if task.get("status") in {"validation_failed", "reverted"}
+            if task.get("validation_passed") is False
+            or task.get("status") in {"validation_failed", "reverted"}
         ),
         "futureGuidance": sum(
             1
@@ -94,6 +96,91 @@ def _commits(tasks: list[dict[str, Any]]) -> list[CommitInfo]:
         for task in tasks
         if task.get("commit_sha")
     ]
+
+
+def _mark_code_fixes_manual(
+    issues: list[dict[str, Any]],
+    reason: str,
+) -> list[dict[str, Any]]:
+    """Return selected issues with code fixes converted to manual review."""
+    tasks: list[dict[str, Any]] = []
+    for issue in issues:
+        task = dict(issue)
+        if task.get("classification") == "code_fix":
+            task["status"] = "manual_review"
+            task["error"] = reason
+        tasks.append(task)
+    return tasks
+
+
+def _make_report(
+    *,
+    run_id: str,
+    pipeline_id: PipelineId,
+    target_repo: Path,
+    branch: str,
+    dry_run: bool,
+    tasks: list[dict[str, Any]],
+    snapshots: int,
+    cfg: Settings,
+    error: str | None,
+) -> RunReport:
+    """Construct a RunReport from current pipeline state."""
+    return RunReport(
+        runId=run_id,
+        pipeline=pipeline_id,
+        targetRepo=str(target_repo),
+        branch=branch,
+        dryRun=dry_run,
+        summary=_summary(tasks, snapshots),
+        tasks=tasks,
+        validation=_validation_summary(tasks, cfg, pipeline_id),
+        commits=_commits(tasks),
+        error=error,
+    )
+
+
+def _publish_report(report: RunReport, cfg: Settings, r2: Any) -> None:
+    """Publish a report and always leave a local fallback on publish failure."""
+    try:
+        publish(report, cfg, r2)
+    except Exception as exc:
+        logger.exception(
+            "pipeline: failed to publish report pipeline=%s runId=%s",
+            report.pipeline,
+            report.runId,
+        )
+        reason = str(exc)
+        report.error = (report.error + "; " if report.error else "") + (
+            f"report publish failed: {reason}"
+        )
+        try:
+            write_local_fallback(report, cfg, reason)
+        except Exception:
+            logger.exception(
+                "pipeline: failed to write local fallback report pipeline=%s runId=%s",
+                report.pipeline,
+                report.runId,
+            )
+
+
+def _preflight_live_repo(target_repo: Path, cfg: Settings) -> None:
+    """Fail closed if deployment or repo state is unsafe for live mutation."""
+    if cfg.rms_single_worker_mode and configured_worker_count() != 1:
+        raise RuntimeError(
+            "live mode requires a single worker because RAMS uses in-process locks"
+        )
+    if not cfg.live_write_permitted:
+        raise RuntimeError(
+            "live mode is not permitted; require RMS_DRY_RUN=false and "
+            "RMS_LIVE_WRITE_ENABLED=true"
+        )
+    if not target_repo.exists() or not target_repo.is_dir():
+        raise RuntimeError(f"target repo path is missing or invalid: {target_repo}")
+    git_mgr = GitManager(target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled)
+    if not git_mgr.is_git_repo():
+        raise RuntimeError(f"target repo is not a Git worktree: {target_repo}")
+    git_mgr.assert_clean_worktree()
 
 
 class RmsPipeline:
@@ -219,16 +306,15 @@ async def _run_async(
     lock = _pipeline_locks[pipeline_id]
 
     if not lock.acquire(False):
-        return RunReport(
-            runId=actual_run_id,
-            pipeline=pipeline_id,
-            targetRepo=str(target_repo),
+        return _make_report(
+            run_id=actual_run_id,
+            pipeline_id=pipeline_id,
+            target_repo=target_repo,
             branch=branch,
-            dryRun=dry_run,
-            summary=_summary([], 0),
+            dry_run=dry_run,
             tasks=[],
-            validation=None,
-            commits=[],
+            snapshots=0,
+            cfg=cfg,
             error=f"pipeline {pipeline_id!r} already running",
         )
 
@@ -242,18 +328,14 @@ async def _run_async(
         git_mgr = None
         if not dry_run and queues.code_fix:
             try:
+                _preflight_live_repo(target_repo, cfg)
                 git_mgr = GitManager(
                     target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled
                 )
                 git_mgr.create_branch(branch)
             except Exception as exc:
-                error = f"Git branch setup failed; live code_fix writes skipped: {exc}"
-                for issue in selected:
-                    task = dict(issue)
-                    if task.get("classification") == "code_fix":
-                        task["status"] = "manual_review"
-                        task["error"] = error
-                    tasks.append(task)
+                error = f"Git/live preflight failed; live code_fix writes skipped: {exc}"
+                tasks = _mark_code_fixes_manual(selected, error)
                 selected = []
 
         for issue in selected:
@@ -272,42 +354,32 @@ async def _run_async(
             else:
                 tasks.append(dict(issue))
 
-        report = RunReport(
-            runId=actual_run_id,
-            pipeline=pipeline_id,
-            targetRepo=str(target_repo),
+        report = _make_report(
+            run_id=actual_run_id,
+            pipeline_id=pipeline_id,
+            target_repo=target_repo,
             branch=branch,
-            dryRun=dry_run,
-            summary=_summary(tasks, snapshots),
+            dry_run=dry_run,
             tasks=tasks,
-            validation=_validation_summary(tasks, cfg, pipeline_id),
-            commits=_commits(tasks),
+            snapshots=snapshots,
+            cfg=cfg,
             error=error,
         )
-        try:
-            publish(report, cfg, r2)
-        except Exception as exc:
-            report.error = (report.error + "; " if report.error else "") + (
-                f"report publish failed: {exc}"
-            )
+        _publish_report(report, cfg, r2)
         return report
     except Exception as exc:
-        report = RunReport(
-            runId=actual_run_id,
-            pipeline=pipeline_id,
-            targetRepo=str(target_repo),
+        report = _make_report(
+            run_id=actual_run_id,
+            pipeline_id=pipeline_id,
+            target_repo=target_repo,
             branch=branch,
-            dryRun=dry_run,
-            summary=_summary(tasks, snapshots),
+            dry_run=dry_run,
             tasks=tasks,
-            validation=_validation_summary(tasks, cfg, pipeline_id),
-            commits=_commits(tasks),
+            snapshots=snapshots,
+            cfg=cfg,
             error=str(exc),
         )
-        try:
-            publish(report, cfg, r2)
-        except Exception:
-            pass
+        _publish_report(report, cfg, r2)
         return report
     finally:
         lock.release()
