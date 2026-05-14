@@ -67,6 +67,12 @@ class TestHealthEndpoint:
             assert pid in data["pipelines"]
 
 
+    def test_root_returns_200_for_platform_health_probe(self, client: TestClient) -> None:
+        response = client.get("/")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+
 class TestRunEndpoints:
     @pytest.mark.parametrize(
         "endpoint,pipeline_id",
