@@ -215,7 +215,8 @@ RMS_WEBSITE_REPO_PATH=/tmp/rams-repos/website
 RMS_AIMS_REPO_URL=<aims-repo-git-url>
 RMS_AIMS_REPO_BRANCH=main
 RMS_AIMS_REPO_PATH=/tmp/rams-repos/aims
-GITHUB_TOKEN=<token-with-read-access-if-private>
+RMS_GITHUB_TOKEN=<token-with-read-access-if-private>
+# GITHUB_TOKEN is also supported as a backwards-compatible alias
 ```
 
 The bootstrapper clones or refreshes the two target repos on the first rebuild trigger. It does not run during `/health`.
@@ -284,7 +285,7 @@ docker run --rm rams-production-check npm --version
 - Set real R2 and OpenRouter values
 - Set `RMS_WEBSITE_REPO_PATH` for `seo-aeo-geo` and `mobile-ux`
 - Set `RMS_AIMS_REPO_PATH` for `on-brand`
-- For Koyeb, set `RMS_REPO_BOOTSTRAP_ENABLED=true`, `RMS_WEBSITE_REPO_URL`, `RMS_AIMS_REPO_URL`, and `GITHUB_TOKEN` when repos are private
+- For Koyeb, set `RMS_REPO_BOOTSTRAP_ENABLED=true`, `RMS_WEBSITE_REPO_URL`, `RMS_AIMS_REPO_URL`, and `RMS_GITHUB_TOKEN` when repos are private. `GITHUB_TOKEN` remains supported as a backwards-compatible alias
 - Ensure target repo paths exist in the container, or let the bootstrapper clone them on the first rebuild trigger
 
 Do not treat a green `/health` as deployment readiness. The little green lamp only proves the process is alive; `/readiness` is where the grown-up machinery reports its actual state. 🛠️
