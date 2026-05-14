@@ -25,7 +25,7 @@ _AUDIT_KEY_MAP: dict[str, str] = {
 }
 
 
-def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict:  # type: ignore[type-arg]
+def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[str, object]:
     """
     Read the latest audit JSON for *pipeline_id* from R2.
 

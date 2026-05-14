@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import PrivateAttr, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -89,6 +89,10 @@ class Settings(BaseSettings):
         " && python3 scripts/sync_redirects.py --check"
         " && python3 scripts/check_crawlers.py"
     )
+
+    # ── API authentication (optional) ──────────────────────────────────────
+    # Absence means auth is disabled; a startup WARNING is logged in that case.
+    rms_api_key: str | None = Field(default=None)
 
     # ── Behaviour defaults ─────────────────────────────────────────────────
     rms_dry_run: bool = True  # SAFE DEFAULT — never omit

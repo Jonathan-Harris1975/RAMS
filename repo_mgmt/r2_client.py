@@ -88,7 +88,8 @@ class R2Client:
         """
         try:
             response = self._client.get_object(Bucket=bucket, Key=key)
-            return response["Body"].read()  # type: ignore[no-any-return]
+            body: bytes = response["Body"].read()
+            return body
         except ClientError as exc:
             raise R2Error(
                 f"R2 get_object failed for bucket={bucket!r} key={key!r}: {exc}"

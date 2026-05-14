@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
-from fastapi import BackgroundTasks, Body, FastAPI, Path
+from fastapi import BackgroundTasks, Body, FastAPI, Header, Path
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -34,6 +34,16 @@ app = FastAPI(
     description="Autonomous repository audit and patch pipeline service.",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+async def _startup_checks() -> None:
+    """Log a warning when API key authentication is not configured."""
+    cfg = _get_cfg()
+    if cfg is None or not cfg.rms_api_key:
+        logger.warning(
+            "rms-api: RMS_API_KEY is not set — trigger endpoints are unauthenticated"
+        )
 
 PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
 _PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
@@ -380,8 +390,23 @@ async def trigger_run(
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     background_tasks: BackgroundTasks,
     body: RunRequest = Body(default=RunRequest()),
+    authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Trigger a pipeline run and return the single source-of-truth run ID."""
+    # ── Optional Bearer-token authentication ──────────────────────────────
+    cfg_for_auth = _get_cfg()
+    expected_key = cfg_for_auth.rms_api_key if cfg_for_auth is not None else None
+    if expected_key:
+        token: str | None = None
+        if authorization and authorization.lower().startswith("bearer "):
+            token = authorization[len("bearer "):].strip()
+        if not token or token != expected_key:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "unauthorized"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     typed_pipeline_id: PipelineId = pipeline_id
     if _running.get(typed_pipeline_id):
         return JSONResponse(
@@ -407,6 +432,7 @@ async def trigger_run(
     return JSONResponse(
         status_code=202,
         content={"runId": run_id, "pipeline": typed_pipeline_id, "dryRun": dry_run},
+        headers={"X-Run-Id": run_id},
     )
 
 
