@@ -73,3 +73,15 @@ def test_live_r2_failure_can_write_fallback(settings, mock_r2, tmp_path):
     assert data["publishStatus"]["ok"] is False
     assert data["publishStatus"]["error"] == "r2 failed"
     assert data["publishStatus"]["fallbackPath"] == dest
+
+
+def test_dry_run_uses_configured_report_dir(settings, mock_r2, tmp_path):
+    settings.rms_report_dir = str(tmp_path)
+    dest = publish(_report(True), settings, mock_r2)
+    assert Path(dest).parent == tmp_path
+    assert Path(dest).name.startswith("dry-run-on-brand-")
+
+
+def test_dry_run_default_report_dir_is_container_safe(settings, mock_r2):
+    dest = publish(_report(True), settings, mock_r2)
+    assert str(dest).startswith("/tmp/rams-reports/")

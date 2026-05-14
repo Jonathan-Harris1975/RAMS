@@ -16,6 +16,10 @@ from repo_mgmt.patch_protocol import PathTraversalError
 
 
 def _patch(changes=None, reason: str | None = "No bounded patch is safe"):
+    if changes is not None:
+        for change in changes:
+            if isinstance(change, dict):
+                change.setdefault("rationale", "test patch")
     doc = {
         "patchProtocol": "AnchorPatch/v1",
         "changes": changes if changes is not None else [],

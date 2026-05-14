@@ -17,7 +17,13 @@ def test_root_returns_public_health_payload() -> None:
     with TestClient(app) as client:
         response = client.get("/")
     assert response.status_code == 200
-    data = response.json()
-    assert "status" in data
-    assert "pipelines" in data
-    assert "dependencies" in data
+    assert response.json()["status"] == "ok"
+    assert "pipelines" in response.json()
+    assert "dependencies" not in response.json()
+
+
+def test_readiness_route_returns_dependency_payload() -> None:
+    with TestClient(app) as client:
+        response = client.get("/readiness")
+    assert response.status_code == 200
+    assert "dependencies" in response.json()

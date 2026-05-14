@@ -81,3 +81,16 @@ def test_task_restore_preserves_unrelated_untracked_file(tmp_path: Path) -> None
     gm.restore_task_state(snapshot)
     assert (tmp_path / "README.md").read_text(encoding="utf-8") == "hello\n"
     assert (tmp_path / "unrelated.txt").read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_git_manager_timeout_raises_git_manager_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Git subprocess timeouts are converted into safe GitManagerError failures."""
+    from repo_mgmt.git_manager import GitManagerError
+
+    def timeout_run(*args: object, **kwargs: object) -> object:
+        raise subprocess.TimeoutExpired(cmd=["git", "status"], timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", timeout_run)
+    gm = GitManager(tmp_path)
+    with pytest.raises(GitManagerError, match="timed out"):
+        gm.status_porcelain()

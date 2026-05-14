@@ -105,7 +105,7 @@ def install_valid_api(
     return mock_r2
 
 
-def test_health_reports_dependency_readiness(
+def test_health_reports_exact_contract(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
     settings = make_settings(repo_dirs)
@@ -114,8 +114,28 @@ def test_health_reports_dependency_readiness(
         response = client.get("/health")
     data = response.json()
     assert response.status_code == 200
-    assert data["status"] == "ok"
-    assert data["pipelines"]["on-brand"] == "idle"
+    assert data == {
+        "status": "ok",
+        "pipelines": {
+            "seo-aeo-geo": "idle",
+            "mobile-ux": "idle",
+            "on-brand": "idle",
+        },
+    }
+
+
+
+def test_readiness_reports_dependency_readiness(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    """Readiness exposes dependency detail moved out of /health."""
+    settings = make_settings(repo_dirs)
+    install_valid_api(monkeypatch, settings)
+    with TestClient(api_mod.app) as client:
+        response = client.get("/readiness")
+    data = response.json()
+    assert response.status_code == 200
+    assert data["status"] == "ready"
     assert data["dependencies"] == {
         "config_loaded": True,
         "r2_ready": True,
@@ -126,12 +146,12 @@ def test_health_reports_dependency_readiness(
     }
 
 
-def test_health_degraded_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readiness_degraded_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         api_mod, "load_settings", lambda: (_ for _ in ()).throw(RuntimeError("missing"))
     )
     with TestClient(api_mod.app) as client:
-        response = client.get("/health")
+        response = client.get("/readiness")
     data = response.json()
     assert response.status_code == 200
     assert data["status"] == "degraded"
@@ -241,13 +261,13 @@ def test_body_cannot_override_dry_run_without_live_gate(
     assert fake_pipeline.calls == []
 
 
-def test_single_worker_limitation_visible_in_health(
+def test_single_worker_limitation_visible_in_readiness(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
     settings = make_settings(repo_dirs)
     install_valid_api(monkeypatch, settings)
     monkeypatch.setenv("WEB_CONCURRENCY", "2")
     with TestClient(api_mod.app) as client:
-        response = client.get("/health")
+        response = client.get("/readiness")
     assert response.json()["status"] == "degraded"
     assert response.json()["dependencies"]["single_worker_mode"] is False

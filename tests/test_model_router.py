@@ -70,3 +70,31 @@ def test_non_retryable_4xx_does_not_fallback(
         router.complete("prompt")
     assert exc_info.value.status_code == status
     assert calls == [settings.openrouter_primary_model]
+
+@pytest.mark.asyncio
+async def test_async_complete_uses_async_client_and_fallback(settings, monkeypatch) -> None:
+    calls: list[str] = []
+    responses = [_response(503, "unavailable"), _success("async-fallback")]
+
+    class FakeAsyncClient:
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(self, url: str, headers: dict[str, str], json: dict[str, object]) -> httpx.Response:
+            calls.append(str(json["model"]))
+            assert headers["HTTP-Referer"] == "repo-management-suite"
+            return responses.pop(0)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    router = ModelRouter(settings)
+    assert await router.complete_async("prompt") == "async-fallback"
+    assert calls == [
+        settings.openrouter_primary_model,
+        settings.openrouter_secondary_model,
+    ]
