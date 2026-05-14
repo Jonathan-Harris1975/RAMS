@@ -74,15 +74,22 @@ A fake R2 endpoint or invalid credentials must leave `r2_verified=false` and `st
 
 ## Trigger request
 
+When `RMS_API_KEY` is set, all `/rebuild/*` endpoints require a Bearer token:
+
 ```bash
 curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
+  -H "Authorization: Bearer $RMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"dry_run":true}'
 ```
 
+If `RMS_API_KEY` is not configured, the endpoints are unauthenticated and RAMS logs a startup `WARNING`.
+
 `dry_run` is optional. If omitted, RAMS uses `RMS_DRY_RUN`.
 
 ### `202 Accepted`
+
+The response body and the `X-Run-Id` response header both carry the run ID.
 
 ```json
 {
@@ -90,6 +97,16 @@ curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
   "pipeline": "mobile-ux",
   "dryRun": true
 }
+```
+
+`X-Run-Id: 2026-05-05T03-00-00Z` is also present as a response header so callers can read the run ID without parsing JSON.
+
+### `401 Unauthorized`
+
+Returned when `RMS_API_KEY` is configured and the request carries a missing or incorrect Bearer token.
+
+```json
+{"error": "unauthorized"}
 ```
 
 ### `409 Conflict`
@@ -227,6 +244,7 @@ docker run --rm rams-production-check npm --version
 - Keep `RMS_LIVE_WRITE_ENABLED=false`
 - Keep `RMS_PUSH_ENABLED=false`
 - Keep `RMS_CREATE_PR=false`
+- Set `RMS_API_KEY` to a strong random secret in production to enable trigger-endpoint authentication
 - Set real R2, OpenRouter, `RMS_SEO_REPO_PATH`, and `RMS_WEBSITE_REPO_PATH`
 - Ensure target repo paths exist in the container or attached runtime filesystem
 
