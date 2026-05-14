@@ -25,6 +25,8 @@ def reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
     api_mod._pipelines.clear()
     for pipeline_id in api_mod._running:
         api_mod._running[pipeline_id] = False
+    api_mod._bootstrap_attempted = False
+    api_mod._bootstrap_results = []
     monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
     monkeypatch.delenv("UVICORN_WORKERS", raising=False)
     monkeypatch.delenv("GUNICORN_WORKERS", raising=False)
@@ -33,16 +35,16 @@ def reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def repo_dirs(tmp_path: Path) -> tuple[Path, Path]:
     """Create fake target repo directories for API admission."""
-    seo = tmp_path / "seo"
     website = tmp_path / "website"
-    seo.mkdir()
+    aims = tmp_path / "aims"
     website.mkdir()
-    return seo, website
+    aims.mkdir()
+    return website, aims
 
 
 def make_settings(repo_dirs: tuple[Path, Path], **overrides: str) -> Settings:
     """Build Settings with concrete repo paths and optional env overrides."""
-    seo, website = repo_dirs
+    website, aims = repo_dirs
     env: dict[str, str] = {
         "R2_ENDPOINT": "https://test.r2.cloudflarestorage.com",
         "R2_ACCESS_KEY_ID": "test-key-id",
@@ -52,8 +54,8 @@ def make_settings(repo_dirs: tuple[Path, Path], **overrides: str) -> Settings:
         "OPENROUTER_PRIMARY_MODEL": "primary/model",
         "OPENROUTER_SECONDARY_MODEL": "secondary/model",
         "OPENROUTER_TRIAGE_MODEL": "triage/model",
-        "RMS_SEO_REPO_PATH": str(seo),
         "RMS_WEBSITE_REPO_PATH": str(website),
+        "RMS_AIMS_REPO_PATH": str(aims),
         "RMS_DRY_RUN": "true",
         "RMS_LIVE_WRITE_ENABLED": "false",
     }
@@ -146,8 +148,10 @@ def test_readiness_reports_dependency_readiness(
     assert deps["r2_configured"] is True
     assert deps["r2_verified"] is True
     assert deps["model_router_ready"] is True
-    assert deps["seo_repo_ready"] is True
     assert deps["website_repo_ready"] is True
+    assert deps["aims_repo_ready"] is True
+    assert deps["pipeline_repo_paths"]["seo-aeo-geo"].endswith("website")
+    assert deps["pipeline_repo_paths"]["on-brand"].endswith("aims")
     assert deps["validation_runtime_ready"] is True
     assert deps["single_worker_mode"] is True
     assert deps["runtime"]["node"].startswith("v")
@@ -261,9 +265,9 @@ def test_unverified_r2_returns_503_and_readiness_degraded(
 def test_invalid_repo_path_returns_503_and_schedules_no_background(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
-    seo, website = repo_dirs
-    website.rmdir()
-    settings = make_settings((seo, website))
+    website, aims = repo_dirs
+    aims.rmdir()
+    settings = make_settings((website, aims))
     fake_pipeline = FakePipeline()
     install_valid_api(monkeypatch, settings, fake_pipeline)
     with TestClient(api_mod.app) as client:

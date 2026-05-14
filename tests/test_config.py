@@ -24,8 +24,8 @@ class TestSettingsValidation:
             "OPENROUTER_PRIMARY_MODEL": "m1",
             "OPENROUTER_SECONDARY_MODEL": "m2",
             "OPENROUTER_TRIAGE_MODEL": "m3",
-            "RMS_SEO_REPO_PATH": "/tmp/a",
             "RMS_WEBSITE_REPO_PATH": "/tmp/b",
+            "RMS_AIMS_REPO_PATH": "/tmp/a",
         }
         with patch.dict(os.environ, env, clear=True):
             cfg = Settings()
@@ -46,31 +46,30 @@ class TestSettingsValidation:
                 Settings()
         assert "R2_ENDPOINT" in str(exc_info.value) or "Missing" in str(exc_info.value)
 
-    def test_validation_commands_for_seo(self, settings: Settings) -> None:
+    def test_validation_commands_for_seo_uses_website_validation(self, settings: Settings) -> None:
         cmds = settings.validation_commands_for("seo-aeo-geo")
         assert isinstance(cmds, list)
-        assert len(cmds) >= 1
-        assert all(isinstance(c, str) for c in cmds)
+        assert any("inject_partials" in c for c in cmds)
 
     def test_validation_commands_for_website(self, settings: Settings) -> None:
         cmds = settings.validation_commands_for("mobile-ux")
         assert isinstance(cmds, list)
         assert any("inject_partials" in c for c in cmds)
 
-    def test_repo_path_for_seo(self, settings: Settings) -> None:
-        from pathlib import Path
-
-        p = settings.repo_path_for("seo-aeo-geo")
-        assert isinstance(p, Path)
-        assert str(p) == "/tmp/fake-seo-repo"
-
     def test_repo_path_for_website_pipelines(self, settings: Settings) -> None:
         from pathlib import Path
 
-        for pid in ("mobile-ux", "on-brand"):
+        for pid in ("seo-aeo-geo", "mobile-ux"):
             p = settings.repo_path_for(pid)  # type: ignore[arg-type]
             assert isinstance(p, Path)
             assert str(p) == "/tmp/fake-website-repo"
+
+    def test_repo_path_for_on_brand_uses_aims(self, settings: Settings) -> None:
+        from pathlib import Path
+
+        p = settings.repo_path_for("on-brand")
+        assert isinstance(p, Path)
+        assert str(p) == "/tmp/fake-aims-repo"
 
 
 class TestLoadSettings:
@@ -89,8 +88,8 @@ def _complete_env(**overrides: str) -> dict[str, str]:
         "OPENROUTER_PRIMARY_MODEL": "m1",
         "OPENROUTER_SECONDARY_MODEL": "m2",
         "OPENROUTER_TRIAGE_MODEL": "m3",
-        "RMS_SEO_REPO_PATH": "/tmp/a",
         "RMS_WEBSITE_REPO_PATH": "/tmp/b",
+        "RMS_AIMS_REPO_PATH": "/tmp/a",
     }
     env.update(overrides)
     return env
