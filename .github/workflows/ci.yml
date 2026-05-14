@@ -37,12 +37,12 @@ jobs:
           OPENROUTER_PRIMARY_MODEL: "anthropic/claude-3-5-sonnet"
           OPENROUTER_SECONDARY_MODEL: "anthropic/claude-3-haiku"
           OPENROUTER_TRIAGE_MODEL: "openai/gpt-4o-mini"
-          RMS_SEO_REPO_PATH: "/tmp/fake-seo"
           RMS_WEBSITE_REPO_PATH: "/tmp/fake-website"
+          RMS_AIMS_REPO_PATH: "/tmp/fake-aims"
           RMS_DRY_RUN: "true"
           RMS_LIVE_WRITE_ENABLED: "false"
         run: |
-          mkdir -p /tmp/fake-seo /tmp/fake-website
+          mkdir -p /tmp/fake-website /tmp/fake-aims
           python -V
           python -m compileall -q repo_mgmt tests
           python -m pytest tests/ -q --tb=short
@@ -89,7 +89,7 @@ jobs:
             -e OPENROUTER_PRIMARY_MODEL='anthropic/claude-3-5-sonnet' \
             -e OPENROUTER_SECONDARY_MODEL='anthropic/claude-3-haiku' \
             -e OPENROUTER_TRIAGE_MODEL='openai/gpt-4o-mini' \
-            -e RMS_SEO_REPO_PATH='/tmp/fake-seo' \
+            -e RMS_AIMS_REPO_PATH='/tmp/fake-aims' \
             -e RMS_WEBSITE_REPO_PATH='/tmp/fake-website' \
             -e RMS_DRY_RUN='true' \
             -e RMS_LIVE_WRITE_ENABLED='false' \
