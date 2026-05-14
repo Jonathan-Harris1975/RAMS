@@ -27,13 +27,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install pytest pytest-asyncio httpx
 
       - name: Run tests
         env:
-          # Minimal env so Settings() validation passes in tests.
-          # The directories are created below so health/admission tests see
-          # dependency readiness rather than phantom missing paths.
           R2_ENDPOINT: "https://test.r2.cloudflarestorage.com"
           R2_ACCESS_KEY_ID: "test-key"
           R2_SECRET_ACCESS_KEY: "test-secret"
@@ -47,31 +43,78 @@ jobs:
           RMS_LIVE_WRITE_ENABLED: "false"
         run: |
           mkdir -p /tmp/fake-seo /tmp/fake-website
+          python -V
           python -m compileall -q repo_mgmt tests
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ -q --tb=short
 
   lint:
-    name: Lint
+    name: Lint and type check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
       - name: Install linters
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install ruff mypy
       - name: Ruff check
-        run: ruff check .
+        run: python -m ruff check .
       - name: Mypy
-        run: mypy repo_mgmt/
+        run: python -m mypy repo_mgmt/ --no-incremental --show-error-codes
 
   docker:
-    name: Docker build
+    name: Docker runtime and API smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image
-        run: docker build --target runtime -t rms:ci .
+        run: docker build --target runtime -t rams:ci .
+      - name: Verify runtime binaries
+        run: |
+          docker run --rm rams:ci python --version
+          docker run --rm rams:ci git --version
+          docker run --rm rams:ci node --version
+          docker run --rm rams:ci npm --version
+          docker run --rm rams:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
+      - name: Boot API and probe health/readiness shape
+        run: |
+          docker run -d --name rams-ci-api -p 8000:8000 \
+            -e R2_ENDPOINT='https://test.r2.cloudflarestorage.com' \
+            -e R2_ACCESS_KEY_ID='test-key' \
+            -e R2_SECRET_ACCESS_KEY='test-secret' \
+            -e OPENROUTER_API_KEY='test-or-key' \
+            -e OPENROUTER_PRIMARY_MODEL='anthropic/claude-3-5-sonnet' \
+            -e OPENROUTER_SECONDARY_MODEL='anthropic/claude-3-haiku' \
+            -e OPENROUTER_TRIAGE_MODEL='openai/gpt-4o-mini' \
+            -e RMS_SEO_REPO_PATH='/tmp/fake-seo' \
+            -e RMS_WEBSITE_REPO_PATH='/tmp/fake-website' \
+            -e RMS_DRY_RUN='true' \
+            -e RMS_LIVE_WRITE_ENABLED='false' \
+            -e RMS_PUSH_ENABLED='false' \
+            -e RMS_CREATE_PR='false' \
+            rams:ci
+          trap 'docker logs rams-ci-api || true; docker rm -f rams-ci-api || true' EXIT
+          for i in {1..30}; do
+            curl -fsS http://127.0.0.1:8000/health && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/health | tee /tmp/health.json
+          curl -fsS http://127.0.0.1:8000/readiness | tee /tmp/readiness.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          health = json.loads(Path('/tmp/health.json').read_text())
+          readiness = json.loads(Path('/tmp/readiness.json').read_text())
+          assert health == {
+              'status': 'ok',
+              'pipelines': {'seo-aeo-geo': 'idle', 'mobile-ux': 'idle', 'on-brand': 'idle'},
+          }
+          deps = readiness['dependencies']
+          assert deps['r2_configured'] is True
+          assert deps['r2_verified'] is False
+          assert deps['validation_runtime_ready'] is True
+          assert readiness['status'] == 'degraded'
+          PY
