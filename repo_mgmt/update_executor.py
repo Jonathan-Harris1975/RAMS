@@ -75,7 +75,7 @@ async def run_task(
             return task
 
         context_builder.load_context(task.get("affectedPaths", []), target_repo)
-        patch_doc = patch_planner.plan(
+        patch_doc = await patch_planner.plan_async(
             task, target_repo, pipeline_id, cfg, model_router
         )
         validate_patch(patch_doc)

@@ -35,6 +35,7 @@ _PIPELINES: tuple[PipelineId, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
 
 
 def _validate_pipeline(value: str) -> str:
+    """Validate a CLI pipeline argument against the fixed pipeline IDs."""
     if value not in _PIPELINES:
         raise typer.BadParameter(
             f"Unknown pipeline {value!r}. Valid: {', '.join(_PIPELINES)}"

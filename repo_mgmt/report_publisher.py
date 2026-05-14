@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
+from repo_mgmt.schemas import RunReportModel
+
 if TYPE_CHECKING:
     from repo_mgmt.config import Settings
     from repo_mgmt.r2_client import R2Client
@@ -135,44 +139,50 @@ def _write_text(path: Path, payload: str) -> None:
 
 
 def _serialise(report: RunReport) -> str:
-    """Convert *report* to canonical camelCase JSON."""
+    """Convert *report* to validated canonical camelCase JSON."""
+    data = _convert(report)
+    try:
+        RunReportModel.model_validate(data)
+    except ValidationError as exc:
+        raise ValueError(f"RunReport failed strict schema validation: {exc}") from exc
+    return json.dumps(data, indent=2)
 
-    def _convert(obj: Any) -> Any:
-        if isinstance(obj, CommitInfo):
-            return {"sha": obj.sha, "message": obj.message, "files": obj.files}
-        if isinstance(obj, ValidationSummary):
-            return {
-                "commands": obj.commands,
-                "passed": obj.passed,
-                "outputTail": obj.output_tail,
-            }
-        if isinstance(obj, PublishStatus):
-            data: dict[str, Any] = {"destination": obj.destination, "ok": obj.ok}
-            if obj.error is not None:
-                data["error"] = obj.error
-            if obj.fallback_path is not None:
-                data["fallbackPath"] = obj.fallback_path
-            return data
-        if isinstance(obj, RunReport):
-            data = {
-                "runId": obj.runId,
-                "pipeline": obj.pipeline,
-                "targetRepo": obj.targetRepo,
-                "branch": obj.branch,
-                "dryRun": obj.dryRun,
-                "summary": obj.summary,
-                "tasks": [_convert(t) for t in obj.tasks],
-                "validation": _convert(obj.validation) if obj.validation else None,
-                "commits": [_convert(c) for c in obj.commits],
-                "publishStatus": _convert(obj.publish_status),
-            }
-            if obj.error is not None:
-                data["error"] = obj.error
-            return data
-        if isinstance(obj, dict):
-            return {k: _convert(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_convert(i) for i in obj]
-        return obj
 
-    return json.dumps(_convert(report), indent=2)
+def _convert(obj: Any) -> Any:
+    """Convert report dataclasses and nested values to JSON-ready objects."""
+    if isinstance(obj, CommitInfo):
+        return {"sha": obj.sha, "message": obj.message, "files": obj.files}
+    if isinstance(obj, ValidationSummary):
+        return {
+            "commands": obj.commands,
+            "passed": obj.passed,
+            "outputTail": obj.output_tail,
+        }
+    if isinstance(obj, PublishStatus):
+        data: dict[str, Any] = {"destination": obj.destination, "ok": obj.ok}
+        if obj.error is not None:
+            data["error"] = obj.error
+        if obj.fallback_path is not None:
+            data["fallbackPath"] = obj.fallback_path
+        return data
+    if isinstance(obj, RunReport):
+        data = {
+            "runId": obj.runId,
+            "pipeline": obj.pipeline,
+            "targetRepo": obj.targetRepo,
+            "branch": obj.branch,
+            "dryRun": obj.dryRun,
+            "summary": obj.summary,
+            "tasks": [_convert(task) for task in obj.tasks],
+            "validation": _convert(obj.validation) if obj.validation else None,
+            "commits": [_convert(commit) for commit in obj.commits],
+            "publishStatus": _convert(obj.publish_status),
+        }
+        if obj.error is not None:
+            data["error"] = obj.error
+        return data
+    if isinstance(obj, dict):
+        return {str(key): _convert(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_convert(item) for item in obj]
+    return obj

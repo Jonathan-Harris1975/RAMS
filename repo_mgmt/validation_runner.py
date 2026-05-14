@@ -1,6 +1,7 @@
 """Canonical validation runner for RAMS."""
 
 from __future__ import annotations
+
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,11 +9,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from repo_mgmt.config import PipelineId, Settings
+
 DEFAULT_TIMEOUT_SECONDS = 300
 
 
 @dataclass
 class ValidationResult:
+    """Outcome from a sequential validation-command run."""
+
     passed: bool
     commands: list[str] = field(default_factory=list)
     output_tail: str = ""
@@ -21,12 +25,14 @@ class ValidationResult:
 
 
 def _tail_200(text: str) -> str:
+    """Return the final 200 lines from validation output."""
     return "\n".join(text.splitlines()[-200:])
 
 
 def run_commands(
     commands: list[str], cwd: Path, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
 ) -> ValidationResult:
+    """Run validation commands sequentially with a timeout per command."""
     tail = ""
     for cmd in commands:
         try:
@@ -63,6 +69,8 @@ def run(
     dry_run: bool = True,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> ValidationResult:
+    """Run the configured validation commands for one pipeline target repo."""
+    _ = dry_run
     return run_commands(
         cfg.validation_commands_for(pipeline_id),
         cwd=repo_root,

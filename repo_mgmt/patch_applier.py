@@ -70,6 +70,9 @@ def apply(
     try:
         validate_patch(patch_doc)
     except PatchSchemaError as exc:
+        message = str(exc)
+        if "path traversal" in message or "absolute paths" in message:
+            raise PathTraversalError(message) from exc
         raise PatchApplyError(f"Invalid patch document: {exc}") from exc
 
     protected = PROTECTED_PATHS.get(pipeline_id, frozenset())

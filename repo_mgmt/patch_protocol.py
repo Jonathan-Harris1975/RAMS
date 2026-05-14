@@ -11,10 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
+from repo_mgmt.schemas import AnchorPatchModel
+
 
 PROTOCOL_VERSION = "AnchorPatch/v1"
-
-_VALID_OPERATIONS = frozenset(["replace", "insert_after", "delete"])
 
 
 class PathTraversalError(Exception):
@@ -27,14 +29,6 @@ class ProtectedPathError(Exception):
 
 class PatchSchemaError(Exception):
     """Raised when an AnchorPatch/v1 document fails schema validation."""
-
-
-def _require_non_empty_string(change: dict[str, Any], key: str, index: int) -> str:
-    """Return a required non-empty string field or raise PatchSchemaError."""
-    value = change.get(key)
-    if not isinstance(value, str) or not value:
-        raise PatchSchemaError(f"changes[{index}].{key} must be a non-empty string")
-    return value
 
 
 def validate_patch(doc: Any) -> dict[str, Any]:
@@ -54,49 +48,14 @@ def validate_patch(doc: Any) -> dict[str, Any]:
         raise PatchSchemaError(
             f"AnchorPatch/v1 document must be a JSON object, got {type(doc).__name__}"
         )
-
-    protocol = doc.get("patchProtocol")
-    if protocol != PROTOCOL_VERSION:
-        raise PatchSchemaError(
-            f"patchProtocol must equal {PROTOCOL_VERSION!r}, got {protocol!r}"
-        )
-
     changes = doc.get("changes")
     if not isinstance(changes, list):
         raise PatchSchemaError("'changes' must be a JSON array")
-    if not changes:
-        reason = doc.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            raise PatchSchemaError(
-                "empty AnchorPatch/v1 changes require a non-empty reason"
-            )
-
-    for index, change in enumerate(changes):
-        if not isinstance(change, dict):
-            raise PatchSchemaError(f"changes[{index}] must be a JSON object")
-
-        file_path = change.get("file")
-        if not isinstance(file_path, str) or not file_path:
-            raise PatchSchemaError(f"changes[{index}].file must be a non-empty string")
-
-        operation = change.get("operation")
-        if operation not in _VALID_OPERATIONS:
-            raise PatchSchemaError(
-                f"changes[{index}].operation must be one of "
-                f"{sorted(_VALID_OPERATIONS)}, got {operation!r}"
-            )
-
-        _require_non_empty_string(change, "anchorBefore", index)
-
-        if operation in ("replace", "insert_after", "delete"):
-            _require_non_empty_string(change, "find", index)
-
-        if operation in ("replace", "insert_after") and "replace" not in change:
-            raise PatchSchemaError(
-                f"changes[{index}].replace is required for operation={operation!r}"
-            )
-
-    return doc
+    try:
+        model = AnchorPatchModel.model_validate(doc)
+    except ValidationError as exc:
+        raise PatchSchemaError(str(exc)) from exc
+    return model.model_dump(exclude_none=True)
 
 
 def is_protected(path: str, protected: frozenset[str]) -> bool:

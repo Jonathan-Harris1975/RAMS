@@ -54,6 +54,7 @@ class AdmissionError(Exception):
     """Raised when an endpoint request cannot be safely admitted."""
 
     def __init__(self, status_code: int, error: str, details: dict[str, object]) -> None:
+        """Initialise an admission error with an HTTP status and JSON details."""
         super().__init__(error)
         self.status_code = status_code
         self.error = error
@@ -141,19 +142,25 @@ def _dependency_details() -> dict[str, object]:
     return deps
 
 
+def _pipeline_states() -> dict[str, str]:
+    """Return exact public idle/running state for every pipeline."""
+    return {
+        pipeline_id: ("running" if _running[pipeline_id] else "idle")
+        for pipeline_id in _running
+    }
+
+
 def _health_payload() -> dict[str, object]:
-    """Build the public health payload shared by / and /health."""
+    """Build the exact /health contract from the RMS specification."""
+    return {"status": "ok", "pipelines": _pipeline_states()}
+
+
+def _readiness_payload() -> dict[str, object]:
+    """Build dependency readiness detail for deployment probes and operators."""
     deps = _dependency_details()
     ready_values = [value for value in deps.values() if isinstance(value, bool)]
-    status = "ok" if ready_values and all(ready_values) else "degraded"
-    return {
-        "status": status,
-        "pipelines": {
-            pipeline_id: ("running" if _running[pipeline_id] else "idle")
-            for pipeline_id in _running
-        },
-        "dependencies": deps,
-    }
+    status = "ready" if ready_values and all(ready_values) else "degraded"
+    return {"status": status, "pipelines": _pipeline_states(), "dependencies": deps}
 
 
 def _get_pipeline(pipeline_id: PipelineId) -> RmsPipeline | None:
@@ -263,14 +270,20 @@ async def _run_pipeline_bg(pipeline_id: PipelineId, dry_run: bool, run_id: str) 
 
 @app.get("/")
 async def root() -> JSONResponse:
-    """Return 200 for platform health probes that target the service root."""
+    """Return the minimal public health contract for root probes."""
     return JSONResponse(status_code=200, content=_health_payload())
 
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    """Return service health, dependency readiness, and per-pipeline run state."""
+    """Return the exact RMS health contract: status plus pipeline states."""
     return JSONResponse(status_code=200, content=_health_payload())
+
+
+@app.get("/readiness")
+async def readiness() -> JSONResponse:
+    """Return dependency readiness details without changing /health."""
+    return JSONResponse(status_code=200, content=_readiness_payload())
 
 
 @app.post("/rebuild/{pipeline_id}/run", status_code=202)

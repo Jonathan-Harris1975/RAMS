@@ -10,6 +10,7 @@ _MAX_FILE_BYTES = 256 * 1024
 
 
 def load_context(affected_paths: list[str], repo_root: Path) -> dict[str, str]:
+    """Read repo-relative file contents while rejecting traversal attempts."""
     real_root = repo_root.resolve()
     out = {}
     for rel in affected_paths:

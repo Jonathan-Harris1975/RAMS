@@ -321,7 +321,9 @@ async def _run_async(
     try:
         audit = audit_reader.read_latest(pipeline_id, r2, cfg.r2_bucket_audits)
         snapshots = 1 if audit else 0
-        issues = issue_normaliser.normalise(audit, pipeline_id, _date(), cfg, router)
+        issues = await asyncio.to_thread(
+            issue_normaliser.normalise, audit, pipeline_id, _date(), cfg, router
+        )
         queues = task_ranker.rank(issues, cfg.rms_max_issues_per_run)
         selected = [*queues.code_fix, *queues.manual_review, *queues.future_guidance]
 

@@ -6,115 +6,186 @@ its broad revert helper.
 """
 
 from __future__ import annotations
+
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 _PROTECTED_BRANCHES = frozenset(["main", "master"])
+_GIT_TIMEOUT_SECONDS = 30
 
 
 class BranchSafetyError(Exception):
-    pass
+    """Raised when a legacy helper is asked to write to main/master."""
 
 
 class GitOpsError(Exception):
-    pass
+    """Raised when a legacy Git subprocess fails or times out."""
+
+
+def _git_env() -> dict[str, str]:
+    """Return an environment that disables interactive Git credential prompts."""
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 
 
 class _CliGit:
-    def __init__(self, root: Path):
+    """Tiny subprocess-backed replacement for the old GitPython-style surface."""
+
+    def __init__(self, root: Path) -> None:
+        """Store the repository root used for all subprocess calls."""
         self.root = Path(root)
 
     def _run(self, *args: str) -> str:
-        p = subprocess.run(
-            ["git", *args],
-            cwd=self.root,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if p.returncode != 0:
-            raise GitOpsError(
-                p.stderr.strip() or p.stdout.strip() or f"git {' '.join(args)} failed"
+        """Run a bounded Git subprocess and return stripped stdout."""
+        try:
+            proc = subprocess.run(
+                ["git", *args],
+                cwd=self.root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=_GIT_TIMEOUT_SECONDS,
+                env=_git_env(),
             )
-        return p.stdout.strip()
+        except subprocess.TimeoutExpired as exc:
+            raise GitOpsError(
+                f"git {' '.join(args)} timed out after {_GIT_TIMEOUT_SECONDS}s"
+            ) from exc
+        if proc.returncode != 0:
+            raise GitOpsError(
+                proc.stderr.strip()
+                or proc.stdout.strip()
+                or f"git {' '.join(args)} failed"
+            )
+        return proc.stdout.strip()
 
     def push(self, *args: str) -> str:
+        """Run git push with bounded timeout handling."""
         return self._run("push", *args)
 
     def reset(self, *args: str) -> str:
+        """Run git reset with bounded timeout handling."""
         return self._run("reset", *args)
 
     def clean(self, *args: str) -> str:
+        """Run git clean with bounded timeout handling."""
         return self._run("clean", *args)
 
     def checkout(self, *args: str) -> str:
+        """Run git checkout with bounded timeout handling."""
         return self._run("checkout", *args)
 
 
 class _CliIndex:
-    def __init__(self, root: Path):
+    """Minimal index facade used by the deprecated compatibility helper."""
+
+    def __init__(self, root: Path) -> None:
+        """Store the repository root used for index operations."""
         self.root = Path(root)
 
     def add(self, paths: list[str]) -> None:
-        if paths:
+        """Stage the supplied paths using a bounded Git subprocess."""
+        if not paths:
+            return
+        try:
             subprocess.run(
                 ["git", "add", "--", *paths],
                 cwd=self.root,
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                timeout=_GIT_TIMEOUT_SECONDS,
+                env=_git_env(),
             )
+        except subprocess.TimeoutExpired as exc:
+            raise GitOpsError(
+                f"git add timed out after {_GIT_TIMEOUT_SECONDS}s"
+            ) from exc
 
     def commit(self, message: str) -> SimpleNamespace:
-        subprocess.run(
-            ["git", "commit", "-m", message],
-            cwd=self.root,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self.root,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-        ).stdout.strip()
+        """Commit staged files and return an object exposing hexsha."""
+        try:
+            subprocess.run(
+                ["git", "commit", "-m", message],
+                cwd=self.root,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=_GIT_TIMEOUT_SECONDS,
+                env=_git_env(),
+            )
+            sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.root,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=_GIT_TIMEOUT_SECONDS,
+                env=_git_env(),
+            ).stdout.strip()
+        except subprocess.TimeoutExpired as exc:
+            raise GitOpsError(
+                f"git commit/rev-parse timed out after {_GIT_TIMEOUT_SECONDS}s"
+            ) from exc
         return SimpleNamespace(hexsha=sha)
 
 
 class _CliRepo:
-    def __init__(self, root: Path):
+    """Minimal repository facade retained for backwards-compatible tests."""
+
+    def __init__(self, root: Path) -> None:
+        """Initialise git and index facades for *root*."""
         self.root = Path(root)
         self.git = _CliGit(root)
         self.index = _CliIndex(root)
 
     @property
     def active_branch(self) -> SimpleNamespace:
-        p = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=self.root,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-        )
-        return SimpleNamespace(name=p.stdout.strip())
+        """Return an object exposing the active branch name."""
+        try:
+            proc = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=self.root,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=_GIT_TIMEOUT_SECONDS,
+                env=_git_env(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GitOpsError(
+                f"git rev-parse timed out after {_GIT_TIMEOUT_SECONDS}s"
+            ) from exc
+        return SimpleNamespace(name=proc.stdout.strip())
 
     @property
     def branches(self) -> list[SimpleNamespace]:
-        p = subprocess.run(
-            ["git", "branch", "--format=%(refname:short)"],
-            cwd=self.root,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-        )
-        return [SimpleNamespace(name=x) for x in p.stdout.splitlines() if x]
+        """Return branch names as SimpleNamespace objects."""
+        try:
+            proc = subprocess.run(
+                ["git", "branch", "--format=%(refname:short)"],
+                cwd=self.root,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=_GIT_TIMEOUT_SECONDS,
+                env=_git_env(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GitOpsError(
+                f"git branch timed out after {_GIT_TIMEOUT_SECONDS}s"
+            ) from exc
+        return [SimpleNamespace(name=line) for line in proc.stdout.splitlines() if line]
 
 
 def ensure_clean_branch(repo_root: Path, branch_name: str) -> _CliRepo:
+    """Return a legacy repo facade after checking out a non-protected branch."""
     if branch_name in _PROTECTED_BRANCHES:
         raise BranchSafetyError(
             f"Refusing to work directly on protected branch {branch_name!r}."
@@ -127,7 +198,7 @@ def ensure_clean_branch(repo_root: Path, branch_name: str) -> _CliRepo:
         )
     if current == branch_name:
         return repo
-    names = [b.name for b in repo.branches]
+    names = [branch.name for branch in repo.branches]
     if branch_name in names:
         repo.git.checkout(branch_name)
     else:
@@ -138,6 +209,7 @@ def ensure_clean_branch(repo_root: Path, branch_name: str) -> _CliRepo:
 def stage_and_commit(
     repo: Any, paths: list[str], message: str, dry_run: bool = True
 ) -> str | None:
+    """Stage exact paths and commit through the deprecated facade."""
     branch = repo.active_branch.name
     if branch in _PROTECTED_BRANCHES:
         raise BranchSafetyError(
@@ -154,6 +226,7 @@ def stage_and_commit(
 def push_branch(
     repo: Any, branch_name: str, dry_run: bool = True, push_enabled: bool = False
 ) -> None:
+    """Push a non-protected branch only when explicitly enabled."""
     if branch_name in _PROTECTED_BRANCHES:
         raise BranchSafetyError(
             f"Refusing to push to protected branch {branch_name!r}."
@@ -164,6 +237,7 @@ def push_branch(
 
 
 def revert_to_head(repo: Any, dry_run: bool = True) -> None:
+    """Perform the legacy broad revert; retained only for compatibility."""
     if dry_run:
         return
     repo.git.reset("--hard", "HEAD")

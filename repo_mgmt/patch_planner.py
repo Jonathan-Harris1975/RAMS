@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -57,7 +59,53 @@ def plan(
     settings: "Settings",
     model_router: "ModelRouter",
 ) -> dict[str, Any]:
-    """Request and validate a strict AnchorPatch/v1 plan for a code_fix issue."""
+    """Request and validate a strict AnchorPatch/v1 plan synchronously."""
+    task_id, affected_paths, prompt = _prepare_plan_inputs(
+        issue, target_repo, pipeline_id, settings
+    )
+    try:
+        raw = model_router.complete(prompt=prompt, system=SYSTEM_PROMPT, max_tokens=4096)
+    except Exception as exc:
+        raise PatchPlanError(f"LLM call failed: {exc}") from exc
+    patch_doc = _parse_plan(raw, task_id)
+    _validate_plan_scope(patch_doc, affected_paths, pipeline_id)
+    return patch_doc
+
+
+async def plan_async(
+    issue: dict[str, Any],
+    target_repo: Path,
+    pipeline_id: str,
+    settings: "Settings",
+    model_router: "ModelRouter",
+) -> dict[str, Any]:
+    """Request and validate a strict AnchorPatch/v1 plan without blocking the event loop."""
+    task_id, affected_paths, prompt = _prepare_plan_inputs(
+        issue, target_repo, pipeline_id, settings
+    )
+    try:
+        complete_async = getattr(model_router, "complete_async", None)
+        if inspect.iscoroutinefunction(complete_async):
+            raw = await complete_async(prompt=prompt, system=SYSTEM_PROMPT, max_tokens=4096)
+        else:
+            raw = await asyncio.to_thread(
+                model_router.complete, prompt=prompt, system=SYSTEM_PROMPT, max_tokens=4096
+            )
+    except Exception as exc:
+        raise PatchPlanError(f"LLM call failed: {exc}") from exc
+    patch_doc = _parse_plan(raw, task_id)
+    _validate_plan_scope(patch_doc, affected_paths, pipeline_id)
+    return patch_doc
+
+
+def _prepare_plan_inputs(
+    issue: dict[str, Any],
+    target_repo: Path,
+    pipeline_id: str,
+    settings: "Settings",
+) -> tuple[str, list[str], str]:
+    """Build task id, affected path list, and model prompt for patch planning."""
+    _ = settings
     task_id = str(issue.get("taskId", "<unknown>"))
     if issue.get("classification") != "code_fix":
         raise PatchPlanError(
@@ -65,16 +113,7 @@ def plan(
         )
     affected_paths = [str(path) for path in issue.get("affectedPaths", [])]
     context_files = _load_context(affected_paths, target_repo)
-    prompt = _build_prompt(issue, context_files, pipeline_id)
-    try:
-        raw = model_router.complete(
-            prompt=prompt, system=SYSTEM_PROMPT, max_tokens=4096
-        )
-    except Exception as exc:
-        raise PatchPlanError(f"LLM call failed: {exc}") from exc
-    patch_doc = _parse_plan(raw, task_id)
-    _validate_plan_scope(patch_doc, affected_paths, pipeline_id)
-    return patch_doc
+    return task_id, affected_paths, _build_prompt(issue, context_files, pipeline_id)
 
 
 def _parse_plan(raw: str, task_id: str) -> dict[str, Any]:

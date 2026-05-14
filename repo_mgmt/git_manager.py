@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 _PROTECTED_BRANCHES = frozenset({"main", "master"})
+_DEFAULT_GIT_TIMEOUT_SECONDS = 30
 
 
 class BranchSafetyError(Exception):
@@ -43,21 +45,32 @@ class GitManager:
         target_repo: Path,
         branch_prefix: str = "rms-qa/",
         push_enabled: bool = False,
+        timeout_seconds: int = _DEFAULT_GIT_TIMEOUT_SECONDS,
     ) -> None:
+        """Initialise a branch-safe Git wrapper for one target repository."""
         self.target_repo = Path(target_repo)
         self.branch_prefix = branch_prefix
         self.push_enabled = push_enabled
+        self.timeout_seconds = timeout_seconds
 
     def _git(self, *args: str) -> str:
-        """Run git with *args* in the managed repository and return stdout."""
-        p = subprocess.run(
-            ["git", *args],
-            cwd=self.target_repo,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        """Run git with timeout and prompts disabled, returning stdout."""
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        try:
+            p = subprocess.run(
+                ["git", *args],
+                cwd=self.target_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=self.timeout_seconds,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GitManagerError(
+                f"git {' '.join(args)} timed out after {self.timeout_seconds}s"
+            ) from exc
         if p.returncode != 0:
             raise GitManagerError(
                 p.stderr.strip() or p.stdout.strip() or f"git {' '.join(args)} failed"
