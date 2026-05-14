@@ -211,25 +211,38 @@ def _repo_ready(path: FilePath) -> bool:
     return path.exists() and path.is_dir()
 
 
-def _ensure_repos_bootstrapped(cfg: Settings) -> list[BootstrapResult]:
-    """Run repo bootstrap once per process when explicitly enabled."""
+def _ensure_repos_bootstrapped(cfg: Settings, pipeline_id: PipelineId | None = None) -> list[BootstrapResult]:
+    """Run repo bootstrap once per process when explicitly enabled.
+
+    Bootstrap only the repository required by the requested pipeline. This avoids
+    blocking an AIMS/on-brand run because the website repo is temporarily
+    unavailable, and vice versa.
+    """
     global _bootstrap_attempted, _bootstrap_results
-    if not _bootstrap_attempted:
+    label = "all"
+    if pipeline_id in {"seo-aeo-geo", "mobile-ux"}:
+        label = "website"
+    elif pipeline_id == "on-brand":
+        label = "aims"
+    existing = {result.label: result for result in _bootstrap_results}
+    if not existing.get(label, BootstrapResult(label, "", False, False, "missing")).ready:
         _bootstrap_attempted = True
         try:
-            _bootstrap_results = bootstrap_repositories(cfg)
+            new_results = bootstrap_repositories(cfg, pipeline_id=pipeline_id)
+            for result in new_results:
+                existing[result.label] = result
+            _bootstrap_results = list(existing.values())
         except Exception as exc:
             logger.exception("api: repo bootstrap failed")
-            _bootstrap_results = [
-                BootstrapResult(
-                    label="all",
-                    path="",
-                    attempted=True,
-                    ready=False,
-                    action="failed",
-                    error=str(exc),
-                )
-            ]
+            existing[label] = BootstrapResult(
+                label=label,
+                path="",
+                attempted=True,
+                ready=False,
+                action="failed",
+                error=str(exc),
+            )
+            _bootstrap_results = list(existing.values())
     return _bootstrap_results
 
 
@@ -344,7 +357,7 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
             "model-router configuration unavailable",
             {"dependencies": _dependency_details()},
         )
-    _ensure_repos_bootstrapped(cfg)
+    _ensure_repos_bootstrapped(cfg, pipeline_id)
     target_repo = cfg.repo_path_for(pipeline_id)
     if not _repo_ready(target_repo):
         raise AdmissionError(

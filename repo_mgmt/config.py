@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     rms_aims_repo_url: str = ""
     rms_aims_repo_branch: str = "main"
     github_token: str | None = None
+    rms_github_token: str | None = None
 
     # ── Per-target validation commands (split on " && ") ──────────────────
     rms_aims_validation_commands: str = "npm test && npm run build"
@@ -224,6 +225,20 @@ class Settings(BaseSettings):
     def aims_repo_path_value(self) -> str:
         """Return the AIMS repo path, using the legacy SEO path only as a fallback."""
         return self.rms_aims_repo_path or self.rms_seo_repo_path
+
+    @property
+    def github_token_value(self) -> str | None:
+        """Return the runtime GitHub token from supported env aliases.
+
+        Koyeb deployments normally use RMS_GITHUB_TOKEN for application-owned
+        secrets, while local/GitHub-hosted environments often expose
+        GITHUB_TOKEN. Supporting both keeps the bootstrap contract explicit
+        without breaking existing deployments.
+        """
+        for candidate in (self.rms_github_token, self.github_token):
+            if candidate and candidate.strip():
+                return candidate.strip()
+        return None
 
     def validation_commands_for(self, pipeline: PipelineId) -> list[str]:
         """Return the ordered validation commands for the given pipeline."""
