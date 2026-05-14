@@ -14,18 +14,18 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Mount local repo clones so the service can read/write them
+      # Optional local development mounts. In Koyeb, prefer RMS_REPO_BOOTSTRAP_ENABLED=true.
       - type: bind
-        source: ${RMS_SEO_REPO_PATH}
-        target: /repos/seo
-        read_only: false
-      - type: bind
-        source: ${RMS_WEBSITE_REPO_PATH}
+        source: ${RMS_WEBSITE_REPO_PATH:-/tmp/rams-repos/website}
         target: /repos/website
         read_only: false
+      - type: bind
+        source: ${RMS_AIMS_REPO_PATH:-/tmp/rams-repos/aims}
+        target: /repos/aims
+        read_only: false
     environment:
-      - RMS_SEO_REPO_PATH=/repos/seo
       - RMS_WEBSITE_REPO_PATH=/repos/website
+      - RMS_AIMS_REPO_PATH=/repos/aims
     healthcheck:
       test: ["CMD", "python", "-c",
              "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]

@@ -75,7 +75,7 @@ curl -sS http://127.0.0.1:8766/health
 
 curl -sS http://127.0.0.1:8766/readiness
 # status=degraded, r2_configured=true, r2_verified=false,
-# seo_repo_ready=true, website_repo_ready=true, validation_runtime_ready=true
+# website_repo_ready=true, aims_repo_ready=true, validation_runtime_ready=true
 ```
 
 Clean-room lexical scan:
@@ -103,7 +103,7 @@ grep -RIn -E '<forbidden-token-regex>' .
 - Operator/pre-trigger readiness: `/readiness`.
 - Keep `RMS_DRY_RUN=true` for staging.
 - Keep `RMS_LIVE_WRITE_ENABLED=false`, `RMS_PUSH_ENABLED=false`, and `RMS_CREATE_PR=false`.
-- Ensure the container has real target repo paths available at `RMS_SEO_REPO_PATH` and `RMS_WEBSITE_REPO_PATH`.
+- Ensure the container has real target repo paths available at `RMS_WEBSITE_REPO_PATH` and `RMS_AIMS_REPO_PATH`.
 - Use real R2 credentials; fake endpoints must not pass readiness.
 - The service honours `RMS_PORT`, then `PORT`, then `8000`.
 

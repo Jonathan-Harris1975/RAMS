@@ -84,7 +84,7 @@ Required Koyeb settings:
 
 Required mounted or cloned repos:
 
-- `RMS_SEO_REPO_PATH`
+- `RMS_AIMS_REPO_PATH`
 - `RMS_WEBSITE_REPO_PATH`
 
 Both paths must exist. For live tests, each must be a clean Git worktree.

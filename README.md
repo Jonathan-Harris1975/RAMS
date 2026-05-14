@@ -8,11 +8,11 @@ RAMS is safe by default: `RMS_DRY_RUN=true`, live writes disabled, pushes disabl
 
 | Pipeline | Audit key | Target repo | Validation |
 |---|---|---|---|
-| SEO/AEO/GEO | `seo-aeo-geo` | AI Management Suite, Node.js / Express | `npm test && npm run build` |
+| SEO/AEO/GEO | `seo-aeo-geo` | `jonathan-harris-website`, static site | `inject_partials`, `sync_redirects`, `check_crawlers` |
 | Mobile UX | `mobile-ux` | `jonathan-harris-website`, static site | `inject_partials`, `sync_redirects`, `check_crawlers` |
-| On-Brand | `on-brand` | `jonathan-harris-website`, static site | `inject_partials`, `sync_redirects`, `check_crawlers` |
+| On-Brand | `on-brand` | AIMS / AI Management Suite, Node.js / Express | `npm test && npm run build` |
 
-The production Docker image includes Python, Git, Node.js 20+, and npm so the SEO/AEO/GEO validation command can run inside the deployed container.
+The production Docker image includes Python, Git, Node.js 20+, and npm so both website checks and AIMS validation can run inside the deployed container.
 
 ## HTTP API
 
@@ -55,8 +55,18 @@ The production Docker image includes Python, Git, Node.js 20+, and npm so the SE
     "config_loaded": true,
     "r2_configured": true,
     "r2_verified": true,
-    "seo_repo_ready": true,
     "website_repo_ready": true,
+    "aims_repo_ready": true,
+    "pipeline_repo_paths": {
+      "seo-aeo-geo": "/tmp/rams-repos/website",
+      "mobile-ux": "/tmp/rams-repos/website",
+      "on-brand": "/tmp/rams-repos/aims"
+    },
+    "repo_bootstrap": {
+      "enabled": true,
+      "attempted": true,
+      "results": []
+    },
     "validation_runtime_ready": true,
     "model_router_ready": true,
     "single_worker_mode": true,
@@ -184,6 +194,32 @@ cp .env.template .env
 
 Fill in real R2, OpenRouter, and target repo path values before running real dry-runs.
 
+### Target repo mapping
+
+RAMS uses this live mapping:
+
+```text
+seo-aeo-geo -> RMS_WEBSITE_REPO_PATH
+mobile-ux   -> RMS_WEBSITE_REPO_PATH
+on-brand    -> RMS_AIMS_REPO_PATH
+```
+
+For Koyeb, where target repos are not mounted by default, enable runtime bootstrap and provide Git URLs:
+
+```text
+RMS_REPO_BOOTSTRAP_ENABLED=true
+RMS_REPO_BASE_DIR=/tmp/rams-repos
+RMS_WEBSITE_REPO_URL=<website-repo-git-url>
+RMS_WEBSITE_REPO_BRANCH=main
+RMS_WEBSITE_REPO_PATH=/tmp/rams-repos/website
+RMS_AIMS_REPO_URL=<aims-repo-git-url>
+RMS_AIMS_REPO_BRANCH=main
+RMS_AIMS_REPO_PATH=/tmp/rams-repos/aims
+GITHUB_TOKEN=<token-with-read-access-if-private>
+```
+
+The bootstrapper clones or refreshes the two target repos on the first rebuild trigger. It does not run during `/health`.
+
 ## Run the API
 
 ```bash
@@ -245,8 +281,11 @@ docker run --rm rams-production-check npm --version
 - Keep `RMS_PUSH_ENABLED=false`
 - Keep `RMS_CREATE_PR=false`
 - Set `RMS_API_KEY` to a strong random secret in production to enable trigger-endpoint authentication
-- Set real R2, OpenRouter, `RMS_SEO_REPO_PATH`, and `RMS_WEBSITE_REPO_PATH`
-- Ensure target repo paths exist in the container or attached runtime filesystem
+- Set real R2 and OpenRouter values
+- Set `RMS_WEBSITE_REPO_PATH` for `seo-aeo-geo` and `mobile-ux`
+- Set `RMS_AIMS_REPO_PATH` for `on-brand`
+- For Koyeb, set `RMS_REPO_BOOTSTRAP_ENABLED=true`, `RMS_WEBSITE_REPO_URL`, `RMS_AIMS_REPO_URL`, and `GITHUB_TOKEN` when repos are private
+- Ensure target repo paths exist in the container, or let the bootstrapper clone them on the first rebuild trigger
 
 Do not treat a green `/health` as deployment readiness. The little green lamp only proves the process is alive; `/readiness` is where the grown-up machinery reports its actual state. 🛠️
 
