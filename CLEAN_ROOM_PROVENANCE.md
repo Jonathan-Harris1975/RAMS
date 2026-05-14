@@ -1,39 +1,30 @@
 # Clean-Room Provenance
 
-## Repo Management Suite · v1.0 · May 2026
+## Repository Automation Management Service · v1.0 · May 2026
 
-This document certifies the provenance of every source file in this repository.
+This document records the provenance boundary for every source file in this repository.
 
-### Build Method
+## Build method
 
-All code in `repo_mgmt/` and `tests/` was derived **exclusively** from the functional
-specification contained in:
+All code in `repo_mgmt/` and `tests/` is derived from the supplied RMS functional specification and the RAMS production-readiness audit findings.
 
-> *Repo Management Suite · Build Prompt · v1.0 · May 2026*
+No upstream source code, prompts, parser logic, CLI strings, internal class names, or package namespaces from third-party autonomous-coding tools are part of this deliverable.
 
-No upstream source code, prompts, parser logic, CLI strings, internal class names,
-or package namespaces from any third-party autonomous-coding tool were copied,
-adapted, or referenced during implementation.
+## Excluded reference material
 
-### What "Clean-Room" Means Here
+A separate repository archive was supplied as reference-only material with provenance risk. It is not copied into RAMS, not used as implementation source, not included in the Docker context, not referenced by CI, and not included in release artefacts.
+
+The release artefact contains `RAMS-main` only.
+
+## Verification notes
 
 | Constraint | Status |
 |---|---|
-| No Aider source files read or copied | ✓ Confirmed |
-| No Aider class names used | ✓ Confirmed |
-| No Aider CLI strings reproduced | ✓ Confirmed |
-| No Aider internal prompts embedded | ✓ Confirmed |
-| No Aider package namespace (`aider.*`) referenced | ✓ Confirmed |
-| Implementation derived solely from the RMS specification | ✓ Confirmed |
+| Source derived from RMS specification and readiness findings | Confirmed |
+| Reference archive excluded from source and Docker context | Confirmed |
+| No third-party autonomous-coding package namespace in runtime source | Confirmed |
+| CI operates on RAMS files only | Confirmed |
 
-### Third-Party Libraries
+## Third-party libraries
 
-All third-party libraries listed in `pyproject.toml` are used as public API only
-(imports of their documented public interfaces). See `THIRD_PARTY_NOTICES.md` for
-full attribution.
-
-### Specification Reference
-
-- Document: *Repo Management Suite · Build Prompt · v1.0 · May 2026*
-- Sections: §1 – §15
-- Build date: 2026-05-05
+All third-party libraries listed in `pyproject.toml` are used through their documented public APIs. See `THIRD_PARTY_NOTICES.md` for attribution.
