@@ -2,22 +2,24 @@
 
 RAMS is a clean-room, safety-first FastAPI service for controlled repository remediation. It exposes one HTTP API with three independent rebuild pipelines. Each pipeline reads an audit snapshot, normalises issues, plans bounded AnchorPatch/v1 changes, validates the target repo, and publishes a run report.
 
-RAMS is safe by default: `RMS_DRY_RUN=true`, pushes disabled, PR creation disabled, and live writes blocked unless both live-write gates are explicitly opened.
+RAMS is safe by default: `RMS_DRY_RUN=true`, live writes disabled, pushes disabled, PR creation disabled, and production writes blocked unless both live-write gates are explicitly opened.
 
 ## Pipelines
 
 | Pipeline | Audit key | Target repo | Validation |
 |---|---|---|---|
-| SEO/AEO/GEO | `seo-aeo-geo` | AI Management Suite (Node.js / Express) | `npm test && npm run build` |
-| Mobile UX | `mobile-ux` | jonathan-harris-website (static site) | `inject_partials`, `sync_redirects`, `check_crawlers` |
-| On-Brand | `on-brand` | jonathan-harris-website (static site) | `inject_partials`, `sync_redirects`, `check_crawlers` |
+| SEO/AEO/GEO | `seo-aeo-geo` | AI Management Suite, Node.js / Express | `npm test && npm run build` |
+| Mobile UX | `mobile-ux` | `jonathan-harris-website`, static site | `inject_partials`, `sync_redirects`, `check_crawlers` |
+| On-Brand | `on-brand` | `jonathan-harris-website`, static site | `inject_partials`, `sync_redirects`, `check_crawlers` |
+
+The production Docker image includes Python, Git, Node.js 20+, and npm so the SEO/AEO/GEO validation command can run inside the deployed container.
 
 ## HTTP API
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Exact public health contract: status plus pipeline states only |
-| `GET` | `/readiness` | Dependency readiness detail for operators and deployment probes |
+| `GET` | `/health` | Liveness only: exact RMS health contract, with pipeline states only |
+| `GET` | `/readiness` | Dependency readiness for operators and pre-trigger deployment checks |
 | `POST` | `/rebuild/seo-aeo-geo/run` | Trigger SEO/AEO/GEO pipeline |
 | `POST` | `/rebuild/mobile-ux/run` | Trigger Mobile UX pipeline |
 | `POST` | `/rebuild/on-brand/run` | Trigger On-Brand pipeline |
@@ -35,9 +37,42 @@ RAMS is safe by default: `RMS_DRY_RUN=true`, pushes disabled, PR creation disabl
 }
 ```
 
-Dependency detail deliberately lives at `/readiness` so the `/health` contract stays aligned with the RMS specification.
+`/health` deliberately does not check R2, OpenRouter, mounted repos, Node, npm, or Git. Use it for Koyeb liveness only.
 
-### Trigger request
+### `/readiness` response
+
+`/readiness` distinguishes local configuration from real dependency verification:
+
+```json
+{
+  "status": "ready",
+  "pipelines": {
+    "seo-aeo-geo": "idle",
+    "mobile-ux": "idle",
+    "on-brand": "idle"
+  },
+  "dependencies": {
+    "config_loaded": true,
+    "r2_configured": true,
+    "r2_verified": true,
+    "seo_repo_ready": true,
+    "website_repo_ready": true,
+    "validation_runtime_ready": true,
+    "model_router_ready": true,
+    "single_worker_mode": true,
+    "runtime": {
+      "python": "Python 3.11.x",
+      "git": "git version ...",
+      "node": "v20.x or newer",
+      "npm": "..."
+    }
+  }
+}
+```
+
+A fake R2 endpoint or invalid credentials must leave `r2_verified=false` and `status=degraded`. Pipeline triggers are refused while R2 is not verified.
+
+## Trigger request
 
 ```bash
 curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
@@ -72,12 +107,14 @@ Live writes require all of the following:
 
 1. `RMS_DRY_RUN=false`
 2. `RMS_LIVE_WRITE_ENABLED=true`
-3. A clean Git worktree
-4. A non-`main` / non-`master` active branch after QA branch creation
-5. Single-worker / single-instance operation
-6. Successful validation before commit
+3. `/readiness` is `ready`
+4. A clean Git worktree
+5. A QA branch under `rms-qa/<pipeline>/<runId>`
+6. A non-`main` / non-`master` active branch before any write, stage, commit, or push
+7. Single-worker / single-instance operation
+8. Successful validation before commit
 
-Pushes additionally require `RMS_PUSH_ENABLED=true`. `RMS_CREATE_PR=false` remains the default; PR creation is not treated as implemented by this service.
+Pushes additionally require `RMS_PUSH_ENABLED=true`. `RMS_CREATE_PR=false` remains the required setting because PR creation is not implemented in this release.
 
 ## Protected paths
 
@@ -92,15 +129,31 @@ The `mobile-ux` pipeline cannot touch:
 
 These paths are blocked at both normalisation and patch-application layers.
 
+The `on-brand` pipeline may patch blog/transcript files only for deterministic structural or metadata defects. Editorial quality findings for historical content become `future_guidance` and must not reach patch application.
+
+## RunReport validation object
+
+Run reports always serialise `validation` as an object with:
+
+- `commands`
+- `passed`
+- `outputTail`
+
+When validation has not run, the report emits a consumer-safe not-run object rather than `null`.
+
 ## Dry-run report location
 
-The original specification wrote dry-run reports to the current working directory. RAMS deliberately uses `RMS_REPORT_DIR` instead, defaulting to `/tmp/rams-reports`, because that is safer for containers and Koyeb-style deployments.
+Accepted production deviation: the original RMS prompt wrote dry-run reports to the current working directory. RAMS deliberately uses `RMS_REPORT_DIR`, defaulting to `/tmp/rams-reports`, because that is safer for containers and Koyeb-style deployments.
 
 Override it when required:
 
 ```bash
 RMS_REPORT_DIR=/app/reports rms dry-run on-brand
 ```
+
+## External scheduling model
+
+Accepted production deviation: RAMS does not start an in-process cron scheduler. Trigger pipelines externally by HTTP, for example from Koyeb scheduled jobs, GitHub Actions, or another trusted scheduler. `repo_mgmt/scheduler.py` intentionally rejects accidental in-process scheduling.
 
 ## Local setup
 
@@ -122,9 +175,7 @@ rms-api
 uvicorn repo_mgmt.api:app --host 0.0.0.0 --port 8000
 ```
 
-## External scheduling model
-
-RAMS does not start an in-process cron scheduler. Trigger pipelines externally by HTTP, for example from Koyeb scheduled jobs, GitHub Actions, or another trusted scheduler. `repo_mgmt/scheduler.py` intentionally rejects accidental in-process scheduling.
+`rms-api` honours `RMS_PORT` first, then `PORT`, then the configured default `8000`.
 
 ## Smoke tests
 
@@ -152,12 +203,34 @@ See [`RELEASE_GATE.md`](RELEASE_GATE.md). The short version:
 
 ```bash
 python -m compileall -q repo_mgmt tests
-pytest -q
-ruff check .
-mypy repo_mgmt
-docker build --target runtime -t rams:production-ready .
-docker run --rm --env-file .env.example-dry-run -p 8000:8000 rams:production-ready
+python -m pytest tests/ -q --tb=short
+python -m ruff check .
+python -m mypy repo_mgmt/ --no-incremental --show-error-codes
+docker build --target runtime -t rams-production-check .
+docker run --rm rams-production-check python --version
+docker run --rm rams-production-check git --version
+docker run --rm rams-production-check node --version
+docker run --rm rams-production-check npm --version
 ```
+
+`./scripts/release_gate.sh` runs the same local gate plus Docker smoke checks when Docker is available.
+
+## Koyeb deployment notes
+
+- Deployment type: one web service
+- Instance count: `1`
+- Worker count: `1`
+- Startup command: `rms-api`
+- Liveness path: `/health`
+- Operator readiness check: `/readiness`
+- Keep `RMS_DRY_RUN=true` for staging
+- Keep `RMS_LIVE_WRITE_ENABLED=false`
+- Keep `RMS_PUSH_ENABLED=false`
+- Keep `RMS_CREATE_PR=false`
+- Set real R2, OpenRouter, `RMS_SEO_REPO_PATH`, and `RMS_WEBSITE_REPO_PATH`
+- Ensure target repo paths exist in the container or attached runtime filesystem
+
+Do not treat a green `/health` as deployment readiness. The little green lamp only proves the process is alive; `/readiness` is where the grown-up machinery reports its actual state. 🛠️
 
 ## Provenance
 

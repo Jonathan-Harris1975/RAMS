@@ -5,26 +5,32 @@ This checklist is mandatory before controlled production use. Do not skip gates 
 ## Gate 1: Local static checks
 
 ```bash
+python -V
 python -m compileall -q repo_mgmt tests
-pytest -q
-ruff check .
-mypy repo_mgmt
+python -m pytest tests/ -q --tb=short
+python -m ruff check .
+python -m mypy repo_mgmt/ --no-incremental --show-error-codes
 ```
 
-Expected result: all pass.
+Expected result: all pass. If `mypy` cannot complete in a constrained assessment container, CI on a clean Linux runner is the source of truth.
 
-## Gate 2: Docker image build
+## Gate 2: Docker image build and runtime binaries
 
 ```bash
-docker build --target runtime -t rams:production-ready .
+docker build --target runtime -t rams-production-check .
+docker run --rm rams-production-check python --version
+docker run --rm rams-production-check git --version
+docker run --rm rams-production-check node --version
+docker run --rm rams-production-check npm --version
+docker run --rm rams-production-check node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
 ```
 
-Expected result: image builds without warnings that affect runtime dependencies.
+Expected result: Python, Git, Node.js 20+, and npm are available in the runtime image.
 
 ## Gate 3: Boot the production image
 
 ```bash
-docker run --rm --env-file .env.example-dry-run -p 8000:8000 rams:production-ready
+docker run --rm --env-file .env.example-dry-run -p 8000:8000 rams-production-check
 ```
 
 Then, in another shell:
@@ -40,7 +46,7 @@ Expected `/health`:
 {"status":"ok","pipelines":{"seo-aeo-geo":"idle","mobile-ux":"idle","on-brand":"idle"}}
 ```
 
-`/readiness` may be `degraded` when placeholder paths or credentials are used. With real staging configuration, readiness must be `ready` before accepting pipeline triggers.
+With fake credentials, `/readiness` must be `degraded` and must show `r2_verified=false`. With real staging configuration, readiness must be `ready` before accepting pipeline triggers.
 
 ## Gate 4: Dry-run smoke tests
 
@@ -68,7 +74,7 @@ Required Koyeb settings:
 - Instance count: `1`
 - Worker count: `1`
 - Startup command: `rms-api`
-- Exposed port: `8000`
+- Exposed port: `8000`, or set `PORT` / `RMS_PORT` explicitly
 - Health path: `/health`
 - Readiness/operator check: `/readiness`
 - `RMS_DRY_RUN=true`
@@ -89,7 +95,9 @@ Run all three pipelines in dry-run mode against real R2 latest audit snapshots.
 
 Verify:
 
+- `/readiness` is `ready` before triggering.
 - Run reports are written under `RMS_REPORT_DIR` in dry-run mode.
+- `validation` is always an object, never `null`.
 - Issue classifications are sane.
 - Mobile UX never produces executable changes for protected content paths.
 - On-brand editorial quality findings become `future_guidance`.
@@ -106,21 +114,31 @@ RMS_PUSH_ENABLED=false
 RMS_CREATE_PR=false
 ```
 
-Use a disposable branch and disposable target repo clone. Confirm:
+First run the local primitive safety drill:
 
+```bash
+python scripts/disposable_live_branch_check.py
+```
+
+Then use a disposable target repo clone. Confirm:
+
+- Branch creation uses `rms-qa/<pipeline>/<runId>`.
 - The active branch is never `main` or `master` when writes occur.
 - Validation runs before commit.
 - Failed validation restores only task-scoped files.
 - No unrelated dirty files are staged or modified.
+- Push and PR automation remain disabled.
 
-## Gate 8: Live push decision
+## Gate 8: Live push and PR decision
 
-Live push remains NO-GO until throw-away-branch live commits are repeatedly proven and push credentials are tested safely.
+Live production writes remain NO-GO until repeated disposable-branch live commits prove validation, rollback, and exact-path staging. Live push remains NO-GO until separately authorised and credential-tested.
 
-Only then consider:
+`RMS_CREATE_PR` remains NO-GO because PR creation is not implemented in this release.
+
+## One-command local gate
 
 ```bash
-RMS_PUSH_ENABLED=true
+./scripts/release_gate.sh
 ```
 
-`RMS_CREATE_PR` remains NO-GO unless PR creation is separately implemented and tested.
+This script runs local Python gates and Docker gates. It exits with code `2` when Docker is unavailable so CI or a Docker-enabled Linux runner can execute the missing gate.
