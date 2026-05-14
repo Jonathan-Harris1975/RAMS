@@ -166,5 +166,5 @@ class RunReportModel(BaseModel):
     dryRun: bool
     summary: dict[str, int]
     tasks: list[dict[str, Any]] = Field(default_factory=list)
-    validation: ValidationSummaryModel | None = None
+    validation: ValidationSummaryModel
     commits: list[CommitInfoModel] = Field(default_factory=list)

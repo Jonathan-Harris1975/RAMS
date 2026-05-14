@@ -59,7 +59,13 @@ class RunReport:
     dryRun: bool
     summary: dict[str, int] = field(default_factory=dict)
     tasks: list[dict[str, Any]] = field(default_factory=list)
-    validation: ValidationSummary | None = None
+    validation: ValidationSummary = field(
+        default_factory=lambda: ValidationSummary(
+            commands=[],
+            passed=False,
+            output_tail="not_run: validation did not run",
+        )
+    )
     commits: list[CommitInfo] = field(default_factory=list)
     error: str | None = None
     publish_status: PublishStatus = field(default_factory=PublishStatus)
@@ -174,7 +180,7 @@ def _convert(obj: Any) -> Any:
             "dryRun": obj.dryRun,
             "summary": obj.summary,
             "tasks": [_convert(task) for task in obj.tasks],
-            "validation": _convert(obj.validation) if obj.validation else None,
+            "validation": _convert(obj.validation),
             "commits": [_convert(commit) for commit in obj.commits],
             "publishStatus": _convert(obj.publish_status),
         }

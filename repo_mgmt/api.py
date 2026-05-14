@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path as FilePath
 from typing import Annotated, Literal
@@ -42,6 +45,8 @@ _cfg: Settings | None = None
 _cfg_error: str | None = None
 _r2: R2Client | None = None
 _r2_error: str | None = None
+_r2_verified: bool | None = None
+_r2_verify_error: str | None = None
 
 
 class RunRequest(BaseModel):
@@ -95,6 +100,84 @@ def _get_r2() -> R2Client | None:
     return _r2
 
 
+def _r2_configured(cfg: Settings | None) -> bool:
+    """Return True when required R2 configuration values are present."""
+    if cfg is None:
+        return False
+    return all(
+        [
+            cfg.r2_endpoint.startswith(("http://", "https://")),
+            bool(cfg.r2_access_key_id.strip()),
+            bool(cfg.r2_secret_access_key.strip()),
+            bool(cfg.r2_bucket_audits.strip()),
+        ]
+    )
+
+
+def _verify_r2() -> bool:
+    """Probe R2 once and cache the verified/not-verified result."""
+    global _r2_verified, _r2_verify_error
+    if _r2_verified is not None:
+        return _r2_verified
+    cfg = _get_cfg()
+    r2 = _get_r2() if cfg is not None else None
+    if cfg is None or r2 is None or not _r2_configured(cfg):
+        _r2_verified = False
+        return False
+    try:
+        _r2_verified = bool(r2.verify_bucket(cfg.r2_bucket_audits))
+    except Exception as exc:
+        _r2_verified = False
+        _r2_verify_error = str(exc)
+        logger.warning("api: R2 verification failed: %s", exc)
+    return _r2_verified
+
+
+def _version_output(command: str) -> tuple[bool, str]:
+    """Run a runtime binary version check and return safe public output."""
+    binary = command.split()[0]
+    if shutil.which(binary) is None:
+        return False, f"{binary} not found"
+    try:
+        result = subprocess.run(
+            command.split(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    output = result.stdout.strip()
+    return result.returncode == 0, output
+
+
+def _node_major_ok(version_text: str) -> bool:
+    """Return True when node --version reports major version 20 or newer."""
+    token = version_text.strip().lstrip("v").split(".", 1)[0]
+    try:
+        return int(token) >= 20
+    except ValueError:
+        return False
+
+
+def _validation_runtime_details() -> dict[str, object]:
+    """Return public version checks for validation/runtime dependencies."""
+    python_ok, python_version = _version_output("python --version")
+    git_ok, git_version = _version_output("git --version")
+    node_ok, node_version = _version_output("node --version")
+    npm_ok, npm_version = _version_output("npm --version")
+    node_ok = node_ok and _node_major_ok(node_version)
+    return {
+        "ready": python_ok and git_ok and node_ok and npm_ok,
+        "python": python_version,
+        "git": git_version,
+        "node": node_version,
+        "npm": npm_version,
+    }
+
+
 def _model_router_ready(cfg: Settings | None) -> bool:
     """Return True when model-router settings are present and syntactically usable."""
     if cfg is None:
@@ -121,22 +204,28 @@ def _dependency_details() -> dict[str, object]:
     r2 = _get_r2() if cfg is not None else None
     seo_ready = False
     website_ready = False
+    validation_runtime = _validation_runtime_details()
     if cfg is not None:
         seo_ready = _repo_ready(cfg.repo_path_for("seo-aeo-geo"))
         website_ready = _repo_ready(cfg.repo_path_for("on-brand"))
     deps: dict[str, object] = {
         "config_loaded": cfg is not None,
-        "r2_ready": r2 is not None,
-        "model_router_ready": _model_router_ready(cfg),
+        "r2_configured": _r2_configured(cfg),
+        "r2_verified": _verify_r2() if cfg is not None and r2 is not None else False,
         "seo_repo_ready": seo_ready,
         "website_repo_ready": website_ready,
+        "validation_runtime_ready": bool(validation_runtime["ready"]),
+        "model_router_ready": _model_router_ready(cfg),
         "single_worker_mode": configured_worker_count() == 1,
+        "runtime": validation_runtime,
     }
     errors: dict[str, str] = {}
     if _cfg_error:
         errors["config"] = _cfg_error
     if _r2_error:
-        errors["r2"] = _r2_error
+        errors["r2_client"] = _r2_error
+    if _r2_verify_error:
+        errors["r2_verification"] = _r2_verify_error
     if errors:
         deps["errors"] = errors
     return deps
@@ -186,7 +275,7 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
             "configuration unavailable",
             {"dependencies": _dependency_details()},
         )
-    if _get_r2() is None:
+    if _get_r2() is None or not _verify_r2():
         raise AdmissionError(
             503,
             "R2 unavailable",
@@ -327,7 +416,12 @@ def serve() -> None:
 
     cfg = _get_cfg()
     host = cfg.rms_host if cfg is not None else "0.0.0.0"
-    port = cfg.rms_port if cfg is not None else 8000
+    port_raw = os.getenv("RMS_PORT") or os.getenv("PORT")
+    try:
+        port = int(port_raw) if port_raw else (cfg.rms_port if cfg is not None else 8000)
+    except ValueError:
+        logger.warning("rms-api: invalid port %r; falling back to 8000", port_raw)
+        port = 8000
     log_level = cfg.log_level if cfg is not None else "info"
 
     logging.basicConfig(

@@ -70,8 +70,8 @@ def _summary(tasks: list[dict[str, Any]], snapshots: int) -> dict[str, int]:
 
 def _validation_summary(
     tasks: list[dict[str, Any]], cfg: Settings, pipeline_id: PipelineId
-) -> ValidationSummary | None:
-    """Return the most recent task validation summary, when present."""
+) -> ValidationSummary:
+    """Return the latest validation summary or an explicit not-run object."""
     for task in reversed(tasks):
         validation = task.get("validation")
         if validation:
@@ -82,7 +82,11 @@ def _validation_summary(
                 passed=bool(validation.get("passed")),
                 output_tail=str(validation.get("outputTail", "")),
             )
-    return None
+    return ValidationSummary(
+        commands=cfg.validation_commands_for(pipeline_id),
+        passed=False,
+        output_tail="not_run: validation did not run for this pipeline run",
+    )
 
 
 def _commits(tasks: list[dict[str, Any]]) -> list[CommitInfo]:

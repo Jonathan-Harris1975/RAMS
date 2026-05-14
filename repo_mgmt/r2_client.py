@@ -1,9 +1,10 @@
 """
 Cloudflare R2 client for the Repo Management Suite.
 
-Wraps boto3 S3-compatible calls against the R2 endpoint.
-Raises R2Error (a custom exception) on any boto3 ClientError so callers
-never need to import boto3 directly.
+Wraps boto3 S3-compatible calls against the R2 endpoint. Client construction is
+not treated as readiness: callers must use ``verify_bucket`` when they need to
+prove that the configured endpoint, credentials, and bucket are reachable.
+Raises R2Error on boto3 failures so callers never need to import boto3 directly.
 """
 
 from __future__ import annotations
@@ -12,7 +13,8 @@ import logging
 from typing import TYPE_CHECKING
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 if TYPE_CHECKING:
     from repo_mgmt.config import Settings
@@ -31,8 +33,9 @@ class R2Client:
         """
         Initialise the R2 client using credentials from *cfg*.
 
-        Args:
-            cfg: Validated RMS settings object.
+        Construction only validates local configuration shape. It does not prove
+        network reachability or credential validity. Use ``verify_bucket`` for a
+        lightweight live readiness check.
         """
         self._bucket_audits = cfg.r2_bucket_audits
         self._client = boto3.client(
@@ -41,9 +44,33 @@ class R2Client:
             aws_access_key_id=cfg.r2_access_key_id,
             aws_secret_access_key=cfg.r2_secret_access_key,
             region_name=cfg.r2_region,
+            config=Config(
+                connect_timeout=3,
+                read_timeout=3,
+                retries={"max_attempts": 1, "mode": "standard"},
+            ),
         )
 
     # ── Public API ─────────────────────────────────────────────────────────
+
+    def verify_bucket(self, bucket: str | None = None) -> bool:
+        """
+        Return True only when the configured R2 bucket can be reached.
+
+        The check uses S3 ``HeadBucket`` against the audits bucket. Invalid
+        endpoints, bad credentials, permission failures, and missing buckets all
+        return False instead of raising so /readiness can report a degraded state
+        without disturbing /health liveness.
+        """
+        target_bucket = bucket or self._bucket_audits
+        if not target_bucket:
+            return False
+        try:
+            self._client.head_bucket(Bucket=target_bucket)
+            return True
+        except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
+            logger.warning("r2_client: bucket readiness probe failed: %s", exc)
+            return False
 
     def get_object(self, bucket: str, key: str) -> bytes:
         """
