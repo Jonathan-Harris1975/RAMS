@@ -14,4 +14,6 @@ def test_sample_mobile_ux_audit_is_consumed_by_normaliser(settings):
         "2026-05-05",
         settings,
     )
-    assert len(issues) == 1 and issues[0]["classification"] == "code_fix"
+    assert len(issues) == 2
+    assert [issue["classification"] for issue in issues] == ["code_fix", "skipped"]
+    assert issues[1]["status"] == "skipped_not_actionable"

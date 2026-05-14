@@ -78,3 +78,59 @@ class TestLoadSettings:
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ConfigurationError):
                 load_settings()
+
+
+def _complete_env(**overrides: str) -> dict[str, str]:
+    env = {
+        "R2_ENDPOINT": "https://x.r2.example.com",
+        "R2_ACCESS_KEY_ID": "k",
+        "R2_SECRET_ACCESS_KEY": "s",
+        "OPENROUTER_API_KEY": "or",
+        "OPENROUTER_PRIMARY_MODEL": "m1",
+        "OPENROUTER_SECONDARY_MODEL": "m2",
+        "OPENROUTER_TRIAGE_MODEL": "m3",
+        "RMS_SEO_REPO_PATH": "/tmp/a",
+        "RMS_WEBSITE_REPO_PATH": "/tmp/b",
+    }
+    env.update(overrides)
+    return env
+
+
+def test_absent_rms_dry_run_is_safe_default_not_live_permitted() -> None:
+    with patch.dict(os.environ, _complete_env(), clear=True):
+        cfg = Settings()
+    assert cfg.rms_dry_run is True
+    assert cfg.dry_run_env_explicit_and_parseable is False
+    assert cfg.live_write_permitted is False
+
+
+def test_malformed_rms_dry_run_is_safe_default_not_live_permitted() -> None:
+    with patch.dict(os.environ, _complete_env(RMS_DRY_RUN="absolutely-not"), clear=True):
+        cfg = Settings()
+    assert cfg.rms_dry_run is True
+    assert cfg.dry_run_env_explicit_and_parseable is False
+    assert cfg.live_write_permitted is False
+
+
+def test_live_mode_requires_both_parseable_env_gates() -> None:
+    with patch.dict(
+        os.environ,
+        _complete_env(RMS_DRY_RUN="false", RMS_LIVE_WRITE_ENABLED="true"),
+        clear=True,
+    ):
+        cfg = Settings()
+    assert cfg.rms_dry_run is False
+    assert cfg.rms_live_write_enabled is True
+    assert cfg.live_write_permitted is True
+
+
+def test_live_mode_not_permitted_when_live_gate_malformed() -> None:
+    with patch.dict(
+        os.environ,
+        _complete_env(RMS_DRY_RUN="false", RMS_LIVE_WRITE_ENABLED="wat"),
+        clear=True,
+    ):
+        cfg = Settings()
+    assert cfg.rms_dry_run is False
+    assert cfg.rms_live_write_enabled is False
+    assert cfg.live_write_permitted is False

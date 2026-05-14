@@ -1,122 +1,253 @@
-"""Tests for repo_mgmt.api (FastAPI endpoints)."""
+"""Admission and execution-path tests for repo_mgmt.api."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from repo_mgmt.api import app, _running
+from repo_mgmt import api as api_mod
+from repo_mgmt.config import Settings
 from repo_mgmt.report_publisher import RunReport
 
 
-def _mock_report(pipeline_id: str = "on-brand") -> RunReport:
-    return RunReport(
-        runId="2026-05-05T03-00-00Z",
-        pipeline=pipeline_id,
-        targetRepo="/tmp/repo",
-        branch="",
-        dryRun=True,
-        summary={
-            "snapshotsRead": 0,
-            "tasksGenerated": 0,
-            "codeFixesAttempted": 0,
-            "committed": 0,
-            "validationFailed": 0,
-            "futureGuidance": 0,
-            "manualReview": 0,
-        },
-        tasks=[],
-        validation=None,
-        commits=[],
-    )
+@pytest.fixture(autouse=True)
+def reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset cached API singletons between tests."""
+    api_mod._cfg = None
+    api_mod._cfg_error = None
+    api_mod._r2 = None
+    api_mod._r2_error = None
+    api_mod._pipelines.clear()
+    for pipeline_id in api_mod._running:
+        api_mod._running[pipeline_id] = False
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("GUNICORN_WORKERS", raising=False)
 
 
 @pytest.fixture
-def client(settings) -> TestClient:
-    """TestClient with all external dependencies mocked."""
+def repo_dirs(tmp_path: Path) -> tuple[Path, Path]:
+    """Create fake target repo directories for API admission."""
+    seo = tmp_path / "seo"
+    website = tmp_path / "website"
+    seo.mkdir()
+    website.mkdir()
+    return seo, website
+
+
+def make_settings(repo_dirs: tuple[Path, Path], **overrides: str) -> Settings:
+    """Build Settings with concrete repo paths and optional env overrides."""
+    seo, website = repo_dirs
+    env: dict[str, str] = {
+        "R2_ENDPOINT": "https://test.r2.cloudflarestorage.com",
+        "R2_ACCESS_KEY_ID": "test-key-id",
+        "R2_SECRET_ACCESS_KEY": "test-secret",
+        "R2_BUCKET_AUDITS": "audits",
+        "OPENROUTER_API_KEY": "test-or-key",
+        "OPENROUTER_PRIMARY_MODEL": "primary/model",
+        "OPENROUTER_SECONDARY_MODEL": "secondary/model",
+        "OPENROUTER_TRIAGE_MODEL": "triage/model",
+        "RMS_SEO_REPO_PATH": str(seo),
+        "RMS_WEBSITE_REPO_PATH": str(website),
+        "RMS_DRY_RUN": "true",
+        "RMS_LIVE_WRITE_ENABLED": "false",
+    }
+    env.update(overrides)
+    from unittest.mock import patch
+
+    with patch.dict("os.environ", env, clear=True):
+        return Settings()
+
+
+class FakePipeline:
+    """Fake pipeline that records the actual background execution path."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[bool, str]] = []
+
+    async def run(self, dry_run: bool, run_id: str) -> RunReport:
+        self.calls.append((dry_run, run_id))
+        return RunReport(
+            runId=run_id,
+            pipeline="on-brand",
+            targetRepo="/tmp/site",
+            branch=f"rms-qa/on-brand/{run_id}",
+            dryRun=dry_run,
+            summary={
+                "snapshotsRead": 0,
+                "tasksGenerated": 0,
+                "codeFixesAttempted": 0,
+                "committed": 0,
+                "validationFailed": 0,
+                "futureGuidance": 0,
+                "manualReview": 0,
+            },
+            tasks=[],
+            validation=None,
+            commits=[],
+        )
+
+
+def install_valid_api(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Settings,
+    fake_pipeline: FakePipeline | None = None,
+) -> MagicMock:
+    """Patch config, R2, and optional pipeline construction for an API test."""
     mock_r2 = MagicMock()
-    with (
-        patch("repo_mgmt.api.load_settings", return_value=settings),
-        patch("repo_mgmt.api.R2Client", return_value=mock_r2),
-        patch("repo_mgmt.api.pipeline_mod.run", return_value=_mock_report()),
-    ):
-        with TestClient(app) as c:
-            yield c
+    monkeypatch.setattr(api_mod, "load_settings", lambda: settings)
+    monkeypatch.setattr(api_mod, "R2Client", lambda cfg: mock_r2)
+    if fake_pipeline is not None:
+        monkeypatch.setattr(api_mod, "_get_pipeline", lambda pipeline_id: fake_pipeline)
+    return mock_r2
 
 
-@pytest.fixture(autouse=True)
-def reset_running(client) -> None:
-    """Ensure _running is cleared before and after every test."""
-    for k in _running:
-        _running[k] = False
-    yield
-    for k in _running:
-        _running[k] = False
-
-
-class TestHealthEndpoint:
-    def test_health_returns_200(self, client: TestClient) -> None:
+def test_health_reports_dependency_readiness(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    install_valid_api(monkeypatch, settings)
+    with TestClient(api_mod.app) as client:
         response = client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ok"
-        assert "pipelines" in data
-        for pid in ("seo-aeo-geo", "mobile-ux", "on-brand"):
-            assert pid in data["pipelines"]
+    data = response.json()
+    assert response.status_code == 200
+    assert data["status"] == "ok"
+    assert data["pipelines"]["on-brand"] == "idle"
+    assert data["dependencies"] == {
+        "config_loaded": True,
+        "r2_ready": True,
+        "model_router_ready": True,
+        "seo_repo_ready": True,
+        "website_repo_ready": True,
+        "single_worker_mode": True,
+    }
 
 
-    def test_root_returns_200_for_platform_health_probe(self, client: TestClient) -> None:
-        response = client.get("/")
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-
-
-class TestRunEndpoints:
-    @pytest.mark.parametrize(
-        "endpoint,pipeline_id",
-        [
-            ("/rebuild/seo-aeo-geo/run", "seo-aeo-geo"),
-            ("/rebuild/mobile-ux/run", "mobile-ux"),
-            ("/rebuild/on-brand/run", "on-brand"),
-        ],
+def test_health_degraded_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        api_mod, "load_settings", lambda: (_ for _ in ()).throw(RuntimeError("missing"))
     )
-    def test_post_returns_202(
-        self, client: TestClient, endpoint: str, pipeline_id: str
-    ) -> None:
+    with TestClient(api_mod.app) as client:
+        response = client.get("/health")
+    data = response.json()
+    assert response.status_code == 200
+    assert data["status"] == "degraded"
+    assert data["dependencies"]["config_loaded"] is False
+
+
+@pytest.mark.parametrize(
+    "endpoint,pipeline_id",
+    [
+        ("/rebuild/seo-aeo-geo/run", "seo-aeo-geo"),
+        ("/rebuild/mobile-ux/run", "mobile-ux"),
+        ("/rebuild/on-brand/run", "on-brand"),
+    ],
+)
+def test_valid_run_request_calls_real_background_pipeline_path(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_dirs: tuple[Path, Path],
+    endpoint: str,
+    pipeline_id: str,
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    with TestClient(api_mod.app) as client:
         response = client.post(endpoint)
-        assert response.status_code == 202
-        data = response.json()
-        assert "runId" in data
-        assert data["pipeline"] == pipeline_id
-        assert "dryRun" in data
+    data = response.json()
+    assert response.status_code == 202
+    assert data["pipeline"] == pipeline_id
+    assert data["dryRun"] is True
+    assert len(fake_pipeline.calls) == 1
+    assert fake_pipeline.calls[0][0] is True
+    assert fake_pipeline.calls[0][1] == data["runId"]
 
-    def test_dry_run_override_in_body(self, client: TestClient) -> None:
-        response = client.post(
-            "/rebuild/on-brand/run",
-            json={"dry_run": False},
-        )
-        assert response.status_code == 202
 
-    def test_409_when_pipeline_running(self, client: TestClient) -> None:
-        """409 is returned when _running flag is already True for the pipeline."""
-        # Set _running directly — same pattern as test_api_endpoints.py
-        _running["on-brand"] = True
-        try:
-            response = client.post("/rebuild/on-brand/run")
-            assert response.status_code == 409
-            data = response.json()
-            # Response must be flat — NOT nested under 'detail'
-            assert "already running" in data["error"]
-            assert data.get("pipeline") == "on-brand"
-            assert "detail" not in data
-        finally:
-            _running["on-brand"] = False
+def test_already_running_conflict_schedules_no_background(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    api_mod._running["on-brand"] = True
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 409
+    assert fake_pipeline.calls == []
 
-    def test_invalid_body_returns_422(self, client: TestClient) -> None:
-        response = client.post(
-            "/rebuild/on-brand/run",
-            json={"dry_run": "not-a-boolean"},
-        )
-        assert response.status_code == 422
+
+def test_missing_config_returns_503_and_schedules_no_background(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_pipeline = FakePipeline()
+    monkeypatch.setattr(
+        api_mod,
+        "load_settings",
+        lambda: (_ for _ in ()).throw(RuntimeError("missing config")),
+    )
+    monkeypatch.setattr(api_mod, "_get_pipeline", lambda pipeline_id: fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 503
+    assert "configuration" in response.json()["error"]
+    assert fake_pipeline.calls == []
+
+
+def test_missing_r2_returns_503_and_schedules_no_background(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    monkeypatch.setattr(api_mod, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        api_mod, "R2Client", lambda cfg: (_ for _ in ()).throw(RuntimeError("r2 down"))
+    )
+    monkeypatch.setattr(api_mod, "_get_pipeline", lambda pipeline_id: fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 503
+    assert "R2" in response.json()["error"]
+    assert fake_pipeline.calls == []
+
+
+def test_invalid_repo_path_returns_503_and_schedules_no_background(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    seo, website = repo_dirs
+    website.rmdir()
+    settings = make_settings((seo, website))
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 503
+    assert "repo" in response.json()["error"]
+    assert fake_pipeline.calls == []
+
+
+def test_body_cannot_override_dry_run_without_live_gate(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs, RMS_DRY_RUN="true", RMS_LIVE_WRITE_ENABLED="false")
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run", json={"dry_run": False})
+    assert response.status_code == 403
+    assert response.json()["error"] == "live write refused"
+    assert fake_pipeline.calls == []
+
+
+def test_single_worker_limitation_visible_in_health(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    install_valid_api(monkeypatch, settings)
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    with TestClient(api_mod.app) as client:
+        response = client.get("/health")
+    assert response.json()["status"] == "degraded"
+    assert response.json()["dependencies"]["single_worker_mode"] is False

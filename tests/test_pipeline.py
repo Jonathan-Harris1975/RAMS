@@ -111,7 +111,7 @@ class TestPipelineRun:
         run_task.assert_not_called()
         assert report.tasks[0][
             "status"
-        ] == "manual_review" and "Git branch setup failed" in (report.error or "")
+        ] == "manual_review" and "Git/live preflight failed" in (report.error or "")
 
     def test_validation_runner_is_active_pipeline_validation_path(self):
         assert hasattr(pipeline_mod.update_executor, "validation_runner")
@@ -132,3 +132,19 @@ class TestPipelineRun:
         published = pub.call_args.args[0]
         assert report.runId == fixed and published.runId == fixed
         assert report.branch.endswith(f"/mobile-ux/{fixed}")
+
+
+    def test_publish_failure_writes_local_fallback(
+        self, settings, mock_r2, mock_router, sample_audit, tmp_repo, tmp_path
+    ):
+        settings.rms_website_repo_path = str(tmp_repo)
+        settings.rms_report_dir = str(tmp_path)
+        mock_r2.get_object.return_value = json.dumps(sample_audit).encode()
+        with (
+            patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router),
+            patch("repo_mgmt.pipeline.publish", side_effect=RuntimeError("r2 publish down")),
+        ):
+            report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=True)
+        assert "report publish failed" in (report.error or "")
+        assert report.publish_status.fallback_path is not None
+        assert "fallback-on-brand" in report.publish_status.fallback_path

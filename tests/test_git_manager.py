@@ -1,24 +1,83 @@
+"""Git branch-safety and task rollback tests."""
+
+from __future__ import annotations
+
 import subprocess
+from pathlib import Path
+
 import pytest
+
 from repo_mgmt.git_manager import BranchSafetyError, GitManager
 
 
+def init_repo(path: Path, branch: str = "main") -> None:
+    """Create a small Git repo with one committed file."""
+    subprocess.run(["git", "init", "-b", branch], cwd=path, check=True, stdout=subprocess.PIPE)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
+    (path / "README.md").write_text("hello\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, stdout=subprocess.PIPE)
+
+
 @pytest.mark.parametrize("branch", ["main", "master"])
-def test_create_branch_blocks_from_protected_branch(tmp_path, branch):
-    subprocess.run(
-        ["git", "init", "-b", branch], cwd=tmp_path, check=True, stdout=subprocess.PIPE
-    )
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True
-    )
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
-    (tmp_path / "README.md").write_text("hello")
-    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
-    subprocess.run(
-        ["git", "commit", "-m", "init"],
-        cwd=tmp_path,
-        check=True,
-        stdout=subprocess.PIPE,
-    )
+def test_create_qa_branch_from_protected_branch_is_permitted(tmp_path: Path, branch: str) -> None:
+    init_repo(tmp_path, branch)
+    gm = GitManager(tmp_path)
+    created = gm.create_branch("rms-qa/on-brand/run-1")
+    assert created == "rms-qa/on-brand/run-1"
+    assert gm.current_branch() == "rms-qa/on-brand/run-1"
+
+
+@pytest.mark.parametrize("branch", ["main", "master"])
+def test_committing_on_protected_branch_remains_blocked(tmp_path: Path, branch: str) -> None:
+    init_repo(tmp_path, branch)
+    gm = GitManager(tmp_path)
+    (tmp_path / "README.md").write_text("changed\n", encoding="utf-8")
     with pytest.raises(BranchSafetyError):
-        GitManager(tmp_path).create_branch("rms-qa/test")
+        gm.stage_task_files(["README.md"])
+    with pytest.raises(BranchSafetyError):
+        gm.commit("blocked")
+
+
+def test_live_patch_branch_name_includes_pipeline_and_run_id(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    gm = GitManager(tmp_path)
+    branch = gm.make_qa_branch_name("mobile-ux", "2026-05-05T03-00-00Z")
+    assert branch == "rms-qa/mobile-ux/2026-05-05T03-00-00Z"
+
+
+def test_non_qa_branch_creation_is_blocked(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    with pytest.raises(BranchSafetyError):
+        GitManager(tmp_path).create_branch("feature/random")
+
+
+def test_dirty_tracked_file_fails_preflight_and_is_preserved(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "README.md").write_text("dirty\n", encoding="utf-8")
+    gm = GitManager(tmp_path)
+    with pytest.raises(Exception, match="dirty"):
+        gm.assert_clean_worktree()
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "dirty\n"
+
+
+def test_untracked_file_fails_preflight_and_is_preserved(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    (tmp_path / "notes.txt").write_text("operator notes\n", encoding="utf-8")
+    gm = GitManager(tmp_path)
+    with pytest.raises(Exception, match="dirty"):
+        gm.assert_clean_worktree()
+    assert (tmp_path / "notes.txt").read_text(encoding="utf-8") == "operator notes\n"
+
+
+def test_task_restore_preserves_unrelated_untracked_file(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    gm = GitManager(tmp_path)
+    gm.create_branch("rms-qa/on-brand/run-2")
+    snapshot = gm.capture_task_state(["README.md"])
+    (tmp_path / "README.md").write_text("task change\n", encoding="utf-8")
+    (tmp_path / "unrelated.txt").write_text("keep me\n", encoding="utf-8")
+    gm.restore_task_state(snapshot)
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "hello\n"
+    assert (tmp_path / "unrelated.txt").read_text(encoding="utf-8") == "keep me\n"

@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from repo_mgmt.report_publisher import CommitInfo, RunReport, ValidationSummary, publish
+from repo_mgmt.report_publisher import CommitInfo, RunReport, ValidationSummary, publish, write_local_fallback
 
 
 def _report(dry_run=True):
@@ -41,8 +41,11 @@ def test_dry_run_writes_local_json(tmp_path, monkeypatch, settings, mock_r2):
         "tasks",
         "validation",
         "commits",
+        "publishStatus",
     }
     assert data["validation"]["outputTail"] == "ok"
+    assert data["publishStatus"]["ok"] is True
+    assert "on-brand" in Path(dest).name and "run-1" in Path(dest).name
 
 
 def test_live_writes_report_and_latest(settings, mock_r2):
@@ -60,3 +63,13 @@ def test_report_error_is_serialised(tmp_path, monkeypatch, settings, mock_r2):
     dest = publish(report, settings, mock_r2)
     data = json.loads(Path(dest).read_text())
     assert data["error"] == "boom"
+
+
+def test_live_r2_failure_can_write_fallback(settings, mock_r2, tmp_path):
+    settings.rms_report_dir = str(tmp_path)
+    report = _report(False)
+    dest = write_local_fallback(report, settings, "r2 failed")
+    data = json.loads(Path(dest).read_text())
+    assert data["publishStatus"]["ok"] is False
+    assert data["publishStatus"]["error"] == "r2 failed"
+    assert data["publishStatus"]["fallbackPath"] == dest
