@@ -115,19 +115,27 @@ async def _run_pipeline_bg(pipeline_id: PipelineId, dry_run: bool, run_id: str) 
         _running[pipeline_id] = False
 
 
+def _health_payload() -> dict[str, object]:
+    """Build the public health payload shared by / and /health."""
+    return {
+        "status": "ok",
+        "pipelines": {
+            pipeline_id: ("running" if _running[pipeline_id] else "idle")
+            for pipeline_id in _running
+        },
+    }
+
+
+@app.get("/")
+async def root() -> JSONResponse:
+    """Return 200 for platform health probes that target the service root."""
+    return JSONResponse(status_code=200, content=_health_payload())
+
+
 @app.get("/health")
 async def health() -> JSONResponse:
     """Return service health and per-pipeline run state."""
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "ok",
-            "pipelines": {
-                pipeline_id: ("running" if _running[pipeline_id] else "idle")
-                for pipeline_id in _running
-            },
-        },
-    )
+    return JSONResponse(status_code=200, content=_health_payload())
 
 
 @app.post("/rebuild/{pipeline_id}/run", status_code=202)
