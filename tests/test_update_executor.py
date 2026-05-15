@@ -216,3 +216,36 @@ def test_magicmock_git_manager_restores_via_task_snapshot(
         result = run_executor(issue(sample_audit), tmp_repo, settings, mock_router, gm, False)
     gm.restore_task_state.assert_called_once_with(gm.capture_task_state.return_value)
     assert result["status"] == "manual_review"
+
+
+def test_partial_patch_snapshot_candidates_include_generated_html(tmp_path: Path) -> None:
+    """Partial patches must capture generated pages before post-patch sync."""
+    repo = tmp_path / "site"
+    (repo / "assets" / "partials").mkdir(parents=True)
+    (repo / "assets" / "partials" / "header.html").write_text("<header/>", encoding="utf-8")
+    (repo / "index.html").write_text("<html/>", encoding="utf-8")
+    (repo / "nested").mkdir()
+    (repo / "nested" / "page.html").write_text("<html/>", encoding="utf-8")
+
+    paths = update_executor._snapshot_candidates(  # noqa: SLF001
+        ["assets/partials/header.html"], repo, "mobile-ux"
+    )
+
+    assert "assets/partials/header.html" in paths
+    assert "index.html" in paths
+    assert "nested/page.html" in paths
+
+
+def test_post_patch_sync_runs_partial_injector(tmp_path: Path) -> None:
+    """The partial-sync helper must run the injector, not the validate-only command."""
+    with patch("repo_mgmt.update_executor.validation_runner.run_commands") as run_commands:
+        run_commands.return_value = ValidationResult(
+            True, ["python3 scripts/inject_partials.py"], "synced"
+        )
+        result = update_executor._run_post_patch_sync(tmp_path)  # noqa: SLF001
+
+    run_commands.assert_called_once_with(
+        ["python3 scripts/inject_partials.py"], cwd=tmp_path
+    )
+    assert result["passed"] is True
+    assert result["commands"] == ["python3 scripts/inject_partials.py"]

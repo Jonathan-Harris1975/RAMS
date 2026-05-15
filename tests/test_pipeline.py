@@ -1,7 +1,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 from repo_mgmt import pipeline as pipeline_mod
-from repo_mgmt.report_publisher import RunReport
+from repo_mgmt.report_publisher import RunReport, ValidationSummary
 
 
 class TestPipelineRun:
@@ -112,6 +112,29 @@ class TestPipelineRun:
         assert report.tasks[0][
             "status"
         ] == "manual_review" and "Git/live preflight failed" in (report.error or "")
+
+
+    def test_live_baseline_failure_blocks_code_fix_execution(
+        self, settings, mock_r2, mock_router, sample_audit
+    ):
+        mock_r2.get_object.return_value = json.dumps(sample_audit).encode()
+        baseline = ValidationSummary(
+            commands=["python3 scripts/inject_partials.py --validate"],
+            passed=False,
+            output_tail="DRIFT DETECTED before patch",
+        )
+        with (
+            patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router),
+            patch("repo_mgmt.pipeline._preflight_live_repo", return_value=None),
+            patch("repo_mgmt.pipeline._run_baseline_validation", return_value=baseline),
+            patch("repo_mgmt.update_executor.run_task", new_callable=AsyncMock) as run_task,
+        ):
+            report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=False)
+
+        run_task.assert_not_called()
+        assert report.baseline_validation is baseline
+        assert report.tasks[0]["status"] == "manual_review"
+        assert "baseline validation failed before patch" in report.tasks[0]["error"]
 
     def test_validation_runner_is_active_pipeline_validation_path(self):
         assert hasattr(pipeline_mod.update_executor, "validation_runner")
