@@ -378,14 +378,21 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
         return True
 
     if not cfg.live_write_permitted:
+        details = cfg.live_write_gate_diagnostics(
+            requested_dry_run=requested,
+            effective_dry_run=effective_dry_run,
+        )
         raise AdmissionError(
             403,
             "live write refused",
             {
                 "reason": (
-                    "RMS_DRY_RUN=false and RMS_LIVE_WRITE_ENABLED=true must both "
-                    "be explicitly present and parseable"
+                    "Live writes require the request to resolve to dry_run=false, "
+                    "RMS_DRY_RUN=false, and RMS_LIVE_WRITE_ENABLED=true. "
+                    "All gates must be explicitly present and parseable."
                 ),
+                **details,
+                # Backwards-compatible booleans retained for existing Make/log checks.
                 "dryRunEnvExplicitAndParseable": cfg.dry_run_env_explicit_and_parseable,
                 "liveWriteEnvExplicitAndParseable": cfg.live_write_env_explicit_and_parseable,
             },

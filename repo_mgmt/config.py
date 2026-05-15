@@ -132,8 +132,10 @@ class Settings(BaseSettings):
 
     _rms_dry_run_env_present: bool = PrivateAttr(default=False)
     _rms_dry_run_env_parseable: bool = PrivateAttr(default=False)
+    _rms_dry_run_env_raw: str | None = PrivateAttr(default=None)
     _rms_live_write_env_present: bool = PrivateAttr(default=False)
     _rms_live_write_env_parseable: bool = PrivateAttr(default=False)
+    _rms_live_write_env_raw: str | None = PrivateAttr(default=None)
 
     @field_validator(
         "rms_dry_run",
@@ -164,6 +166,8 @@ class Settings(BaseSettings):
         """Raise ConfigurationError listing all missing required fields."""
         dry_raw = _env_get_case_insensitive("RMS_DRY_RUN")
         live_raw = _env_get_case_insensitive("RMS_LIVE_WRITE_ENABLED")
+        self._rms_dry_run_env_raw = dry_raw
+        self._rms_live_write_env_raw = live_raw
         self._rms_dry_run_env_present = dry_raw is not None
         self._rms_dry_run_env_parseable = _parse_bool(
             dry_raw, safe_default=True
@@ -200,6 +204,66 @@ class Settings(BaseSettings):
                 f"Missing required configuration fields: {', '.join(missing)}"
             )
         return self
+
+
+    @property
+    def dry_run_env_raw(self) -> str | None:
+        """Return the raw RMS_DRY_RUN environment value, if present."""
+        return self._rms_dry_run_env_raw
+
+    @property
+    def dry_run_env_present(self) -> bool:
+        """Return True when RMS_DRY_RUN was present in the runtime environment."""
+        return self._rms_dry_run_env_present
+
+    @property
+    def dry_run_env_parseable(self) -> bool:
+        """Return True when RMS_DRY_RUN was parseable as a boolean value."""
+        return self._rms_dry_run_env_parseable
+
+    @property
+    def live_write_env_raw(self) -> str | None:
+        """Return the raw RMS_LIVE_WRITE_ENABLED environment value, if present."""
+        return self._rms_live_write_env_raw
+
+    @property
+    def live_write_env_present(self) -> bool:
+        """Return True when RMS_LIVE_WRITE_ENABLED was present in the runtime environment."""
+        return self._rms_live_write_env_present
+
+    @property
+    def live_write_env_parseable(self) -> bool:
+        """Return True when RMS_LIVE_WRITE_ENABLED was parseable as a boolean value."""
+        return self._rms_live_write_env_parseable
+
+    def live_write_gate_diagnostics(
+        self, *, requested_dry_run: bool | None, effective_dry_run: bool
+    ) -> dict[str, object]:
+        """Return non-secret live-write gate diagnostics for API error responses."""
+        checks = {
+            "requestDryRunIsFalse": effective_dry_run is False,
+            "dryRunEnvPresent": self.dry_run_env_present,
+            "dryRunEnvParseable": self.dry_run_env_parseable,
+            "dryRunEnvValueIsFalse": self.rms_dry_run is False,
+            "liveWriteEnvPresent": self.live_write_env_present,
+            "liveWriteEnvParseable": self.live_write_env_parseable,
+            "liveWriteEnvValueIsTrue": self.rms_live_write_enabled is True,
+        }
+        return {
+            "requestedDryRun": requested_dry_run,
+            "effectiveDryRun": effective_dry_run,
+            "envDryRunRaw": self.dry_run_env_raw,
+            "envDryRunValue": self.rms_dry_run,
+            "envDryRunPresent": self.dry_run_env_present,
+            "envDryRunParseable": self.dry_run_env_parseable,
+            "liveWriteRaw": self.live_write_env_raw,
+            "liveWriteValue": self.rms_live_write_enabled,
+            "liveWritePresent": self.live_write_env_present,
+            "liveWriteParseable": self.live_write_env_parseable,
+            "liveWritePermitted": self.live_write_permitted,
+            "checks": checks,
+            "failedChecks": [name for name, passed in checks.items() if not passed],
+        }
 
     @property
     def dry_run_env_explicit_and_parseable(self) -> bool:
