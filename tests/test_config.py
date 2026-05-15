@@ -133,3 +133,24 @@ def test_live_mode_not_permitted_when_live_gate_malformed() -> None:
     assert cfg.rms_dry_run is False
     assert cfg.rms_live_write_enabled is False
     assert cfg.live_write_permitted is False
+
+
+def test_live_write_gate_diagnostics_exposes_values_without_guesswork() -> None:
+    with patch.dict(
+        os.environ,
+        _complete_env(RMS_DRY_RUN="false", RMS_LIVE_WRITE_ENABLED="false"),
+        clear=True,
+    ):
+        cfg = Settings()
+    details = cfg.live_write_gate_diagnostics(
+        requested_dry_run=False,
+        effective_dry_run=False,
+    )
+    assert details["requestedDryRun"] is False
+    assert details["effectiveDryRun"] is False
+    assert details["envDryRunRaw"] == "false"
+    assert details["envDryRunValue"] is False
+    assert details["liveWriteRaw"] == "false"
+    assert details["liveWriteValue"] is False
+    assert details["liveWritePermitted"] is False
+    assert "liveWriteEnvValueIsTrue" in details["failedChecks"]

@@ -286,7 +286,14 @@ def test_body_cannot_override_dry_run_without_live_gate(
     with TestClient(api_mod.app) as client:
         response = client.post("/rebuild/on-brand/run", json={"dry_run": False})
     assert response.status_code == 403
-    assert response.json()["error"] == "live write refused"
+    payload = response.json()
+    assert payload["error"] == "live write refused"
+    assert payload["requestedDryRun"] is False
+    assert payload["effectiveDryRun"] is False
+    assert payload["envDryRunValue"] is True
+    assert payload["liveWriteValue"] is False
+    assert "dryRunEnvValueIsFalse" in payload["failedChecks"]
+    assert "liveWriteEnvValueIsTrue" in payload["failedChecks"]
     assert fake_pipeline.calls == []
 
 
