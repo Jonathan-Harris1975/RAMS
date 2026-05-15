@@ -749,12 +749,26 @@ def _map_on_brand_candidate(candidate: dict[str, Any], artefact_name: str) -> di
 
 
 def _finding_signature(finding: dict[str, Any]) -> str:
-    """Return a stable de-duplication signature for mapped findings."""
+    """Return a stable de-duplication signature for mapped findings.
+
+    Live audit runs may publish the same confirmed defect in both report.json
+    and evidence.json. The source artefact should not be part of the signature;
+    otherwise RAMS creates duplicate tasks from the same underlying issue.
+    """
+    source_issue_id = str(finding.get("sourceIssueId", "")).strip()
+    if source_issue_id:
+        return "|".join(
+            [
+                str(finding.get("pipeline", "")),
+                source_issue_id,
+                ",".join(str(path) for path in finding.get("affectedPaths", [])),
+            ]
+        )
     return "|".join(
         [
-            str(finding.get("sourceAudit", "")),
-            str(finding.get("sourceIssueId", "")),
             str(finding.get("title", "")),
+            str(finding.get("description", "")),
+            str(finding.get("requiredOutcome", "")),
             ",".join(str(path) for path in finding.get("affectedPaths", [])),
         ]
     )

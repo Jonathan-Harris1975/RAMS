@@ -40,15 +40,34 @@ repository management system. You receive:
 Your response MUST be a single valid JSON object conforming to
 AnchorPatch/v1. No prose, no markdown fences, no explanation
 outside the JSON.
+
+AnchorPatch/v1 exact schema:
+{
+  "patchProtocol": "AnchorPatch/v1",
+  "changes": [
+    {
+      "file": "repo-relative/path.ext",
+      "operation": "replace" | "insert_after" | "delete",
+      "anchorBefore": "exact unique anchor text from the current file",
+      "find": "exact unique text to replace, insert after, or delete",
+      "replace": "replacement or insertion text",
+      "rationale": "brief reason for this bounded change"
+    }
+  ],
+  "reason": "required only when changes is empty"
+}
+
 Rules:
 1. Only include files listed in affectedPaths.
-2. anchorBefore must appear exactly once in the current file.
-3. find must appear exactly once in the current file (replace/delete).
-4. Do not rename files, add new dependencies, or change unrelated code.
-5. Do not touch any file whose path matches a protected prefix
+2. Use the exact key names above: file, operation, anchorBefore, find, replace, rationale.
+3. Do not use aliases such as path, action, before, search, replacement, or explanation.
+4. anchorBefore must appear exactly once in the current file.
+5. find must appear exactly once in the current file.
+6. Do not rename files, add new dependencies, or change unrelated code.
+7. Do not touch any file whose path matches a protected prefix
 (blog/posts/, transcripts/, data/podcast-episodes.json) unless
 this pipeline explicitly has authority over those paths.
-6. If the required outcome cannot be safely achieved with a bounded
+8. If the required outcome cannot be safely achieved with a bounded
 patch, return:
 {"patchProtocol":"AnchorPatch/v1","changes":[],"reason":"<why>"}
 """
@@ -57,8 +76,14 @@ REPAIR_SYSTEM_PROMPT = """
 You repair invalid repository patch-planner output.
 Return exactly one valid JSON object conforming to AnchorPatch/v1.
 Do not include prose, markdown fences, analysis, comments, or any text
-outside the JSON object. If a safe bounded patch cannot be produced,
-return {"patchProtocol":"AnchorPatch/v1","changes":[],"reason":"<why>"}.
+outside the JSON object.
+
+Every change must use these exact keys only:
+file, operation, anchorBefore, find, replace, rationale.
+Never use aliases such as path, action, before, search, replacement,
+content, text, explanation, or reason inside a change object.
+If a safe bounded patch cannot be produced, return
+{"patchProtocol":"AnchorPatch/v1","changes":[],"reason":"<why>"}.
 """
 
 
@@ -247,12 +272,132 @@ def _parse_plan(raw: str, task_id: str) -> dict[str, Any]:
         raise PatchPlanError(
             "Planner must emit AnchorPatch/v1 directly, not taskId/operations"
         )
+    data = _canonicalise_anchor_patch(data, task_id)
     try:
         return validate_patch(data)
     except PatchSchemaError as exc:
         raise PatchPlanError(
             f"Invalid AnchorPatch/v1 plan for {task_id!r}: {exc}"
         ) from exc
+
+
+def _canonicalise_anchor_patch(data: Any, task_id: str) -> Any:
+    """Normalise common model key aliases into AnchorPatch/v1.
+
+    Some providers still return near-miss JSON after the repair prompt, for
+    example ``path`` instead of ``file`` or ``action`` instead of
+    ``operation``. This adapter is intentionally narrow: it never fabricates
+    anchors, find strings, replacement text, or files. It only translates
+    obvious synonyms and supplies a missing rationale so the strict schema can
+    make the final safety decision.
+    """
+    if not isinstance(data, dict):
+        return data
+    if data.get("patchProtocol") != "AnchorPatch/v1":
+        protocol = data.get("protocol") or data.get("patch_protocol")
+        if protocol == "AnchorPatch/v1":
+            data = {**data, "patchProtocol": "AnchorPatch/v1"}
+    changes = data.get("changes")
+    if not isinstance(changes, list):
+        return data
+    canonical_changes: list[Any] = []
+    for index, change in enumerate(changes):
+        if not isinstance(change, dict):
+            canonical_changes.append(change)
+            continue
+        canonical = dict(change)
+        _copy_first_present(canonical, "file", ["path", "filePath", "repoPath", "filename"])
+        _copy_first_present(canonical, "operation", ["action", "op", "type"])
+        _copy_first_present(
+            canonical,
+            "anchorBefore",
+            ["anchor", "before", "anchorText", "anchor_before", "context", "location"],
+        )
+        _copy_first_present(
+            canonical,
+            "find",
+            ["search", "findText", "oldText", "old", "target", "match", "current"],
+        )
+        _copy_first_present(
+            canonical,
+            "replace",
+            ["replacement", "replaceWith", "newText", "new", "insert", "content", "text", "updated"],
+        )
+        _copy_first_present(canonical, "rationale", ["explanation", "reason", "why"])
+
+        if "operation" in canonical:
+            canonical["operation"] = _normalise_operation(canonical.get("operation"))
+        elif canonical.get("find") and "replace" in canonical:
+            canonical["operation"] = "replace"
+
+        if not canonical.get("rationale") and canonical.get("file") and canonical.get("operation"):
+            canonical["rationale"] = f"Bounded patch proposed for {task_id}."
+
+        for alias in (
+            "path",
+            "filePath",
+            "repoPath",
+            "filename",
+            "action",
+            "op",
+            "type",
+            "anchor",
+            "before",
+            "anchorText",
+            "anchor_before",
+            "context",
+            "location",
+            "search",
+            "findText",
+            "oldText",
+            "old",
+            "target",
+            "match",
+            "current",
+            "replacement",
+            "replaceWith",
+            "newText",
+            "new",
+            "insert",
+            "content",
+            "text",
+            "updated",
+            "explanation",
+            "why",
+        ):
+            canonical.pop(alias, None)
+        canonical_changes.append(canonical)
+    return {**data, "changes": canonical_changes}
+
+
+def _copy_first_present(target: dict[str, Any], canonical_key: str, aliases: list[str]) -> None:
+    """Copy the first non-empty alias into *canonical_key* when absent."""
+    if target.get(canonical_key) not in (None, ""):
+        return
+    for alias in aliases:
+        value = target.get(alias)
+        if value not in (None, ""):
+            target[canonical_key] = value
+            return
+
+
+def _normalise_operation(value: Any) -> Any:
+    """Map common operation aliases onto the strict operation enum."""
+    text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    mapping = {
+        "replace": "replace",
+        "update": "replace",
+        "substitute": "replace",
+        "insert_after": "insert_after",
+        "insertafter": "insert_after",
+        "append_after": "insert_after",
+        "add_after": "insert_after",
+        "insert": "insert_after",
+        "append": "insert_after",
+        "delete": "delete",
+        "remove": "delete",
+    }
+    return mapping.get(text, value)
 
 
 def _validate_plan_scope(
