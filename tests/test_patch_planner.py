@@ -59,6 +59,49 @@ class TestParsePlan:
         assert parsed["patchProtocol"] == "AnchorPatch/v1"
         assert parsed["changes"] == []
 
+
+    def test_normalises_common_change_aliases_before_schema_validation(self) -> None:
+        raw = {
+            "patchProtocol": "AnchorPatch/v1",
+            "changes": [
+                {
+                    "path": "index.html",
+                    "action": "update",
+                    "anchor": "<button class=\"jh-hamburger\">",
+                    "search": "aria-expanded=\"false\"",
+                    "replacement": "aria-expanded=\"true\"",
+                    "explanation": "Keep hamburger state aligned.",
+                }
+            ],
+        }
+        parsed = _parse_plan(json.dumps(raw), "rms-mobile-ux-2026-05-15-001")
+        assert parsed["changes"][0] == {
+            "file": "index.html",
+            "operation": "replace",
+            "anchorBefore": "<button class=\"jh-hamburger\">",
+            "find": "aria-expanded=\"false\"",
+            "replace": "aria-expanded=\"true\"",
+            "rationale": "Keep hamburger state aligned.",
+        }
+
+    def test_adds_bounded_default_rationale_for_alias_patch(self) -> None:
+        raw = {
+            "patchProtocol": "AnchorPatch/v1",
+            "changes": [
+                {
+                    "path": "index.html",
+                    "action": "replace",
+                    "anchor": "<nav",
+                    "find": "old",
+                    "replace": "new",
+                }
+            ],
+        }
+        parsed = _parse_plan(json.dumps(raw), "rms-mobile-ux-2026-05-15-001")
+        assert parsed["changes"][0]["rationale"] == (
+            "Bounded patch proposed for rms-mobile-ux-2026-05-15-001."
+        )
+
     def test_raises_on_invalid_json(self) -> None:
         with pytest.raises(PatchPlanError):
             _parse_plan("not json", "t")

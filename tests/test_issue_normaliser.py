@@ -256,3 +256,28 @@ class TestNormalise:
         assert issues[0]["classification"] == "manual_review"
         assert issues[0]["sourceAudit"] == "seo-aeo-geo:summary.json"
         assert issues[0]["affectedPaths"] == []
+
+    def test_on_brand_deduplicates_same_defect_from_report_and_evidence(self, settings) -> None:
+        duplicate = {
+            "issueId": "OB-001",
+            "severity": "high",
+            "confidence": "confirmed",
+            "sourceType": "rss_feed",
+            "issueType": "existing RSS validator finding",
+            "exactEvidence": "Summary contains banned filler.",
+            "whyItIsOffBrand": "The validator identified a rule breach.",
+            "violatedRule": "RSS publication rules.",
+            "rootCauseLevel": "validator",
+            "exactRemediation": "For future RSS output, tighten the prompt or rewrite retry path.",
+        }
+        audit = {
+            "latest": {"auditType": "on-brand"},
+            "artefacts": {
+                "report.json": {"confirmedDefectsLedger": [duplicate]},
+                "evidence.json": {"confirmedDefectsLedger": [dict(duplicate)]},
+            },
+        }
+        issues = normalise(audit, "on-brand", "2026-05-15", settings)
+        assert len(issues) == 1
+        assert issues[0]["sourceIssueId"] == "OB-001"
+
