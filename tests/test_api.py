@@ -300,3 +300,88 @@ def test_single_worker_limitation_visible_in_readiness(
         response = client.get("/readiness")
     assert response.json()["status"] == "degraded"
     assert response.json()["dependencies"]["single_worker_mode"] is False
+
+
+def _write_dry_run_report(report_dir: Path, pipeline: str, run_id: str) -> Path:
+    """Write a minimal dry-run report fixture to the configured report directory."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+    path = report_dir / f"dry-run-{pipeline}-{run_id}-report.json"
+    path.write_text(
+        '{"runId":"%s","pipeline":"%s","dryRun":true,"summary":{"tasksGenerated":0}}'
+        % (run_id, pipeline),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_dry_run_report_latest_endpoint_returns_newest_report(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Operators can fetch the newest container-local dry-run report over HTTP."""
+    report_dir = tmp_path / "reports"
+    older = "2026-05-15T12-16-44Z"
+    newer = "2026-05-15T12-22-04Z"
+    _write_dry_run_report(report_dir, "mobile-ux", older)
+    _write_dry_run_report(report_dir, "mobile-ux", newer)
+    settings = make_settings(repo_dirs, RMS_REPORT_DIR=str(report_dir))
+    install_valid_api(monkeypatch, settings)
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/reports/dry-run/mobile-ux/latest")
+
+    assert response.status_code == 200
+    assert response.json()["runId"] == newer
+    assert response.json()["pipeline"] == "mobile-ux"
+
+
+def test_dry_run_report_specific_endpoint_returns_requested_report(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Operators can fetch a specific dry-run report by run ID."""
+    report_dir = tmp_path / "reports"
+    run_id = "2026-05-15T12-21-37Z"
+    _write_dry_run_report(report_dir, "on-brand", run_id)
+    settings = make_settings(repo_dirs, RMS_REPORT_DIR=str(report_dir))
+    install_valid_api(monkeypatch, settings)
+
+    with TestClient(api_mod.app) as client:
+        response = client.get(f"/reports/dry-run/on-brand/{run_id}")
+
+    assert response.status_code == 200
+    assert response.json()["runId"] == run_id
+    assert response.json()["pipeline"] == "on-brand"
+
+
+def test_dry_run_report_list_endpoint_returns_metadata(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The report index exposes report URLs without reading every full payload."""
+    report_dir = tmp_path / "reports"
+    run_id = "2026-05-15T12-22-04Z"
+    _write_dry_run_report(report_dir, "seo-aeo-geo", run_id)
+    settings = make_settings(repo_dirs, RMS_REPORT_DIR=str(report_dir))
+    install_valid_api(monkeypatch, settings)
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/reports/dry-run/seo-aeo-geo")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 1
+    assert data["latestRunId"] == run_id
+    assert data["reports"][0]["url"] == f"/reports/dry-run/seo-aeo-geo/{run_id}"
+
+
+def test_missing_dry_run_report_returns_helpful_404(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A missing report returns a clear operator-facing 404 rather than route 404."""
+    settings = make_settings(repo_dirs, RMS_REPORT_DIR=str(tmp_path / "reports"))
+    install_valid_api(monkeypatch, settings)
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/reports/dry-run/mobile-ux/latest")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "dry-run report not found"
+    assert "Run the pipeline" in response.json()["hint"]
