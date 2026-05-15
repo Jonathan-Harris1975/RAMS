@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path as FilePath
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import BackgroundTasks, Body, FastAPI, Header, Path
 from fastapi.responses import JSONResponse
@@ -451,6 +453,235 @@ async def readiness() -> JSONResponse:
     return JSONResponse(status_code=200, content=_readiness_payload())
 
 
+
+
+def _auth_error_response(authorization: str | None) -> JSONResponse | None:
+    """Return a 401 response when optional bearer-token auth is enabled and fails."""
+    cfg_for_auth = _get_cfg()
+    expected_key = cfg_for_auth.rms_api_key if cfg_for_auth is not None else None
+    if not expected_key:
+        return None
+    token: str | None = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[len("bearer "):].strip()
+    if token == expected_key:
+        return None
+    return JSONResponse(
+        status_code=401,
+        content={"error": "unauthorized"},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _report_config_or_response() -> tuple[Settings | None, JSONResponse | None]:
+    """Return settings for report endpoints, or a structured 503 response."""
+    cfg = _get_cfg()
+    if cfg is None:
+        return None, JSONResponse(
+            status_code=503,
+            content={"error": "configuration unavailable", "dependencies": _dependency_details()},
+        )
+    return cfg, None
+
+
+def _safe_report_dir(cfg: Settings) -> FilePath:
+    """Return the configured local report directory as a resolved path."""
+    return cfg.report_dir().expanduser().resolve()
+
+
+def _dry_run_report_run_id(path: FilePath, pipeline_id: PipelineId) -> str:
+    """Extract the run ID from a dry-run report filename."""
+    prefix = f"dry-run-{pipeline_id}-"
+    suffix = "-report.json"
+    name = path.name
+    if name.startswith(prefix) and name.endswith(suffix):
+        return name[len(prefix) : -len(suffix)]
+    return ""
+
+
+def _dry_run_report_records(cfg: Settings, pipeline_id: PipelineId) -> list[dict[str, Any]]:
+    """Return newest-first metadata for local dry-run reports for *pipeline_id*."""
+    report_dir = _safe_report_dir(cfg)
+    if not report_dir.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for path in report_dir.glob(f"dry-run-{pipeline_id}-*-report.json"):
+        if not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        run_id = _dry_run_report_run_id(path, pipeline_id)
+        if not run_id:
+            continue
+        updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        records.append(
+            {
+                "runId": run_id,
+                "filename": path.name,
+                "sizeBytes": stat.st_size,
+                "updatedAt": updated_at,
+                "url": f"/reports/dry-run/{pipeline_id}/{run_id}",
+            }
+        )
+    return sorted(records, key=lambda item: str(item["runId"]), reverse=True)
+
+
+def _dry_run_report_path(cfg: Settings, pipeline_id: PipelineId, run_id: str) -> FilePath | None:
+    """Return the safe path for a local dry-run report, or None if invalid/missing."""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z", run_id) is None:
+        return None
+    report_dir = _safe_report_dir(cfg)
+    path = (report_dir / f"dry-run-{pipeline_id}-{run_id}-report.json").resolve()
+    try:
+        path.relative_to(report_dir)
+    except ValueError:
+        return None
+    return path if path.is_file() else None
+
+
+def _read_json_report(path: FilePath) -> tuple[dict[str, Any] | list[Any] | None, str | None]:
+    """Read a local JSON report file and return payload plus optional error."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, f"report is not valid JSON: {exc.msg}"
+    except OSError as exc:
+        return None, f"report could not be read: {exc}"
+    if isinstance(payload, (dict, list)):
+        return payload, None
+    return None, "report JSON root must be an object or array"
+
+
+@app.get("/reports/dry-run")
+async def list_all_dry_run_reports(
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """List local dry-run reports retained inside the running container."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg, error_response = _report_config_or_response()
+    if error_response is not None or cfg is None:
+        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+    pipelines: dict[str, object] = {}
+    for pipeline_id in _PIPELINE_IDS:
+        records = _dry_run_report_records(cfg, pipeline_id)
+        pipelines[pipeline_id] = {
+            "count": len(records),
+            "latestRunId": records[0]["runId"] if records else None,
+            "latestUrl": records[0]["url"] if records else None,
+        }
+    return JSONResponse(
+        status_code=200,
+        content={
+            "reportType": "dry-run",
+            "reportDir": str(_safe_report_dir(cfg)),
+            "pipelines": pipelines,
+        },
+    )
+
+
+@app.get("/reports/dry-run/{pipeline_id}")
+async def list_pipeline_dry_run_reports(
+    pipeline_id: Annotated[PipelineIdLiteral, Path()],
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """List local dry-run report metadata for a single pipeline."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg, error_response = _report_config_or_response()
+    if error_response is not None or cfg is None:
+        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+    typed_pipeline_id: PipelineId = pipeline_id
+    records = _dry_run_report_records(cfg, typed_pipeline_id)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "reportType": "dry-run",
+            "pipeline": typed_pipeline_id,
+            "count": len(records),
+            "latestRunId": records[0]["runId"] if records else None,
+            "reports": records,
+        },
+    )
+
+
+@app.get("/reports/dry-run/{pipeline_id}/latest")
+async def get_latest_dry_run_report(
+    pipeline_id: Annotated[PipelineIdLiteral, Path()],
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Return the newest local dry-run report for the requested pipeline."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg, error_response = _report_config_or_response()
+    if error_response is not None or cfg is None:
+        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+    typed_pipeline_id: PipelineId = pipeline_id
+    records = _dry_run_report_records(cfg, typed_pipeline_id)
+    if not records:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "dry-run report not found",
+                "pipeline": typed_pipeline_id,
+                "reportDir": str(_safe_report_dir(cfg)),
+                "hint": "Run the pipeline with dry_run=true, then retry this endpoint on the same running instance.",
+            },
+        )
+    latest_run_id = str(records[0]["runId"])
+    path = _dry_run_report_path(cfg, typed_pipeline_id, latest_run_id)
+    if path is None:
+        return JSONResponse(status_code=404, content={"error": "dry-run report not found"})
+    payload, read_error = _read_json_report(path)
+    if read_error:
+        return JSONResponse(
+            status_code=500,
+            content={"error": read_error, "pipeline": typed_pipeline_id, "filename": path.name},
+        )
+    return JSONResponse(status_code=200, content=payload)
+
+
+@app.get("/reports/dry-run/{pipeline_id}/{run_id}")
+async def get_dry_run_report(
+    pipeline_id: Annotated[PipelineIdLiteral, Path()],
+    run_id: Annotated[str, Path()],
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Return a specific local dry-run report by pipeline and run ID."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg, error_response = _report_config_or_response()
+    if error_response is not None or cfg is None:
+        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+    typed_pipeline_id: PipelineId = pipeline_id
+    path = _dry_run_report_path(cfg, typed_pipeline_id, run_id)
+    if path is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "dry-run report not found",
+                "pipeline": typed_pipeline_id,
+                "runId": run_id,
+                "reportDir": str(_safe_report_dir(cfg)),
+            },
+        )
+    payload, read_error = _read_json_report(path)
+    if read_error:
+        return JSONResponse(
+            status_code=500,
+            content={"error": read_error, "pipeline": typed_pipeline_id, "filename": path.name},
+        )
+    return JSONResponse(status_code=200, content=payload)
+
+
 @app.post("/rebuild/{pipeline_id}/run", status_code=202)
 async def trigger_run(
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
@@ -459,19 +690,9 @@ async def trigger_run(
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Trigger a pipeline run and return the single source-of-truth run ID."""
-    # ── Optional Bearer-token authentication ──────────────────────────────
-    cfg_for_auth = _get_cfg()
-    expected_key = cfg_for_auth.rms_api_key if cfg_for_auth is not None else None
-    if expected_key:
-        token: str | None = None
-        if authorization and authorization.lower().startswith("bearer "):
-            token = authorization[len("bearer "):].strip()
-        if not token or token != expected_key:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "unauthorized"},
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
 
     typed_pipeline_id: PipelineId = pipeline_id
     if _running.get(typed_pipeline_id):
