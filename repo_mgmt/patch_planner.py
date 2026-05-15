@@ -116,11 +116,36 @@ def _prepare_plan_inputs(
     return task_id, affected_paths, _build_prompt(issue, context_files, pipeline_id)
 
 
+
+
+def _strip_single_json_fence(text: str) -> str:
+    """Return JSON inside one markdown fence, or the original text.
+
+    Only a single whole-response fence is accepted; this is intentionally not a
+    permissive JSON extractor.
+    """
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if len(lines) < 3 or lines[-1].strip() != "```":
+        return text
+    opener = lines[0].strip().lower()
+    if opener not in {"```", "```json"}:
+        return text
+    inner = "\n".join(lines[1:-1]).strip()
+    if inner.startswith("{") and inner.endswith("}"):
+        return inner
+    return text
+
 def _parse_plan(raw: str, task_id: str) -> dict[str, Any]:
-    """Parse a model response as strict JSON and validate AnchorPatch/v1."""
-    text = raw.strip()
-    if text.startswith("```") or text.endswith("```"):
-        raise PatchPlanError("Model response must be strict JSON, not markdown fences")
+    """Parse a model response as JSON and validate AnchorPatch/v1.
+
+    The planner prompt demands bare JSON. Some hosted models still wrap an
+    otherwise valid object in a single markdown JSON fence. We unwrap only that
+    exact case, then continue through the same AnchorPatch/v1 schema and scope
+    validation. Prose around the JSON remains invalid.
+    """
+    text = _strip_single_json_fence(raw.strip())
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:

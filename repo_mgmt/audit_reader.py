@@ -188,9 +188,11 @@ def _discover_artefact_keys(pipeline_id: str, latest: dict[str, Any]) -> dict[st
             if key and key.endswith(".json"):
                 candidates[_safe_label(label_text)] = key
 
-    # Known artefacts derived from reportPrefix, even when the latest manifest
-    # omits a direct URL. R2 errors are handled fail-soft later.
-    if report_prefix:
+    # If the manifest exposes explicit JSON URLs/artefact entries, trust those.
+    # Older audit writers sometimes omit child JSON pointers entirely; only then
+    # derive a bounded set of likely keys from reportPrefix. This avoids noisy
+    # NoSuchKey warnings for artefacts the producer never wrote.
+    if report_prefix and not candidates:
         for label in priorities:
             candidates.setdefault(label, _join_key(report_prefix, label))
 

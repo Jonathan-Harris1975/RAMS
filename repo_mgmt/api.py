@@ -626,6 +626,16 @@ async def get_latest_dry_run_report(
     typed_pipeline_id: PipelineId = pipeline_id
     records = _dry_run_report_records(cfg, typed_pipeline_id)
     if not records:
+        if _running.get(typed_pipeline_id):
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "pending",
+                    "pipeline": typed_pipeline_id,
+                    "reportDir": str(_safe_report_dir(cfg)),
+                    "hint": "The pipeline is still running. Retry this endpoint after the run finishes.",
+                },
+            )
         return JSONResponse(
             status_code=404,
             content={
@@ -664,6 +674,17 @@ async def get_dry_run_report(
     typed_pipeline_id: PipelineId = pipeline_id
     path = _dry_run_report_path(cfg, typed_pipeline_id, run_id)
     if path is None:
+        if _running.get(typed_pipeline_id):
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "pending",
+                    "pipeline": typed_pipeline_id,
+                    "runId": run_id,
+                    "reportDir": str(_safe_report_dir(cfg)),
+                    "hint": "The requested dry-run report is not written yet. Retry after the run finishes.",
+                },
+            )
         return JSONResponse(
             status_code=404,
             content={

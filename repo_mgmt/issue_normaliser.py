@@ -354,7 +354,136 @@ def _extract_findings(
                     max_items,
                 )
                 return mapped
-    return mapped
+    if mapped:
+        return mapped
+    return _aggregate_manifest_findings(audit, pipeline_id, max_items)
+
+
+def _aggregate_manifest_findings(
+    audit: dict[str, Any],
+    pipeline_id: str,
+    max_items: int,
+) -> list[dict[str, Any]]:
+    """Create safe manual-review findings from aggregate manifests.
+
+    Some audit producers publish only summary/coverage ledgers for a run. Those
+    objects confirm that work exists, but do not provide deterministic file
+    anchors. Surface them as manual-review tasks rather than silently returning
+    an empty report or inventing code patches.
+    """
+    if pipeline_id != "seo-aeo-geo":
+        return []
+    latest = audit.get("latest") if isinstance(audit.get("latest"), dict) else audit
+    artefacts = audit.get("artefacts") if isinstance(audit.get("artefacts"), dict) else {}
+    summary = artefacts.get("summary.json") if isinstance(artefacts.get("summary.json"), dict) else latest
+    coverage = artefacts.get("coverage.json") if isinstance(artefacts.get("coverage.json"), dict) else {}
+
+    findings: list[dict[str, Any]] = []
+    issue_count = _int_field(summary, "issueCount") or _int_field(latest, "issueCount")
+    failed_count = _int_field(summary, "failedUrlCount") or _int_field(coverage, "failedUrlCount")
+    if issue_count or failed_count:
+        findings.append(
+            {
+                "title": "SEO/AEO/GEO aggregate issues require review",
+                "description": (
+                    f"Audit summary reports {issue_count or 0} issue(s)"
+                    f" and {failed_count or 0} failed URL(s), but no deterministic"
+                    " source-level finding ledger was published for RAMS to patch safely."
+                ),
+                "severity": "medium" if issue_count else "low",
+                "confidence": 0.8,
+                "classification": "manual_review",
+                "fixClass": "",
+                "affectedPaths": [],
+                "evidence": [
+                    f"issueCount: {issue_count or 0}",
+                    f"failedUrlCount: {failed_count or 0}",
+                    f"coveragePercent: {summary.get('coveragePercent', latest.get('coveragePercent', 'unknown'))}",
+                ],
+                "requiredOutcome": (
+                    "Inspect the SEO/AEO/GEO summary and coverage artefacts, then ensure the"
+                    " audit producer writes a source-level findings ledger when deterministic"
+                    " repository fixes are available."
+                ),
+                "sourceAudit": "seo-aeo-geo:summary.json",
+                "sourceIssueId": "seo-aeo-geo-aggregate",
+                "sourceArtefact": "summary.json",
+            }
+        )
+
+    family_items = summary.get("familyCoverage")
+    if isinstance(family_items, list):
+        for item in family_items:
+            if not isinstance(item, dict):
+                continue
+            failed = _int_field(item, "failed")
+            lowest_score = _float_field(item, "lowestScore")
+            average_score = _float_field(item, "averageScore")
+            if not failed and (lowest_score is None or lowest_score >= 80):
+                continue
+            page_type = str(item.get("pageType") or "page family").strip()
+            findings.append(
+                {
+                    "title": f"SEO/AEO/GEO page-family review: {page_type}",
+                    "description": (
+                        f"{page_type} has failed={failed or 0}, lowestScore="
+                        f"{lowest_score if lowest_score is not None else 'unknown'}, "
+                        f"averageScore={average_score if average_score is not None else 'unknown'}."
+                    ),
+                    "severity": "high" if failed else "medium",
+                    "confidence": 0.75,
+                    "classification": "manual_review",
+                    "fixClass": "",
+                    "affectedPaths": [],
+                    "evidence": [
+                        f"pageType: {page_type}",
+                        f"analysed: {item.get('analysed', 'unknown')}",
+                        f"failed: {failed or 0}",
+                        f"lowestScore: {lowest_score if lowest_score is not None else 'unknown'}",
+                    ],
+                    "requiredOutcome": (
+                        "Review the page-family coverage result and create deterministic"
+                        " repo-level findings before allowing RAMS to plan patches."
+                    ),
+                    "sourceAudit": "seo-aeo-geo:summary.json",
+                    "sourceIssueId": f"seo-family-{_slug(page_type)}",
+                    "sourceArtefact": "summary.json",
+                }
+            )
+            if len(findings) >= max_items:
+                break
+
+    return findings[:max_items]
+
+
+def _int_field(value: dict[str, Any], key: str) -> int | None:
+    """Return an integer field from a dict when parseable."""
+    try:
+        raw = value.get(key)
+    except AttributeError:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_field(value: dict[str, Any], key: str) -> float | None:
+    """Return a float field from a dict when parseable."""
+    try:
+        raw = value.get(key)
+    except AttributeError:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _slug(value: str) -> str:
+    """Return a compact lowercase slug for source issue IDs."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "unknown"
 
 
 def _normaliser_item_limit(cfg: "Settings") -> int:
