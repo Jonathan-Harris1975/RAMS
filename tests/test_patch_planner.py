@@ -54,9 +54,13 @@ class TestParsePlan:
         with pytest.raises(PatchPlanError, match="reason"):
             _parse_plan(json.dumps(_patch([], reason=None)), "t")
 
-    def test_rejects_markdown_fences_as_not_strict_json(self) -> None:
+    def test_unwraps_single_markdown_json_fence_then_validates(self) -> None:
+        doc = _patch([])
+        assert _parse_plan(f"```json\n{json.dumps(doc)}\n```", "t") == doc
+
+    def test_rejects_markdown_fence_with_invalid_inner_json(self) -> None:
         with pytest.raises(PatchPlanError):
-            _parse_plan("```json\n{}\n```", "t")
+            _parse_plan("```json\nnot-json\n```", "t")
 
     def test_raises_on_invalid_json(self) -> None:
         with pytest.raises(PatchPlanError):

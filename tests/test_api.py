@@ -385,3 +385,36 @@ def test_missing_dry_run_report_returns_helpful_404(
     assert response.status_code == 404
     assert response.json()["error"] == "dry-run report not found"
     assert "Run the pipeline" in response.json()["hint"]
+
+
+def test_latest_dry_run_report_returns_pending_while_pipeline_running(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A report fetch during an active first run should say pending, not 404."""
+    settings = make_settings(repo_dirs, RMS_REPORT_DIR=str(tmp_path / "reports"))
+    install_valid_api(monkeypatch, settings)
+    api_mod._running["mobile-ux"] = True
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/reports/dry-run/mobile-ux/latest")
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "pending"
+    assert "Retry" in response.json()["hint"]
+
+
+def test_specific_dry_run_report_returns_pending_while_pipeline_running(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A specific report fetch during an active run should say pending, not 404."""
+    settings = make_settings(repo_dirs, RMS_REPORT_DIR=str(tmp_path / "reports"))
+    install_valid_api(monkeypatch, settings)
+    api_mod._running["seo-aeo-geo"] = True
+    run_id = "2026-05-15T16-00-15Z"
+
+    with TestClient(api_mod.app) as client:
+        response = client.get(f"/reports/dry-run/seo-aeo-geo/{run_id}")
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "pending"
+    assert response.json()["runId"] == run_id

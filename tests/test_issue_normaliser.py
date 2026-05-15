@@ -227,3 +227,32 @@ class TestNormalise:
         assert issues[0]["classification"] == "code_fix"
         assert issues[0]["fixClass"] == "canonical_fix"
         assert issues[0]["affectedPaths"] == ["bio/index.html"]
+
+    def test_seo_aggregate_summary_without_finding_ledger_generates_manual_review(
+        self, settings
+    ) -> None:
+        audit = {
+            "latest": {"auditType": "seo-aeo-geo", "issueCount": 10},
+            "artefacts": {
+                "summary.json": {
+                    "issueCount": 10,
+                    "failedUrlCount": 10,
+                    "coveragePercent": 94.8,
+                    "familyCoverage": [
+                        {
+                            "pageType": "podcast episode",
+                            "analysed": 33,
+                            "failed": 10,
+                            "lowestScore": 20,
+                            "averageScore": 39.5,
+                        }
+                    ],
+                },
+                "coverage.json": {"coveragePercent": 94.8},
+            },
+        }
+        issues = normalise(audit, "seo-aeo-geo", "2026-05-15", settings)
+        assert len(issues) >= 1
+        assert issues[0]["classification"] == "manual_review"
+        assert issues[0]["sourceAudit"] == "seo-aeo-geo:summary.json"
+        assert issues[0]["affectedPaths"] == []

@@ -71,3 +71,27 @@ class TestReadLatest:
         assert result["artefacts"]["repository-issue-appendix.json"] == repo_appendix
         assert result["artefacts"]["responsive-fix-appendix.json"] == responsive
         assert "screenshots/home-320-fail.png" not in result["artefacts"]
+
+    def test_does_not_probe_unlisted_child_artefacts_when_manifest_has_json_urls(
+        self, mock_r2: MagicMock
+    ) -> None:
+        latest = {
+            "auditType": "seo-aeo-geo",
+            "reportPrefix": "audits/seo-aeo-geo/run-1",
+            "summaryUrl": "https://public.example/audits/seo-aeo-geo/run-1/summary.json",
+            "coverageUrl": "https://public.example/audits/seo-aeo-geo/run-1/coverage.json",
+        }
+        payloads = {
+            "audits/seo-aeo-geo/latest.json": latest,
+            "audits/seo-aeo-geo/run-1/summary.json": {"issueCount": 10},
+            "audits/seo-aeo-geo/run-1/coverage.json": {"coveragePercent": 94.8},
+        }
+
+        def get_object(*, bucket: str, key: str) -> bytes:
+            if key not in payloads:
+                raise AssertionError(f"unexpected R2 child probe: {key}")
+            return json.dumps(payloads[key]).encode()
+
+        mock_r2.get_object.side_effect = get_object
+        result = audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits")
+        assert set(result["artefacts"]) == {"summary.json", "coverage.json"}
