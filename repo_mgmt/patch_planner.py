@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _MAX_FILE_BYTES = 256 * 1024
+_FENCED_JSON_RE = re.compile(r"^```(?:json)?\s*(?P<body>.*?)\s*```$", re.DOTALL | re.IGNORECASE)
 
 
 class PatchPlanError(Exception):
@@ -51,6 +53,14 @@ patch, return:
 {"patchProtocol":"AnchorPatch/v1","changes":[],"reason":"<why>"}
 """
 
+REPAIR_SYSTEM_PROMPT = """
+You repair invalid repository patch-planner output.
+Return exactly one valid JSON object conforming to AnchorPatch/v1.
+Do not include prose, markdown fences, analysis, comments, or any text
+outside the JSON object. If a safe bounded patch cannot be produced,
+return {"patchProtocol":"AnchorPatch/v1","changes":[],"reason":"<why>"}.
+"""
+
 
 def plan(
     issue: dict[str, Any],
@@ -63,11 +73,23 @@ def plan(
     task_id, affected_paths, prompt = _prepare_plan_inputs(
         issue, target_repo, pipeline_id, settings
     )
+    raw = _complete_for_plan(model_router, prompt, SYSTEM_PROMPT)
     try:
-        raw = model_router.complete(prompt=prompt, system=SYSTEM_PROMPT, max_tokens=4096)
-    except Exception as exc:
-        raise PatchPlanError(f"LLM call failed: {exc}") from exc
-    patch_doc = _parse_plan(raw, task_id)
+        patch_doc = _parse_plan(raw, task_id)
+    except PatchPlanError as first_err:
+        logger.warning(
+            "patch_planner [%s]: invalid planner JSON; retrying once with repair prompt: %s",
+            task_id,
+            first_err,
+        )
+        repair_prompt = _build_repair_prompt(prompt, raw, str(first_err))
+        repaired = _complete_for_plan(model_router, repair_prompt, REPAIR_SYSTEM_PROMPT)
+        try:
+            patch_doc = _parse_plan(repaired, task_id)
+        except PatchPlanError as second_err:
+            raise PatchPlanError(
+                f"Planner returned invalid AnchorPatch/v1 after repair retry: {second_err}"
+            ) from second_err
     _validate_plan_scope(patch_doc, affected_paths, pipeline_id)
     return patch_doc
 
@@ -83,19 +105,112 @@ async def plan_async(
     task_id, affected_paths, prompt = _prepare_plan_inputs(
         issue, target_repo, pipeline_id, settings
     )
+    raw = await _complete_for_plan_async(model_router, prompt, SYSTEM_PROMPT)
+    try:
+        patch_doc = _parse_plan(raw, task_id)
+    except PatchPlanError as first_err:
+        logger.warning(
+            "patch_planner [%s]: invalid planner JSON; retrying once with repair prompt: %s",
+            task_id,
+            first_err,
+        )
+        repair_prompt = _build_repair_prompt(prompt, raw, str(first_err))
+        repaired = await _complete_for_plan_async(
+            model_router, repair_prompt, REPAIR_SYSTEM_PROMPT
+        )
+        try:
+            patch_doc = _parse_plan(repaired, task_id)
+        except PatchPlanError as second_err:
+            raise PatchPlanError(
+                f"Planner returned invalid AnchorPatch/v1 after repair retry: {second_err}"
+            ) from second_err
+    _validate_plan_scope(patch_doc, affected_paths, pipeline_id)
+    return patch_doc
+
+
+def _complete_for_plan(model_router: "ModelRouter", prompt: str, system: str) -> str:
+    """Call a router for patch planning, requesting JSON mode when supported."""
+    try:
+        return str(
+            model_router.complete(
+                prompt=prompt,
+                system=system,
+                max_tokens=4096,
+                json_mode=True,
+            )
+        )
+    except TypeError:
+        # Older tests or compatible routers may not yet expose json_mode.
+        try:
+            return str(model_router.complete(prompt=prompt, system=system, max_tokens=4096))
+        except Exception as exc:
+            raise PatchPlanError(f"LLM call failed: {exc}") from exc
+    except Exception as exc:
+        raise PatchPlanError(f"LLM call failed: {exc}") from exc
+
+
+async def _complete_for_plan_async(
+    model_router: "ModelRouter", prompt: str, system: str
+) -> str:
+    """Async variant of _complete_for_plan with a sync-router fallback."""
     try:
         complete_async = getattr(model_router, "complete_async", None)
         if inspect.iscoroutinefunction(complete_async):
-            raw = await complete_async(prompt=prompt, system=SYSTEM_PROMPT, max_tokens=4096)
-        else:
-            raw = await asyncio.to_thread(
-                model_router.complete, prompt=prompt, system=SYSTEM_PROMPT, max_tokens=4096
+            return str(
+                await complete_async(
+                    prompt=prompt,
+                    system=system,
+                    max_tokens=4096,
+                    json_mode=True,
+                )
             )
+        return str(
+            await asyncio.to_thread(
+                model_router.complete,
+                prompt=prompt,
+                system=system,
+                max_tokens=4096,
+                json_mode=True,
+            )
+        )
+    except TypeError:
+        try:
+            complete_async = getattr(model_router, "complete_async", None)
+            if inspect.iscoroutinefunction(complete_async):
+                return str(
+                    await complete_async(prompt=prompt, system=system, max_tokens=4096)
+                )
+            return str(
+                await asyncio.to_thread(
+                    model_router.complete,
+                    prompt=prompt,
+                    system=system,
+                    max_tokens=4096,
+                )
+            )
+        except Exception as exc:
+            raise PatchPlanError(f"LLM call failed: {exc}") from exc
     except Exception as exc:
         raise PatchPlanError(f"LLM call failed: {exc}") from exc
-    patch_doc = _parse_plan(raw, task_id)
-    _validate_plan_scope(patch_doc, affected_paths, pipeline_id)
-    return patch_doc
+
+
+def _build_repair_prompt(original_prompt: str, raw: str, error: str) -> str:
+    """Build a bounded repair prompt after invalid planner output."""
+    return json.dumps(
+        {
+            "repairTask": "Return only one valid AnchorPatch/v1 JSON object.",
+            "parseError": error[:1000],
+            "previousResponse": raw[:3000],
+            "originalRequest": json.loads(original_prompt),
+            "outputContract": {
+                "patchProtocol": "AnchorPatch/v1",
+                "changes": [],
+                "reason": "<why if no bounded patch is safe>",
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 def _prepare_plan_inputs(
@@ -116,36 +231,12 @@ def _prepare_plan_inputs(
     return task_id, affected_paths, _build_prompt(issue, context_files, pipeline_id)
 
 
-
-
-def _strip_single_json_fence(text: str) -> str:
-    """Return JSON inside one markdown fence, or the original text.
-
-    Only a single whole-response fence is accepted; this is intentionally not a
-    permissive JSON extractor.
-    """
-    if not text.startswith("```"):
-        return text
-    lines = text.splitlines()
-    if len(lines) < 3 or lines[-1].strip() != "```":
-        return text
-    opener = lines[0].strip().lower()
-    if opener not in {"```", "```json"}:
-        return text
-    inner = "\n".join(lines[1:-1]).strip()
-    if inner.startswith("{") and inner.endswith("}"):
-        return inner
-    return text
-
 def _parse_plan(raw: str, task_id: str) -> dict[str, Any]:
-    """Parse a model response as JSON and validate AnchorPatch/v1.
-
-    The planner prompt demands bare JSON. Some hosted models still wrap an
-    otherwise valid object in a single markdown JSON fence. We unwrap only that
-    exact case, then continue through the same AnchorPatch/v1 schema and scope
-    validation. Prose around the JSON remains invalid.
-    """
-    text = _strip_single_json_fence(raw.strip())
+    """Parse a model response as JSON and validate AnchorPatch/v1."""
+    text = raw.strip()
+    fenced = _FENCED_JSON_RE.match(text)
+    if fenced:
+        text = fenced.group("body").strip()
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:

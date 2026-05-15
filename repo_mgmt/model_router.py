@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 _TIMEOUT = 90.0
 _REFERER = "repo-management-suite"
+_JSON_MODE_UNSUPPORTED_STATUSES = {400, 422}
+
+
+def _json_mode_unsupported(exc: "ModelError") -> bool:
+    """Return True when a provider appears to reject response_format."""
+    if exc.status_code not in _JSON_MODE_UNSUPPORTED_STATUSES:
+        return False
+    message = str(exc).lower()
+    return "response_format" in message or "json" in message
 
 
 class ModelError(Exception):
@@ -56,11 +65,18 @@ class ModelRouter:
         prompt: str,
         system: str = "",
         max_tokens: int = 4096,
+        json_mode: bool = False,
     ) -> str:
         """Synchronously call the primary model with retryable fallback."""
         try:
-            return self._call(self._primary, prompt, system, max_tokens)
+            return self._call(self._primary, prompt, system, max_tokens, json_mode)
         except ModelError as first_err:
+            if json_mode and _json_mode_unsupported(first_err):
+                logger.warning(
+                    "model_router: provider rejected JSON mode (%s) - retrying without response_format",
+                    first_err,
+                )
+                return self.complete(prompt, system, max_tokens, json_mode=False)
             if not first_err.retryable:
                 raise
             logger.warning(
@@ -68,7 +84,7 @@ class ModelRouter:
                 first_err,
             )
         try:
-            return self._call(self._secondary, prompt, system, max_tokens)
+            return self._call(self._secondary, prompt, system, max_tokens, json_mode)
         except ModelError as second_err:
             raise ModelError(
                 f"Both primary and secondary models failed. Last error: {second_err}",
@@ -81,11 +97,22 @@ class ModelRouter:
         prompt: str,
         system: str = "",
         max_tokens: int = 4096,
+        json_mode: bool = False,
     ) -> str:
         """Asynchronously call the primary model with retryable fallback."""
         try:
-            return await self._call_async(self._primary, prompt, system, max_tokens)
+            return await self._call_async(
+                self._primary, prompt, system, max_tokens, json_mode
+            )
         except ModelError as first_err:
+            if json_mode and _json_mode_unsupported(first_err):
+                logger.warning(
+                    "model_router: provider rejected JSON mode (%s) - retrying without response_format",
+                    first_err,
+                )
+                return await self.complete_async(
+                    prompt, system, max_tokens, json_mode=False
+                )
             if not first_err.retryable:
                 raise
             logger.warning(
@@ -93,7 +120,9 @@ class ModelRouter:
                 first_err,
             )
         try:
-            return await self._call_async(self._secondary, prompt, system, max_tokens)
+            return await self._call_async(
+                self._secondary, prompt, system, max_tokens, json_mode
+            )
         except ModelError as second_err:
             raise ModelError(
                 f"Both primary and secondary models failed. Last error: {second_err}",
@@ -115,9 +144,12 @@ class ModelRouter:
         prompt: str,
         system: str,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> str:
         """POST synchronously to OpenRouter /chat/completions for *model*."""
-        url, headers, payload = self._request_parts(model, prompt, system, max_tokens)
+        url, headers, payload = self._request_parts(
+            model, prompt, system, max_tokens, json_mode
+        )
         try:
             response = httpx.post(url, headers=headers, json=payload, timeout=_TIMEOUT)
         except httpx.TimeoutException as exc:
@@ -132,9 +164,12 @@ class ModelRouter:
         prompt: str,
         system: str,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> str:
         """POST asynchronously to OpenRouter /chat/completions for *model*."""
-        url, headers, payload = self._request_parts(model, prompt, system, max_tokens)
+        url, headers, payload = self._request_parts(
+            model, prompt, system, max_tokens, json_mode
+        )
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 response = await client.post(url, headers=headers, json=payload)
@@ -150,12 +185,20 @@ class ModelRouter:
         prompt: str,
         system: str,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> tuple[str, dict[str, str], dict[str, Any]]:
         """Build URL, headers, and JSON payload for one OpenRouter request."""
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         return (
             f"{self._api_base}/chat/completions",
             {
@@ -163,7 +206,7 @@ class ModelRouter:
                 "Content-Type": "application/json",
                 "HTTP-Referer": _REFERER,
             },
-            {"model": model, "messages": messages, "max_tokens": max_tokens},
+            payload,
         )
 
     def _parse_response(self, response: httpx.Response, model: str) -> str:
