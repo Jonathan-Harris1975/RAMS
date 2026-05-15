@@ -41,3 +41,33 @@ class TestReadLatest:
         ]:
             audit_reader.read_latest(pid, mock_r2, "audits")  # type: ignore[arg-type]
             mock_r2.get_object.assert_called_with(bucket="audits", key=expected_key)
+
+    def test_dereferences_json_artefacts_from_latest_manifest(self, mock_r2: MagicMock) -> None:
+        latest = {
+            "auditType": "mobile-ux",
+            "reportPrefix": "audits/mobile-ux/run-1",
+            "repositoryIssueAppendixUrl": "https://public.example/audits/mobile-ux/run-1/repository-issue-appendix.json",
+            "artefacts": {
+                "responsive-fix-appendix.json": "https://public.example/audits/mobile-ux/run-1/responsive-fix-appendix.json",
+                "screenshots/home-320-fail.png": "https://public.example/audits/mobile-ux/run-1/screenshots/home-320-fail.png",
+            },
+        }
+        repo_appendix = {"issues": [{"issueId": "MUX-001"}]}
+        responsive = {"rows": [{"issueId": "MUX-002"}]}
+
+        def get_object(*, bucket: str, key: str) -> bytes:
+            payloads = {
+                "audits/mobile-ux/latest.json": latest,
+                "audits/mobile-ux/run-1/repository-issue-appendix.json": repo_appendix,
+                "audits/mobile-ux/run-1/responsive-fix-appendix.json": responsive,
+            }
+            if key not in payloads:
+                raise R2Error(f"missing {key}")
+            return json.dumps(payloads[key]).encode()
+
+        mock_r2.get_object.side_effect = get_object
+        result = audit_reader.read_latest("mobile-ux", mock_r2, "audits")
+        assert result["latest"]["auditType"] == "mobile-ux"
+        assert result["artefacts"]["repository-issue-appendix.json"] == repo_appendix
+        assert result["artefacts"]["responsive-fix-appendix.json"] == responsive
+        assert "screenshots/home-320-fail.png" not in result["artefacts"]
