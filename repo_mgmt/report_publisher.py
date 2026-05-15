@@ -66,6 +66,7 @@ class RunReport:
             output_tail="not_run: validation did not run",
         )
     )
+    baseline_validation: ValidationSummary | None = None
     commits: list[CommitInfo] = field(default_factory=list)
     error: str | None = None
     publish_status: PublishStatus = field(default_factory=PublishStatus)
@@ -184,6 +185,8 @@ def _convert(obj: Any) -> Any:
             "commits": [_convert(commit) for commit in obj.commits],
             "publishStatus": _convert(obj.publish_status),
         }
+        if obj.baseline_validation is not None:
+            data["baselineValidation"] = _convert(obj.baseline_validation)
         if obj.error is not None:
             data["error"] = obj.error
         return data

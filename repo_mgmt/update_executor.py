@@ -35,6 +35,74 @@ def _change_files(patch_doc: dict[str, Any]) -> list[str]:
     return files
 
 
+_PARTIAL_PATHS = frozenset({"assets/partials/header.html", "assets/partials/footer.html"})
+_WEBSITE_PIPELINES = frozenset({"seo-aeo-geo", "mobile-ux"})
+
+
+def _touches_governed_partial(files: list[str]) -> bool:
+    """Return True when a patch changes a shared website partial."""
+    return any(path in _PARTIAL_PATHS for path in files)
+
+
+def _html_files(target_repo: Path) -> list[str]:
+    """Return all repo-relative HTML files for partial-sync rollback/staging."""
+    root = target_repo.resolve()
+    files: list[str] = []
+    for path in root.rglob("*.html"):
+        if ".git" in path.parts:
+            continue
+        try:
+            files.append(path.resolve().relative_to(root).as_posix())
+        except ValueError:
+            continue
+    return sorted(files)
+
+
+def _snapshot_candidates(
+    patch_files: list[str], target_repo: Path, pipeline_id: "PipelineId"
+) -> list[str]:
+    """Return all paths whose pre-task state must be restorable."""
+    candidates = list(patch_files)
+    if pipeline_id in _WEBSITE_PIPELINES and _touches_governed_partial(patch_files):
+        candidates.extend(_html_files(target_repo))
+    return list(dict.fromkeys(candidates))
+
+
+def _status_paths(git_mgr: "GitManager") -> list[str]:
+    """Return repo-relative paths currently changed in Git status."""
+    paths: list[str] = []
+    for row in git_mgr.status_porcelain():
+        if len(row) < 4:
+            continue
+        path = row[3:]
+        if " -> " in path:
+            old_path, new_path = path.split(" -> ", 1)
+            paths.extend([old_path.strip(), new_path.strip()])
+        else:
+            paths.append(path.strip())
+    return list(dict.fromkeys(path for path in paths if path))
+
+
+def _post_patch_sync_required(
+    patch_files: list[str], pipeline_id: "PipelineId"
+) -> bool:
+    """Return True when generated HTML must be refreshed before validation."""
+    return pipeline_id in _WEBSITE_PIPELINES and _touches_governed_partial(patch_files)
+
+
+def _run_post_patch_sync(target_repo: Path) -> dict[str, Any]:
+    """Propagate changed shared partials into generated static pages."""
+    commands = ["python3 scripts/inject_partials.py"]
+    result = validation_runner.run_commands(commands, cwd=target_repo)
+    return {
+        "commands": result.commands,
+        "passed": result.passed,
+        "outputTail": result.output_tail,
+        "failedCommand": result.failed_command,
+        "returnCode": result.return_code,
+    }
+
+
 def _restore_after_failure(
     git_mgr: "GitManager | None",
     snapshot: TaskRepoSnapshot | None,
@@ -104,7 +172,10 @@ async def run_task(
             return task
 
         git_mgr.assert_write_allowed()
-        snapshot = git_mgr.capture_task_state(modified_candidates)
+        snapshot_paths = _snapshot_candidates(
+            modified_candidates, target_repo, pipeline_id
+        )
+        snapshot = git_mgr.capture_task_state(snapshot_paths)
 
         patch_started = True
         modified = patch_applier.apply(
@@ -114,6 +185,27 @@ async def run_task(
             pipeline_id=pipeline_id,
         )
         task["modified_files"] = modified
+
+        if _post_patch_sync_required(modified_candidates, pipeline_id):
+            sync_result = _run_post_patch_sync(target_repo)
+            task["postPatchSync"] = sync_result
+            if not sync_result["passed"]:
+                logger.warning(
+                    "update_executor [%s]: post-patch partial sync failed command=%s returnCode=%s outputTail=%s",
+                    task_id,
+                    sync_result.get("failedCommand") or "<unknown>",
+                    sync_result.get("returnCode"),
+                    str(sync_result.get("outputTail", ""))[-2000:],
+                )
+                _restore_after_failure(git_mgr, snapshot, task)
+                task["validation_passed"] = False
+                task["status"] = "manual_review"
+                task["error"] = (
+                    "post-patch partial sync failed: "
+                    f"{sync_result.get('failedCommand') or '<unknown>'}"
+                )
+                return task
+            task["modified_files"] = _status_paths(git_mgr)
 
         if cfg.rms_validate_after_each_task:
             validation = validation_runner.run(
@@ -140,6 +232,7 @@ async def run_task(
                 )
                 return task
 
+        modified = list(task.get("modified_files", modified))
         git_mgr.stage_task_files(modified)
         message = f"rms({pipeline_id}): {task_id} - {task.get('title', 'fix')}"
         sha = git_mgr.commit(message)

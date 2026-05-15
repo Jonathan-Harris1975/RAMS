@@ -9,7 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from repo_mgmt import audit_reader, issue_normaliser, task_ranker, update_executor
+from repo_mgmt import (
+    audit_reader,
+    issue_normaliser,
+    task_ranker,
+    update_executor,
+    validation_runner,
+)
 from repo_mgmt.config import PipelineId, Settings, configured_worker_count
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt.model_router import ModelRouter
@@ -105,6 +111,7 @@ def _commits(tasks: list[dict[str, Any]]) -> list[CommitInfo]:
 def _mark_code_fixes_manual(
     issues: list[dict[str, Any]],
     reason: str,
+    baseline_validation: ValidationSummary | None = None,
 ) -> list[dict[str, Any]]:
     """Return selected issues with code fixes converted to manual review."""
     tasks: list[dict[str, Any]] = []
@@ -113,6 +120,14 @@ def _mark_code_fixes_manual(
         if task.get("classification") == "code_fix":
             task["status"] = "manual_review"
             task["error"] = reason
+            task["validation_passed"] = False
+            task["evidence"] = list(task.get("evidence", [])) + [reason]
+            if baseline_validation is not None:
+                task["baselineValidation"] = {
+                    "commands": baseline_validation.commands,
+                    "passed": baseline_validation.passed,
+                    "outputTail": baseline_validation.output_tail,
+                }
         tasks.append(task)
     return tasks
 
@@ -128,6 +143,7 @@ def _make_report(
     snapshots: int,
     cfg: Settings,
     error: str | None,
+    baseline_validation: ValidationSummary | None = None,
 ) -> RunReport:
     """Construct a RunReport from current pipeline state."""
     return RunReport(
@@ -139,6 +155,7 @@ def _make_report(
         summary=_summary(tasks, snapshots),
         tasks=tasks,
         validation=_validation_summary(tasks, cfg, pipeline_id),
+        baseline_validation=baseline_validation,
         commits=_commits(tasks),
         error=error,
     )
@@ -185,6 +202,27 @@ def _preflight_live_repo(target_repo: Path, cfg: Settings) -> None:
     if not git_mgr.is_git_repo():
         raise RuntimeError(f"target repo is not a Git worktree: {target_repo}")
     git_mgr.assert_clean_worktree()
+
+
+def _run_baseline_validation(
+    pipeline_id: PipelineId, target_repo: Path, cfg: Settings
+) -> ValidationSummary:
+    """Validate the clean cloned repo before applying any live patch."""
+    result = validation_runner.run(pipeline_id, target_repo, cfg, dry_run=False)
+    summary = ValidationSummary(
+        commands=result.commands,
+        passed=result.passed,
+        output_tail=result.output_tail,
+    )
+    if not result.passed:
+        logger.warning(
+            "pipeline: baseline validation failed pipeline=%s command=%s returnCode=%s outputTail=%s",
+            pipeline_id,
+            result.failed_command or "<unknown>",
+            result.return_code,
+            result.output_tail[-2000:],
+        )
+    return summary
 
 
 class RmsPipeline:
@@ -318,6 +356,7 @@ async def _run_async(
     branch = f"{cfg.rms_qa_branch_prefix}{pipeline_id}/{actual_run_id}"
     tasks: list[dict[str, Any]] = []
     error: str | None = None
+    baseline_validation: ValidationSummary | None = None
     snapshots = 0
     lock = _pipeline_locks[pipeline_id]
 
@@ -332,6 +371,7 @@ async def _run_async(
             snapshots=0,
             cfg=cfg,
             error=f"pipeline {pipeline_id!r} already running",
+            baseline_validation=None,
         )
 
     try:
@@ -347,13 +387,25 @@ async def _run_async(
         if not dry_run and queues.code_fix:
             try:
                 _preflight_live_repo(target_repo, cfg)
+                baseline_validation = _run_baseline_validation(
+                    pipeline_id, target_repo, cfg
+                )
+                if not baseline_validation.passed:
+                    failed_command = baseline_validation.output_tail.splitlines()[-1:]
+                    detail = failed_command[0] if failed_command else "validation failed"
+                    raise RuntimeError(
+                        "baseline validation failed before patch; "
+                        f"live code_fix writes skipped: {detail}"
+                    )
                 git_mgr = GitManager(
                     target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled
                 )
                 git_mgr.create_branch(branch)
             except Exception as exc:
                 error = f"Git/live preflight failed; live code_fix writes skipped: {exc}"
-                tasks = _mark_code_fixes_manual(selected, error)
+                tasks = _mark_code_fixes_manual(
+                    selected, error, baseline_validation
+                )
                 selected = []
 
         for issue in selected:
@@ -382,6 +434,7 @@ async def _run_async(
             snapshots=snapshots,
             cfg=cfg,
             error=error,
+            baseline_validation=baseline_validation,
         )
         _publish_report(report, cfg, r2)
         return report
@@ -396,6 +449,7 @@ async def _run_async(
             snapshots=snapshots,
             cfg=cfg,
             error=str(exc),
+            baseline_validation=baseline_validation,
         )
         _publish_report(report, cfg, r2)
         return report
