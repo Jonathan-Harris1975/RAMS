@@ -595,6 +595,9 @@ def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict
     url_or_path = _first_text(candidate, "exactUrlOrFilePath", "filePathOrUrl", "url", "path")
     affected = _paths_from_route_or_url(route, url_or_path)
     check = _first_text(candidate, "check", "issueType", "category") or "mobile UX"
+    affected, governed_evidence = _mobile_governed_source_paths(
+        affected, check, candidate
+    )
     viewport = _first_text(candidate, "viewport")
     title_bits = [issue_id, check]
     if route or url_or_path:
@@ -621,6 +624,7 @@ def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict
     screenshot_refs = candidate.get("screenshotRefs")
     if isinstance(screenshot_refs, list) and screenshot_refs:
         evidence.append(f"screenshotRefs: {len(screenshot_refs)} attached in source artefact")
+    evidence.extend(governed_evidence)
     return {
         "title": " — ".join(part for part in title_bits if part),
         "description": defect or remediation,
@@ -642,6 +646,52 @@ def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict
         "check": check,
     }
 
+
+
+def _mobile_governed_source_paths(
+    affected: list[str], check: str, candidate: dict[str, Any]
+) -> tuple[list[str], list[str]]:
+    """Prefer governed source partials for header/navigation Mobile UX defects.
+
+    Website pages are generated from shared partials. For hamburger, header,
+    and mobile-navigation findings, patching a rendered page such as
+    ``index.html`` creates immediate ``inject_partials --validate`` drift.
+    Remapping the source path keeps RAMS inside the governed edit surface.
+    """
+    text = " ".join(
+        str(part)
+        for part in [
+            check,
+            _first_text(candidate, "defectDescription", "description", "consequence"),
+            _first_text(candidate, "exactRemediation", "remediation", "recommendation"),
+            _first_text(
+                candidate,
+                "selectorComponentCodeAnchor",
+                "bestAvailableAnchor",
+                "currentEvidenceSnippet",
+                "acceptanceCriteria",
+            ),
+        ]
+        if part
+    ).lower()
+    header_nav_markers = (
+        "hamburger",
+        "jh-hamburger",
+        "mobile-nav",
+        "jh-mobile-nav",
+        "mobile navigation",
+        "header",
+        "nav",
+        "aria-controls",
+        "escape",
+        "outside click",
+    )
+    if any(marker in text for marker in header_nav_markers):
+        governed = "assets/partials/header.html"
+        return [governed], [
+            "governedSource: remapped header/navigation defect to assets/partials/header.html to avoid rendered-page partial drift"
+        ]
+    return affected, []
 
 def _map_seo_candidate(candidate: dict[str, Any], artefact_name: str) -> dict[str, Any] | None:
     """Map SEO/AEO/GEO summary or report objects to RAMS findings."""
