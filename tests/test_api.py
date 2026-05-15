@@ -425,3 +425,67 @@ def test_specific_dry_run_report_returns_pending_while_pipeline_running(
     assert response.status_code == 202
     assert response.json()["status"] == "pending"
     assert response.json()["runId"] == run_id
+
+
+def test_live_report_latest_endpoint_reads_r2_latest(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    """Operators can fetch the newest live report published to R2."""
+    settings = make_settings(repo_dirs)
+    mock_r2 = install_valid_api(monkeypatch, settings)
+    payload = {"runId": "2026-05-15T18-37-57Z", "pipeline": "mobile-ux"}
+    import json
+
+    mock_r2.get_object.return_value = json.dumps(payload).encode("utf-8")
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/reports/mobile-ux/latest")
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    mock_r2.get_object.assert_called_once_with(
+        settings.r2_bucket_audits,
+        f"{settings.rms_report_prefix}/mobile-ux/latest.json",
+    )
+
+
+def test_live_report_specific_endpoint_reads_r2_report(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    """Operators can fetch a specific live report from R2 by run ID."""
+    settings = make_settings(repo_dirs)
+    mock_r2 = install_valid_api(monkeypatch, settings)
+    run_id = "2026-05-15T18-37-57Z"
+    payload = {"runId": run_id, "pipeline": "mobile-ux"}
+    import json
+
+    mock_r2.get_object.return_value = json.dumps(payload).encode("utf-8")
+
+    with TestClient(api_mod.app) as client:
+        response = client.get(f"/reports/mobile-ux/{run_id}")
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    mock_r2.get_object.assert_called_once_with(
+        settings.r2_bucket_audits,
+        f"{settings.rms_report_prefix}/mobile-ux/{run_id}/report.json",
+    )
+
+
+def test_latest_live_report_returns_pending_while_pipeline_running(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    """A live report fetch during an active run should say pending, not 404."""
+    from repo_mgmt.r2_client import R2Error
+
+    settings = make_settings(repo_dirs)
+    mock_r2 = install_valid_api(monkeypatch, settings)
+    mock_r2.get_object.side_effect = R2Error("NoSuchKey")
+    api_mod._running["mobile-ux"] = True
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/reports/mobile-ux/latest")
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "pending"
+    assert response.json()["key"].endswith("/mobile-ux/latest.json")
