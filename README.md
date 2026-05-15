@@ -158,6 +158,19 @@ These paths are blocked at both normalisation and patch-application layers.
 
 The `on-brand` pipeline may patch blog/transcript files only for deterministic structural or metadata defects. Editorial quality findings for historical content become `future_guidance` and must not reach patch application.
 
+
+## Audit manifest dereferencing
+
+Production audit `latest.json` files are lightweight manifests. RAMS now reads the manifest first, then follows the JSON artefact pointers it exposes so the normaliser can see the actual finding ledgers.
+
+Supported child artefacts include:
+
+- `mobile-ux`: `repository-issue-appendix.json`, `responsive-fix-appendix.json`, `mandatory-mobile-scorecard.json`, `focused-page-appendix.json`, `summary.json`, `coverage.json`, `report.json`
+- `seo-aeo-geo`: `summary.json`, `coverage.json`, `report.json`, `evidence.json`
+- `on-brand`: `report.json`, `evidence.json`, `summary.json`
+
+RAMS ignores non-JSON evidence such as screenshots during task generation. Missing child artefacts are logged and recorded in the enriched audit payload, but they do not abort the run. Extracted findings are capped per run to avoid creating huge dry-run reports from screenshot-heavy audits.
+
 ## RunReport validation object
 
 Run reports always serialise `validation` as an object with:
