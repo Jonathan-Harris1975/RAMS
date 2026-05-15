@@ -173,7 +173,8 @@ class TestNormalise:
         issues = normalise(audit, "mobile-ux", "2026-05-15", settings)
         assert len(issues) == 1
         assert issues[0]["classification"] == "code_fix"
-        assert issues[0]["affectedPaths"] == ["index.html"]
+        assert issues[0]["affectedPaths"] == ["assets/partials/header.html"]
+        assert any("governedSource" in e for e in issues[0]["evidence"])
         assert issues[0]["severity"] == "critical"
         assert issues[0]["sourceAudit"] == "mobile-ux:repository-issue-appendix.json"
 
