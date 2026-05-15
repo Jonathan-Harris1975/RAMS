@@ -54,13 +54,10 @@ class TestParsePlan:
         with pytest.raises(PatchPlanError, match="reason"):
             _parse_plan(json.dumps(_patch([], reason=None)), "t")
 
-    def test_unwraps_single_markdown_json_fence_then_validates(self) -> None:
-        doc = _patch([])
-        assert _parse_plan(f"```json\n{json.dumps(doc)}\n```", "t") == doc
-
-    def test_rejects_markdown_fence_with_invalid_inner_json(self) -> None:
-        with pytest.raises(PatchPlanError):
-            _parse_plan("```json\nnot-json\n```", "t")
+    def test_unwraps_whole_response_json_markdown_fence(self) -> None:
+        parsed = _parse_plan(f"```json\n{json.dumps(_patch([]))}\n```", "t")
+        assert parsed["patchProtocol"] == "AnchorPatch/v1"
+        assert parsed["changes"] == []
 
     def test_raises_on_invalid_json(self) -> None:
         with pytest.raises(PatchPlanError):
@@ -124,6 +121,50 @@ class TestPlan:
         )
         assert result["patchProtocol"] == "AnchorPatch/v1"
         assert "operations" not in result
+
+    def test_retries_once_when_model_returns_prose_then_json(
+        self, settings, mock_router, tmp_repo
+    ) -> None:
+        mock_router.complete.side_effect = [
+            "I need to analyse this first, which is not JSON.",
+            json.dumps(_patch([])),
+        ]
+        result = plan(
+            {
+                "taskId": "x",
+                "classification": "code_fix",
+                "affectedPaths": ["index.html"],
+            },
+            tmp_repo,
+            "mobile-ux",
+            settings,
+            mock_router,
+        )
+        assert result["changes"] == []
+        assert mock_router.complete.call_count == 2
+        first_kwargs = mock_router.complete.call_args_list[0].kwargs
+        second_kwargs = mock_router.complete.call_args_list[1].kwargs
+        assert first_kwargs["json_mode"] is True
+        assert second_kwargs["json_mode"] is True
+        assert "previousResponse" in second_kwargs["prompt"]
+
+    def test_raises_after_one_repair_retry_if_model_still_returns_prose(
+        self, settings, mock_router, tmp_repo
+    ) -> None:
+        mock_router.complete.side_effect = ["not json", "still not json"]
+        with pytest.raises(PatchPlanError, match="after repair retry"):
+            plan(
+                {
+                    "taskId": "x",
+                    "classification": "code_fix",
+                    "affectedPaths": ["index.html"],
+                },
+                tmp_repo,
+                "mobile-ux",
+                settings,
+                mock_router,
+            )
+        assert mock_router.complete.call_count == 2
 
     def test_raises_on_model_failure(self, settings, mock_router, tmp_repo) -> None:
         mock_router.complete.side_effect = RuntimeError("model down")

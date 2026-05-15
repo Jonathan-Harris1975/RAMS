@@ -71,6 +71,40 @@ def test_non_retryable_4xx_does_not_fallback(
     assert exc_info.value.status_code == status
     assert calls == [settings.openrouter_primary_model]
 
+
+
+def test_json_mode_adds_response_format(settings, monkeypatch) -> None:
+    captured: list[dict[str, object]] = []
+
+    def fake_post(url, headers, json, timeout):
+        captured.append(json)
+        return _success("json-ok")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    router = ModelRouter(settings)
+    assert router.complete("prompt", json_mode=True) == "json-ok"
+    assert captured[0]["response_format"] == {"type": "json_object"}
+
+
+def test_json_mode_provider_rejection_falls_back_without_response_format(
+    settings, monkeypatch
+) -> None:
+    captured: list[dict[str, object]] = []
+    responses = [
+        _response(400, "response_format is not supported by this model"),
+        _success("plain-ok"),
+    ]
+
+    def fake_post(url, headers, json, timeout):
+        captured.append(json)
+        return responses.pop(0)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    router = ModelRouter(settings)
+    assert router.complete("prompt", json_mode=True) == "plain-ok"
+    assert "response_format" in captured[0]
+    assert "response_format" not in captured[1]
+
 @pytest.mark.asyncio
 async def test_async_complete_uses_async_client_and_fallback(settings, monkeypatch) -> None:
     calls: list[str] = []
