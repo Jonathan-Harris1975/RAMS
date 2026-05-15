@@ -27,7 +27,7 @@ from repo_mgmt.config import (
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.pipeline import RmsPipeline
-from repo_mgmt.r2_client import R2Client
+from repo_mgmt.r2_client import R2Client, R2Error
 from repo_mgmt.repo_bootstrap import BootstrapResult, bootstrap_repositories
 
 logger = logging.getLogger(__name__)
@@ -563,6 +563,46 @@ def _read_json_report(path: FilePath) -> tuple[dict[str, Any] | list[Any] | None
     return None, "report JSON root must be an object or array"
 
 
+def _live_report_key(cfg: Settings, pipeline_id: PipelineId, run_id: str | None = None) -> str:
+    """Return the R2 key for a live report or latest pointer."""
+    prefix = cfg.rms_report_prefix.strip("/")
+    if run_id is None:
+        return f"{prefix}/{pipeline_id}/latest.json"
+    return f"{prefix}/{pipeline_id}/{run_id}/report.json"
+
+
+def _valid_run_id(run_id: str) -> bool:
+    """Return True when *run_id* has the RAMS timestamp shape."""
+    return re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z", run_id) is not None
+
+
+def _read_r2_json_report(
+    cfg: Settings,
+    pipeline_id: PipelineId,
+    key: str,
+) -> tuple[dict[str, Any] | list[Any] | None, str | None, int]:
+    """Read a JSON report from R2 and return payload, error, and status code."""
+    r2 = _get_r2()
+    if r2 is None:
+        return None, _r2_error or "R2 client unavailable", 503
+    try:
+        raw = r2.get_object(cfg.r2_bucket_audits, key)
+    except R2Error as exc:
+        message = str(exc)
+        if "NoSuchKey" in message or "404" in message or "Not Found" in message:
+            return None, f"live report not found at {key}", 404
+        return None, message, 502
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        return None, f"live report is not UTF-8 JSON: {exc}", 500
+    except json.JSONDecodeError as exc:
+        return None, f"live report is not valid JSON: {exc.msg}", 500
+    if isinstance(payload, (dict, list)):
+        return payload, None, 200
+    return None, "live report JSON root must be an object or array", 500
+
+
 @app.get("/reports/dry-run")
 async def list_all_dry_run_reports(
     authorization: Annotated[str | None, Header()] = None,
@@ -706,6 +746,117 @@ async def get_dry_run_report(
         return JSONResponse(
             status_code=500,
             content={"error": read_error, "pipeline": typed_pipeline_id, "filename": path.name},
+        )
+    return JSONResponse(status_code=200, content=payload)
+
+
+@app.get("/reports/{pipeline_id}")
+async def get_live_report_index(
+    pipeline_id: Annotated[PipelineIdLiteral, Path()],
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Return live R2 report locations for one pipeline."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg, error_response = _report_config_or_response()
+    if error_response is not None or cfg is None:
+        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+    typed_pipeline_id: PipelineId = pipeline_id
+    return JSONResponse(
+        status_code=200,
+        content={
+            "reportType": "live",
+            "pipeline": typed_pipeline_id,
+            "bucket": cfg.r2_bucket_audits,
+            "latestKey": _live_report_key(cfg, typed_pipeline_id),
+            "latestUrl": f"/reports/{typed_pipeline_id}/latest",
+        },
+    )
+
+
+@app.get("/reports/{pipeline_id}/latest")
+async def get_latest_live_report(
+    pipeline_id: Annotated[PipelineIdLiteral, Path()],
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Return the latest live report published to R2 for the requested pipeline."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg, error_response = _report_config_or_response()
+    if error_response is not None or cfg is None:
+        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+    typed_pipeline_id: PipelineId = pipeline_id
+    key = _live_report_key(cfg, typed_pipeline_id)
+    payload, read_error, status_code = _read_r2_json_report(cfg, typed_pipeline_id, key)
+    if read_error:
+        if status_code == 404 and _running.get(typed_pipeline_id):
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "pending",
+                    "pipeline": typed_pipeline_id,
+                    "bucket": cfg.r2_bucket_audits,
+                    "key": key,
+                    "hint": "The pipeline is still running. Retry this endpoint after the run finishes.",
+                },
+            )
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "error": read_error,
+                "pipeline": typed_pipeline_id,
+                "bucket": cfg.r2_bucket_audits,
+                "key": key,
+            },
+        )
+    return JSONResponse(status_code=200, content=payload)
+
+
+@app.get("/reports/{pipeline_id}/{run_id}")
+async def get_live_report(
+    pipeline_id: Annotated[PipelineIdLiteral, Path()],
+    run_id: Annotated[str, Path()],
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Return a specific live report published to R2."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg, error_response = _report_config_or_response()
+    if error_response is not None or cfg is None:
+        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+    if not _valid_run_id(run_id):
+        return JSONResponse(
+            status_code=404,
+            content={"error": "live report not found", "pipeline": pipeline_id, "runId": run_id},
+        )
+    typed_pipeline_id: PipelineId = pipeline_id
+    key = _live_report_key(cfg, typed_pipeline_id, run_id)
+    payload, read_error, status_code = _read_r2_json_report(cfg, typed_pipeline_id, key)
+    if read_error:
+        if status_code == 404 and _running.get(typed_pipeline_id):
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "pending",
+                    "pipeline": typed_pipeline_id,
+                    "runId": run_id,
+                    "bucket": cfg.r2_bucket_audits,
+                    "key": key,
+                    "hint": "The requested live report is not written yet. Retry after the run finishes.",
+                },
+            )
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "error": read_error,
+                "pipeline": typed_pipeline_id,
+                "runId": run_id,
+                "bucket": cfg.r2_bucket_audits,
+                "key": key,
+            },
         )
     return JSONResponse(status_code=200, content=payload)
 

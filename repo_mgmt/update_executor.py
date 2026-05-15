@@ -125,6 +125,13 @@ async def run_task(
                 "outputTail": validation.output_tail,
             }
             if not validation.passed:
+                logger.warning(
+                    "update_executor [%s]: validation failed command=%s returnCode=%s outputTail=%s",
+                    task_id,
+                    validation.failed_command or "<unknown>",
+                    validation.return_code,
+                    validation.output_tail[-2000:],
+                )
                 _restore_after_failure(git_mgr, snapshot, task)
                 task["validation_passed"] = False
                 task["status"] = "manual_review"

@@ -373,10 +373,14 @@ def _aggregate_manifest_findings(
     """
     if pipeline_id != "seo-aeo-geo":
         return []
-    latest = audit.get("latest") if isinstance(audit.get("latest"), dict) else audit
-    artefacts = audit.get("artefacts") if isinstance(audit.get("artefacts"), dict) else {}
-    summary = artefacts.get("summary.json") if isinstance(artefacts.get("summary.json"), dict) else latest
-    coverage = artefacts.get("coverage.json") if isinstance(artefacts.get("coverage.json"), dict) else {}
+    latest_value = audit.get("latest")
+    latest: dict[str, Any] = latest_value if isinstance(latest_value, dict) else audit
+    artefacts_value = audit.get("artefacts")
+    artefacts: dict[str, Any] = artefacts_value if isinstance(artefacts_value, dict) else {}
+    summary_value = artefacts.get("summary.json")
+    summary: dict[str, Any] = summary_value if isinstance(summary_value, dict) else latest
+    coverage_value = artefacts.get("coverage.json")
+    coverage: dict[str, Any] = coverage_value if isinstance(coverage_value, dict) else {}
 
     findings: list[dict[str, Any]] = []
     issue_count = _int_field(summary, "issueCount") or _int_field(latest, "issueCount")
@@ -458,9 +462,10 @@ def _aggregate_manifest_findings(
 
 def _int_field(value: dict[str, Any], key: str) -> int | None:
     """Return an integer field from a dict when parseable."""
-    try:
-        raw = value.get(key)
-    except AttributeError:
+    raw = value.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, (str, int, float, bool)):
         return None
     try:
         return int(raw)
@@ -470,9 +475,10 @@ def _int_field(value: dict[str, Any], key: str) -> int | None:
 
 def _float_field(value: dict[str, Any], key: str) -> float | None:
     """Return a float field from a dict when parseable."""
-    try:
-        raw = value.get(key)
-    except AttributeError:
+    raw = value.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, (str, int, float, bool)):
         return None
     try:
         return float(raw)
