@@ -84,7 +84,7 @@ A fake R2 endpoint or invalid credentials must leave `r2_verified=false` and `st
 
 ## Trigger request
 
-When `RMS_API_KEY` is set, all `/rebuild/*` endpoints require a Bearer token:
+`/rebuild/*` endpoints are write triggers and require `RMS_API_KEY` by default. Send it as a Bearer token:
 
 ```bash
 curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
@@ -93,7 +93,7 @@ curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
   -d '{"dry_run":true}'
 ```
 
-If `RMS_API_KEY` is not configured, the endpoints are unauthenticated and RAMS logs a startup `WARNING`.
+If `RMS_API_KEY` is not configured, `/rebuild/*` endpoints fail closed with `503 Service Unavailable`. Local-only developer runs may opt in to unauthenticated triggers with `RMS_ALLOW_UNAUTHENTICATED_DEV=true`; do not use that override on a public service.
 
 `dry_run` is optional. If omitted, RAMS uses `RMS_DRY_RUN`.
 
@@ -113,10 +113,21 @@ The response body and the `X-Run-Id` response header both carry the run ID.
 
 ### `401 Unauthorized`
 
-Returned when `RMS_API_KEY` is configured and the request carries a missing or incorrect Bearer token.
+Returned when the request carries a missing or incorrect Bearer token.
 
 ```json
 {"error": "unauthorized"}
+```
+
+### `503 Service Unavailable`
+
+Returned when `RMS_API_KEY` is missing and unauthenticated developer mode is not explicitly enabled.
+
+```json
+{
+  "error": "RMS_API_KEY is required for rebuild endpoints",
+  "hint": "Set RMS_API_KEY for deployed use, or set RMS_ALLOW_UNAUTHENTICATED_DEV=true for local-only development."
+}
 ```
 
 ### `409 Conflict`
@@ -141,7 +152,7 @@ Live writes require all of the following:
 7. Single-worker / single-instance operation
 8. Successful validation before commit
 
-Pushes additionally require `RMS_PUSH_ENABLED=true`. `RMS_CREATE_PR=false` remains the required setting because PR creation is not implemented in this release.
+Pushes additionally require `RMS_PUSH_ENABLED=true`. Keep `RMS_CREATE_PR=false` until a push-only run has proved the branch appears on GitHub; only then test PR creation deliberately.
 
 ## Protected paths
 
@@ -294,7 +305,8 @@ docker run --rm rams-production-check npm --version
 - Keep `RMS_LIVE_WRITE_ENABLED=false`
 - Keep `RMS_PUSH_ENABLED=false`
 - Keep `RMS_CREATE_PR=false`
-- Set `RMS_API_KEY` to a strong random secret in production to enable trigger-endpoint authentication
+- Set `RMS_API_KEY` to a strong random secret before exposing rebuild endpoints
+- Keep `RMS_ALLOW_UNAUTHENTICATED_DEV=false` on deployed services
 - Set real R2 and OpenRouter values
 - Set `RMS_WEBSITE_REPO_PATH` for `seo-aeo-geo` and `mobile-ux`
 - Set `RMS_AIMS_REPO_PATH` for `on-brand`
