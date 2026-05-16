@@ -173,7 +173,11 @@ class TestNormalise:
         issues = normalise(audit, "mobile-ux", "2026-05-15", settings)
         assert len(issues) == 1
         assert issues[0]["classification"] == "code_fix"
-        assert issues[0]["affectedPaths"] == ["assets/partials/header.html"]
+        assert issues[0]["affectedPaths"] == [
+            "assets/partials/header.html",
+            "assets/css/site.css",
+            "assets/js/site-ui.min.js",
+        ]
         assert any("governedSource" in e for e in issues[0]["evidence"])
         assert issues[0]["severity"] == "critical"
         assert issues[0]["sourceAudit"] == "mobile-ux:repository-issue-appendix.json"
@@ -206,7 +210,7 @@ class TestNormalise:
         assert issues[0]["sourceAudit"] == "on-brand:report.json"
         assert issues[0]["confidence"] == 0.95
 
-    def test_seo_enriched_summary_generates_task(self, settings) -> None:
+    def test_seo_enriched_summary_requires_deterministic_code_fix_shape(self, settings) -> None:
         audit = {
             "latest": {"auditType": "seo-aeo-geo", "issueCount": 1},
             "artefacts": {
@@ -225,9 +229,59 @@ class TestNormalise:
         }
         issues = normalise(audit, "seo-aeo-geo", "2026-05-15", settings)
         assert len(issues) == 1
-        assert issues[0]["classification"] == "code_fix"
+        assert issues[0]["classification"] == "manual_review"
         assert issues[0]["fixClass"] == "canonical_fix"
         assert issues[0]["affectedPaths"] == ["bio/index.html"]
+        assert any("classification='code_fix'" in e for e in issues[0]["evidence"])
+
+    def test_seo_deterministic_ledger_generates_code_fix_task(self, settings) -> None:
+        audit = {
+            "latest": {"auditType": "seo-aeo-geo", "issueCount": 1},
+            "artefacts": {
+                "summary.json": {
+                    "deterministicRemediationLedger": {
+                        "findings": [
+                            {
+                                "id": "SEO-001",
+                                "classification": "code_fix",
+                                "severity": "high",
+                                "confidence": 0.9,
+                                "affectedPaths": ["bio/index.html"],
+                                "allowedFixClass": "canonical_fix",
+                                "evidence": ["bio/index.html lacks the canonical href expected by the audit."],
+                                "requiredOutcome": "Add the canonical link for the bio page.",
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+        issues = normalise(audit, "seo-aeo-geo", "2026-05-15", settings)
+        assert len(issues) == 1
+        assert issues[0]["classification"] == "code_fix"
+        assert issues[0]["allowedFixClass"] == "canonical_fix"
+        assert issues[0]["affectedPaths"] == ["bio/index.html"]
+
+    def test_seo_refuses_r2_hosted_podcast_episode_code_fix(self, settings) -> None:
+        audit = {
+            "latest": {"auditType": "seo-aeo-geo", "issueCount": 1},
+            "findings": [
+                {
+                    "id": "SEO-002",
+                    "classification": "code_fix",
+                    "severity": "high",
+                    "confidence": 0.9,
+                    "affectedPaths": ["podcast/episodes/example/index.html"],
+                    "allowedFixClass": "meta_fix",
+                    "evidence": ["R2-hosted podcast page has a metadata mismatch."],
+                    "requiredOutcome": "Update the episode metadata.",
+                }
+            ],
+        }
+        issues = normalise(audit, "seo-aeo-geo", "2026-05-15", settings)
+        assert len(issues) == 1
+        assert issues[0]["classification"] == "manual_review"
+        assert any("R2-hosted podcast episode pages" in e for e in issues[0]["evidence"])
 
     def test_seo_aggregate_summary_without_finding_ledger_generates_manual_review(
         self, settings

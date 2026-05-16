@@ -58,6 +58,7 @@ def make_settings(repo_dirs: tuple[Path, Path], **overrides: str) -> Settings:
         "RMS_AIMS_REPO_PATH": str(aims),
         "RMS_DRY_RUN": "true",
         "RMS_LIVE_WRITE_ENABLED": "false",
+        "RMS_ALLOW_UNAUTHENTICATED_DEV": "true",
     }
     env.update(overrides)
     from unittest.mock import patch
@@ -208,6 +209,39 @@ def test_already_running_conflict_schedules_no_background(
         response = client.post("/rebuild/on-brand/run")
     assert response.status_code == 409
     assert fake_pipeline.calls == []
+
+
+
+
+def test_rebuild_endpoint_requires_api_key_when_dev_override_disabled(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(
+        repo_dirs, RMS_API_KEY="", RMS_ALLOW_UNAUTHENTICATED_DEV="false"
+    )
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"] == "RMS_API_KEY is required for rebuild endpoints"
+    assert "RMS_ALLOW_UNAUTHENTICATED_DEV=true" in payload["hint"]
+    assert fake_pipeline.calls == []
+
+
+def test_rebuild_endpoint_allows_local_dev_override_without_api_key(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(
+        repo_dirs, RMS_API_KEY="", RMS_ALLOW_UNAUTHENTICATED_DEV="true"
+    )
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 202
+    assert len(fake_pipeline.calls) == 1
 
 
 def test_missing_config_returns_503_and_schedules_no_background(
