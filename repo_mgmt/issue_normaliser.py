@@ -44,20 +44,12 @@ _MOBILE_UX_PROTECTED: frozenset[str] = frozenset(
 _APPROVED_FIX_CLASSES: dict[str, frozenset[str]] = {
     "seo-aeo-geo": frozenset(
         [
-            "html_fix",
-            "css_fix",
             "meta_fix",
             "schema_fix",
-            "structured_data_fix",
-            "canonical_fix",
-            "redirect_fix",
-            "crawler_fix",
             "sitemap_fix",
+            "internal_link_fix",
             "robots_fix",
-            "llms_fix",
-            "accessibility_fix",
-            "template_fix",
-            "partial_fix",
+            "canonical_fix",
         ]
     ),
     "mobile-ux": frozenset(
@@ -149,9 +141,12 @@ def normalise(
         if not isinstance(raw_finding, dict):
             metadata_errors.append("finding is not a JSON object")
 
-        affected_paths, path_errors = _safe_affected_paths(
-            finding.get("affectedPaths", [])
-        )
+        raw_affected_paths = finding.get("affectedPaths", [])
+        if pipeline_id == "mobile-ux":
+            raw_affected_paths = _expand_mobile_ux_context_paths(
+                finding, raw_affected_paths
+            )
+        affected_paths, path_errors = _safe_affected_paths(raw_affected_paths)
         metadata_errors.extend(path_errors)
         fix_class = _fix_class(finding)
         severity, severity_error = _safe_severity(finding.get("severity", "low"))
@@ -199,6 +194,32 @@ def normalise(
                     severity=severity,
                     confidence=confidence,
                     evidence=evidence,
+                    source_audit=source_audit,
+                    required_outcome=required_outcome,
+                    allowed_fix_class="",
+                    validation_commands=validation_commands,
+                )
+            )
+            continue
+
+        if pipeline_id in {"seo-aeo-geo", "mobile-ux"} and any(
+            _is_r2_hosted_podcast_episode_path(path) for path in affected_paths
+        ):
+            reason = (
+                "finding targets R2-hosted podcast episode pages; website repo patching refused"
+            )
+            results.append(
+                _build_validated(
+                    task_id=task_id,
+                    pipeline_id=pipeline_id,
+                    finding=finding,
+                    classification="manual_review",
+                    status="manual_review",
+                    affected_paths=affected_paths,
+                    fix_class=fix_class,
+                    severity=severity,
+                    confidence=confidence,
+                    evidence=evidence + [reason],
                     source_audit=source_audit,
                     required_outcome=required_outcome,
                     allowed_fix_class="",
@@ -278,21 +299,35 @@ def normalise(
                 continue
 
         explicit = str(finding.get("classification", "")).strip()
-        if explicit in _VALID_CLASSIFICATIONS - {"code_fix"}:
+        if pipeline_id == "seo-aeo-geo":
+            classification, status, allowed_fix_class, evidence = _classify_seo_finding(
+                explicit=explicit,
+                fix_class=fix_class,
+                approved=approved,
+                affected_paths=affected_paths,
+                evidence=evidence,
+                required_outcome=required_outcome,
+            )
+        elif explicit in _VALID_CLASSIFICATIONS - {"code_fix"}:
             classification = explicit
             status = explicit
+            allowed_fix_class = ""
         elif fix_class == "future_guidance":
             classification = "future_guidance"
             status = "future_guidance"
+            allowed_fix_class = ""
         elif fix_class in approved:
             classification = "code_fix"
             status = "pending"
+            allowed_fix_class = fix_class
         elif fix_class:
             classification = "manual_review"
             status = "manual_review"
+            allowed_fix_class = ""
         else:
             classification = "future_guidance"
             status = "future_guidance"
+            allowed_fix_class = ""
 
         results.append(
             _build_validated(
@@ -308,12 +343,109 @@ def normalise(
                 evidence=evidence,
                 source_audit=source_audit,
                 required_outcome=required_outcome,
-                allowed_fix_class=fix_class if classification == "code_fix" else "",
+                allowed_fix_class=allowed_fix_class,
                 validation_commands=validation_commands,
             )
         )
 
     return results
+
+
+def _classify_seo_finding(
+    *,
+    explicit: str,
+    fix_class: str,
+    approved: frozenset[str],
+    affected_paths: list[str],
+    evidence: list[str],
+    required_outcome: str,
+) -> tuple[str, str, str, list[str]]:
+    """Classify SEO/AEO/GEO findings using deterministic evidence gates."""
+    if explicit in _VALID_CLASSIFICATIONS - {"code_fix"}:
+        return explicit, explicit, "", evidence
+    if fix_class == "future_guidance":
+        return "future_guidance", "future_guidance", "", evidence
+    if explicit != "code_fix":
+        return (
+            "manual_review",
+            "manual_review",
+            "",
+            evidence
+            + [
+                "SEO/AEO/GEO auto-patching requires classification='code_fix' from the audit producer."
+            ],
+        )
+    missing: list[str] = []
+    if fix_class not in approved:
+        missing.append(f"allowedFixClass {fix_class or '<missing>'!r} is not approved")
+    if not affected_paths:
+        missing.append("affectedPaths must name exact repo-owned files")
+    if not evidence:
+        missing.append("evidence must be specific and deterministic")
+    if not required_outcome.strip():
+        missing.append("requiredOutcome must describe the exact repo-level change")
+    if missing:
+        return "manual_review", "manual_review", "", evidence + missing
+    return "code_fix", "pending", fix_class, evidence
+
+
+def _is_r2_hosted_podcast_episode_path(path: str) -> bool:
+    """Return True for podcast episode pages governed by Cloudflare R2."""
+    cleaned = str(path).strip().replace("\\", "/").lstrip("./")
+    return cleaned == "podcast/episodes" or cleaned.startswith("podcast/episodes/")
+
+
+def _expand_mobile_ux_context_paths(
+    finding: dict[str, Any], raw_paths: Any
+) -> list[Any]:
+    """Add shared nav CSS/JS context for hamburger/mobile-navigation fixes."""
+    paths = list(raw_paths) if isinstance(raw_paths, list) else []
+    if not _is_mobile_nav_finding(finding, paths):
+        return paths
+    for path in (
+        "assets/partials/header.html",
+        "assets/css/site.css",
+        "assets/js/site-ui.min.js",
+    ):
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _is_mobile_nav_finding(finding: dict[str, Any], paths: list[Any]) -> bool:
+    """Return True when the finding is about the shared mobile nav control."""
+    text_parts: list[str] = []
+    for key in (
+        "id",
+        "issueId",
+        "title",
+        "description",
+        "check",
+        "defectDescription",
+        "exactRemediation",
+        "selectorComponentCodeAnchor",
+        "acceptanceCriteria",
+        "requiredOutcome",
+    ):
+        value = finding.get(key)
+        if value is not None:
+            text_parts.append(str(value))
+    for item in finding.get("evidence", []) if isinstance(finding.get("evidence"), list) else []:
+        text_parts.append(str(item))
+    text_parts.extend(str(path) for path in paths)
+    haystack = " ".join(text_parts).lower()
+    return any(
+        token in haystack
+        for token in (
+            "hamburger",
+            "mobile nav",
+            "mobile-navigation",
+            "mobilenavigation",
+            "jh-hamburger",
+            "jh-mobile-nav",
+            "mux-g001",
+        )
+    )
 
 
 # ── Live audit artefact extraction ────────────────────────────────────────
@@ -572,6 +704,8 @@ def _looks_like_issue(value: dict[str, Any]) -> bool:
         return True
     if keys & {"violatedRule", "whyItIsOffBrand", "exactEvidence"}:
         return True
+    if keys & {"classification"} and keys & {"affectedPaths"} and keys & {"requiredOutcome", "allowedFixClass"}:
+        return True
     return False
 
 
@@ -730,12 +864,15 @@ def _map_seo_candidate(candidate: dict[str, Any], artefact_name: str) -> dict[st
         return None
     affected = _paths_from_candidate(candidate)
     text = " ".join(str(part) for part in [title, remediation, description] if part)
+    explicit_fix_class = _first_text(candidate, "allowedFixClass", "fixClass", "fix_class")
     return {
         "title": title or f"SEO/AEO/GEO finding from {artefact_name}",
         "description": description or remediation or title,
         "severity": _map_severity(candidate.get("severity"), pipeline="seo-aeo-geo"),
         "confidence": _confidence_from_candidate(candidate),
-        "fixClass": _derive_seo_fix_class(text, affected),
+        "classification": _first_text(candidate, "classification"),
+        "fixClass": explicit_fix_class or _derive_seo_fix_class(text, affected),
+        "allowedFixClass": explicit_fix_class,
         "affectedPaths": affected,
         "evidence": _evidence_from_fields(
             candidate,

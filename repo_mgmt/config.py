@@ -106,9 +106,11 @@ class Settings(BaseSettings):
         " && python3 scripts/check_crawlers.py"
     )
 
-    # ── API authentication (optional) ──────────────────────────────────────
-    # Absence means auth is disabled; a startup WARNING is logged in that case.
+    # ── API authentication ────────────────────────────────────────────────
+    # Rebuild/write endpoints require RMS_API_KEY unless a local developer
+    # explicitly opts out with RMS_ALLOW_UNAUTHENTICATED_DEV=true.
     rms_api_key: str | None = Field(default=None)
+    rms_allow_unauthenticated_dev: bool = False
 
     # ── Behaviour defaults ─────────────────────────────────────────────────
     rms_dry_run: bool = True  # SAFE DEFAULT — never omit
@@ -146,6 +148,7 @@ class Settings(BaseSettings):
         "rms_revert_on_validation_failure",
         "rms_single_worker_mode",
         "rms_repo_bootstrap_enabled",
+        "rms_allow_unauthenticated_dev",
         mode="before",
     )
     @classmethod

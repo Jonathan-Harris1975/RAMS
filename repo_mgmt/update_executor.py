@@ -133,6 +133,11 @@ async def run_task(
     """
     task = dict(issue)
     task_id = str(task.get("taskId", "<unknown>"))
+    task.setdefault("patchAttempted", False)
+    task.setdefault("patchApplied", False)
+    task.setdefault("validationFailed", False)
+    task.setdefault("commitCreated", False)
+    task.setdefault("unsafeWriteRefused", False)
     snapshot: TaskRepoSnapshot | None = None
     patch_started = False
 
@@ -142,6 +147,7 @@ async def run_task(
             task["error"] = "live mode requires a valid Git safety/revert handle"
             return task
 
+        task["patchAttempted"] = True
         context_builder.load_context(task.get("affectedPaths", []), target_repo)
         patch_doc = await patch_planner.plan_async(
             task, target_repo, pipeline_id, cfg, model_router
@@ -184,6 +190,7 @@ async def run_task(
             dry_run=False,
             pipeline_id=pipeline_id,
         )
+        task["patchApplied"] = True
         task["modified_files"] = modified
 
         if _post_patch_sync_required(modified_candidates, pipeline_id):
@@ -199,6 +206,7 @@ async def run_task(
                 )
                 _restore_after_failure(git_mgr, snapshot, task)
                 task["validation_passed"] = False
+                task["validationFailed"] = True
                 task["status"] = "manual_review"
                 task["error"] = (
                     "post-patch partial sync failed: "
@@ -215,6 +223,13 @@ async def run_task(
                 "commands": validation.commands,
                 "passed": validation.passed,
                 "outputTail": validation.output_tail,
+                "failedCommand": validation.failed_command,
+                "returnCode": validation.return_code,
+                "affectedRepo": str(target_repo),
+                "actionableHint": None if validation.passed else (
+                    f"Fix the post-patch validation failure, then rerun {validation.failed_command or 'the validation command'}."
+                ),
+                "patchingSkipped": False,
             }
             if not validation.passed:
                 logger.warning(
@@ -226,6 +241,7 @@ async def run_task(
                 )
                 _restore_after_failure(git_mgr, snapshot, task)
                 task["validation_passed"] = False
+                task["validationFailed"] = True
                 task["status"] = "manual_review"
                 task["error"] = (
                     f"validation failed: {validation.failed_command or '<unknown>'}"
@@ -244,6 +260,8 @@ async def run_task(
             commit_message=message,
             validation_passed=True,
             reverted=False,
+            patchApplied=True,
+            commitCreated=True,
         )
         return task
     except (PathTraversalError, ProtectedPathError) as exc:
@@ -256,6 +274,7 @@ async def run_task(
                     task_id,
                 )
         task["status"] = "manual_review"
+        task["unsafeWriteRefused"] = True
         task["error"] = str(exc)
         task["evidence"] = task.get("evidence", []) + [str(exc)]
     except Exception as exc:

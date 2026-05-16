@@ -45,7 +45,7 @@ async def _startup_checks() -> None:
     cfg = _get_cfg()
     if cfg is None or not cfg.rms_api_key:
         logger.warning(
-            "rms-api: RMS_API_KEY is not set — trigger endpoints are unauthenticated"
+            "rms-api: RMS_API_KEY is not set — rebuild endpoints require it unless RMS_ALLOW_UNAUTHENTICATED_DEV=true"
         )
 
 PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
@@ -480,6 +480,28 @@ def _auth_error_response(authorization: str | None) -> JSONResponse | None:
     )
 
 
+
+def _write_auth_error_response(authorization: str | None) -> JSONResponse | None:
+    """Fail closed for public rebuild endpoints unless explicitly authorised."""
+    cfg_for_auth = _get_cfg()
+    if cfg_for_auth is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "configuration unavailable", "dependencies": _dependency_details()},
+        )
+    if not cfg_for_auth.rms_api_key:
+        if cfg_for_auth.rms_allow_unauthenticated_dev:
+            return None
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "RMS_API_KEY is required for rebuild endpoints",
+                "hint": "Set RMS_API_KEY for deployed use, or set RMS_ALLOW_UNAUTHENTICATED_DEV=true for local-only development.",
+            },
+        )
+    return _auth_error_response(authorization)
+
+
 def _report_config_or_response() -> tuple[Settings | None, JSONResponse | None]:
     """Return settings for report endpoints, or a structured 503 response."""
     cfg = _get_cfg()
@@ -869,7 +891,7 @@ async def trigger_run(
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Trigger a pipeline run and return the single source-of-truth run ID."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _write_auth_error_response(authorization)
     if auth_error is not None:
         return auth_error
 

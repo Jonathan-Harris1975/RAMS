@@ -136,6 +136,11 @@ class ValidationSummaryModel(BaseModel):
     commands: list[str] = Field(default_factory=list)
     passed: bool
     outputTail: str = ""
+    failedCommand: str | None = None
+    returnCode: int | None = None
+    affectedRepo: str | None = None
+    actionableHint: str | None = None
+    patchingSkipped: bool | None = None
 
 
 class CommitInfoModel(BaseModel):

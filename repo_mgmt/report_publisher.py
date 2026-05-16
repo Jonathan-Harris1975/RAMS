@@ -36,6 +36,11 @@ class ValidationSummary:
     commands: list[str]
     passed: bool
     output_tail: str = ""
+    failed_command: str | None = None
+    return_code: int | None = None
+    affected_repo: str | None = None
+    actionable_hint: str | None = None
+    patching_skipped: bool | None = None
 
 
 @dataclass
@@ -160,11 +165,22 @@ def _convert(obj: Any) -> Any:
     if isinstance(obj, CommitInfo):
         return {"sha": obj.sha, "message": obj.message, "files": obj.files}
     if isinstance(obj, ValidationSummary):
-        return {
+        data: dict[str, Any] = {
             "commands": obj.commands,
             "passed": obj.passed,
             "outputTail": obj.output_tail,
         }
+        if obj.failed_command is not None:
+            data["failedCommand"] = obj.failed_command
+        if obj.return_code is not None:
+            data["returnCode"] = obj.return_code
+        if obj.affected_repo is not None:
+            data["affectedRepo"] = obj.affected_repo
+        if obj.actionable_hint is not None:
+            data["actionableHint"] = obj.actionable_hint
+        if obj.patching_skipped is not None:
+            data["patchingSkipped"] = obj.patching_skipped
+        return data
     if isinstance(obj, PublishStatus):
         data: dict[str, Any] = {"destination": obj.destination, "ok": obj.ok}
         if obj.error is not None:

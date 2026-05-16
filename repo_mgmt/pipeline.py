@@ -45,32 +45,48 @@ def _date() -> str:
 
 
 def _summary(tasks: list[dict[str, Any]], snapshots: int) -> dict[str, int]:
-    """Build a RunReport summary from normalised task states."""
+    """Build a RunReport summary from explicit task state markers."""
+    code_fix_candidates = sum(
+        1 for task in tasks if task.get("classification") == "code_fix"
+    )
+    patch_applied = sum(1 for task in tasks if bool(task.get("patchApplied")))
+    commit_created = sum(1 for task in tasks if bool(task.get("commit_sha")))
+    manual_review = sum(
+        1
+        for task in tasks
+        if task.get("classification") == "manual_review"
+        or task.get("status") == "manual_review"
+    )
     return {
         "snapshotsRead": snapshots,
         "tasksGenerated": len(tasks),
-        "codeFixesAttempted": sum(
-            1 for task in tasks if task.get("classification") == "code_fix"
+        "codeFixCandidates": code_fix_candidates,
+        "codeFixesAttempted": sum(1 for task in tasks if bool(task.get("patchAttempted"))),
+        "baselineValidationFailed": sum(
+            1 for task in tasks if bool(task.get("baselineValidationFailed"))
         ),
-        "committed": sum(1 for task in tasks if task.get("status") == "committed"),
-        "validationFailed": sum(
+        "patchApplied": patch_applied,
+        "validationFailed": sum(1 for task in tasks if bool(task.get("validationFailed"))),
+        "commitCreated": commit_created,
+        "manualReview": manual_review,
+        "skipped": sum(
             1
             for task in tasks
-            if task.get("validation_passed") is False
-            or task.get("status") in {"validation_failed", "reverted"}
+            if task.get("classification") == "skipped"
+            or str(task.get("status", "")).startswith("skipped")
         ),
+        "unsafeWriteRefused": sum(
+            1 for task in tasks if bool(task.get("unsafeWriteRefused"))
+        ),
+        # Backwards-compatible keys retained for older dashboards/tests.
+        "committed": commit_created,
         "futureGuidance": sum(
             1
             for task in tasks
             if task.get("classification") == "future_guidance"
             or task.get("status") == "future_guidance"
         ),
-        "manualReview": sum(
-            1
-            for task in tasks
-            if task.get("classification") == "manual_review"
-            or task.get("status") == "manual_review"
-        ),
+        "manualReviewLegacy": manual_review,
     }
 
 
@@ -87,6 +103,11 @@ def _validation_summary(
                 ),
                 passed=bool(validation.get("passed")),
                 output_tail=str(validation.get("outputTail", "")),
+                failed_command=validation.get("failedCommand"),
+                return_code=validation.get("returnCode"),
+                affected_repo=validation.get("affectedRepo"),
+                actionable_hint=validation.get("actionableHint"),
+                patching_skipped=validation.get("patchingSkipped"),
             )
     return ValidationSummary(
         commands=cfg.validation_commands_for(pipeline_id),
@@ -120,16 +141,50 @@ def _mark_code_fixes_manual(
         if task.get("classification") == "code_fix":
             task["status"] = "manual_review"
             task["error"] = reason
-            task["validation_passed"] = False
+            task["patchAttempted"] = False
+            task["patchApplied"] = False
+            task["baselineValidationFailed"] = baseline_validation is not None and not baseline_validation.passed
+            task["patchingSkippedBecauseBaselineFailed"] = task["baselineValidationFailed"]
             task["evidence"] = list(task.get("evidence", [])) + [reason]
             if baseline_validation is not None:
-                task["baselineValidation"] = {
-                    "commands": baseline_validation.commands,
-                    "passed": baseline_validation.passed,
-                    "outputTail": baseline_validation.output_tail,
-                }
+                task["baselineValidation"] = _validation_to_task_block(
+                    baseline_validation
+                )
         tasks.append(task)
     return tasks
+
+
+def _validation_to_task_block(validation: ValidationSummary) -> dict[str, Any]:
+    """Return the task-level baseline validation block for report consumers."""
+    block: dict[str, Any] = {
+        "commands": validation.commands,
+        "passed": validation.passed,
+        "outputTail": validation.output_tail,
+    }
+    if validation.failed_command is not None:
+        block["failedCommand"] = validation.failed_command
+    if validation.return_code is not None:
+        block["returnCode"] = validation.return_code
+    if validation.affected_repo is not None:
+        block["affectedRepo"] = validation.affected_repo
+    if validation.actionable_hint is not None:
+        block["actionableHint"] = validation.actionable_hint
+    if validation.patching_skipped is not None:
+        block["patchingSkipped"] = validation.patching_skipped
+    return block
+
+
+def _baseline_actionable_hint(result: validation_runner.ValidationResult) -> str:
+    """Return a concise operator hint for a failed clean-repo validation."""
+    command = result.failed_command or "validation command"
+    output = result.output_tail
+    combined = f"{command}\n{output}"
+    if "scripts/ebook_pipeline.py" in combined or "sync_redirects.py" in combined:
+        return (
+            "Fix scripts/ebook_pipeline.py syntax error, then rerun "
+            "python3 scripts/sync_redirects.py --check before attempting RAMS live patching."
+        )
+    return f"Fix the clean-repo validation failure, then rerun {command} before attempting RAMS live patching."
 
 
 def _make_report(
@@ -213,6 +268,11 @@ def _run_baseline_validation(
         commands=result.commands,
         passed=result.passed,
         output_tail=result.output_tail,
+        failed_command=result.failed_command,
+        return_code=result.return_code,
+        affected_repo=str(target_repo),
+        actionable_hint=None if result.passed else _baseline_actionable_hint(result),
+        patching_skipped=None if result.passed else True,
     )
     if not result.passed:
         logger.warning(
