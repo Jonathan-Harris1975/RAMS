@@ -1,0 +1,204 @@
+{
+  "schemaVersion": "2026-05-17.lane1",
+  "governance": {
+    "lane": "Lane 1 - Autonomous",
+    "allowedActions": [
+      "crawl",
+      "scan",
+      "extract",
+      "validate",
+      "screenshot",
+      "score",
+      "monitor",
+      "generate reports",
+      "write evidence artefacts"
+    ],
+    "blockedActions": [
+      "auto-publish",
+      "auto-merge",
+      "auto-deploy",
+      "send outreach",
+      "change DNS or Cloudflare routing",
+      "change paid service configuration"
+    ],
+    "evidenceRequired": [
+      "timestamp",
+      "affected URLs or files",
+      "source URLs",
+      "logs or command output",
+      "screenshots where relevant",
+      "pass/fail summary"
+    ]
+  },
+  "skills": [
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 1",
+      "priority": "P0",
+      "skill": "seo-audit",
+      "repository": "coreyhaines31/marketingskills",
+      "sourceUrl": "https://www.skills.sh/coreyhaines31/marketingskills/seo-audit",
+      "ecosystemFit": "SEO / website QA",
+      "autonomyFit": "Scheduled technical/on-page SEO scans and evidence-led reporting.",
+      "manualCheckpoint": "Review before applying any suggested repo fixes.",
+      "installCommand": "npx skills add https://github.com/coreyhaines31/marketingskills --skill seo-audit"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 1",
+      "priority": "P0",
+      "skill": "ai-seo",
+      "repository": "coreyhaines31/marketingskills",
+      "sourceUrl": "https://www.skills.sh/coreyhaines31/marketingskills/ai-seo",
+      "ecosystemFit": "AEO / GEO / AI search",
+      "autonomyFit": "Repeatable answer-engine visibility checks and reporting templates.",
+      "manualCheckpoint": "Review before changing page copy, metadata, schema, or public claims.",
+      "installCommand": "npx skills add https://github.com/coreyhaines31/marketingskills --skill ai-seo"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 2",
+      "priority": "P0",
+      "skill": "agent-browser",
+      "repository": "vercel-labs/agent-browser",
+      "sourceUrl": "https://www.skills.sh/vercel-labs/agent-browser",
+      "ecosystemFit": "Rendered browser automation",
+      "autonomyFit": "Browser sessions, screenshot evidence and route interaction traces.",
+      "manualCheckpoint": "Triage flaky browser failures before patching production code.",
+      "installCommand": "npx skills add vercel-labs/agent-browser"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 2",
+      "priority": "P0",
+      "skill": "playwright-best-practices",
+      "repository": "currents-dev/playwright-best-practices-skill",
+      "sourceUrl": "https://www.skills.sh/currents-dev/playwright-best-practices-skill",
+      "ecosystemFit": "Mobile UX / rendered QA",
+      "autonomyFit": "Reliable selectors, fixtures, screenshots, parallelism and CI evidence.",
+      "manualCheckpoint": "Review before changing the audit runner architecture.",
+      "installCommand": "npx skills add currents-dev/playwright-best-practices-skill"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 2",
+      "priority": "P0",
+      "skill": "webapp-testing",
+      "repository": "anthropics/skills",
+      "sourceUrl": "https://www.skills.sh/anthropics/skills/webapp-testing",
+      "ecosystemFit": "Regression QA",
+      "autonomyFit": "Route tests, report QA, smoke tests and web regression strategy.",
+      "manualCheckpoint": "Manual approval before modifying failing code.",
+      "installCommand": "npx skills add anthropics/skills --skill webapp-testing"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 3",
+      "priority": "P0",
+      "skill": "firecrawl-crawl",
+      "repository": "firecrawl/cli",
+      "sourceUrl": "https://www.skills.sh/firecrawl/cli",
+      "ecosystemFit": "Site discovery / crawl coverage",
+      "autonomyFit": "Discover route inventories and crawl coverage for audits.",
+      "manualCheckpoint": "Manual approval before newly discovered pages become patch scope.",
+      "installCommand": "npx skills add firecrawl/cli --skill firecrawl-crawl"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 3",
+      "priority": "P0",
+      "skill": "firecrawl-scrape",
+      "repository": "firecrawl/cli",
+      "sourceUrl": "https://www.skills.sh/firecrawl/cli",
+      "ecosystemFit": "RSS/article extraction",
+      "autonomyFit": "Extract cleaner article text and structured fields for rewrite pipelines.",
+      "manualCheckpoint": "Editorial sign-off before publication of rewritten article copy.",
+      "installCommand": "npx skills add firecrawl/cli --skill firecrawl-scrape"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 3",
+      "priority": "P0",
+      "skill": "firecrawl-search",
+      "repository": "firecrawl/cli",
+      "sourceUrl": "https://www.skills.sh/firecrawl/cli",
+      "ecosystemFit": "Research / source discovery",
+      "autonomyFit": "Find source pages for RSS research, competitors and backlink discovery reports.",
+      "manualCheckpoint": "Manual approval before outreach or public claims.",
+      "installCommand": "npx skills add firecrawl/cli --skill firecrawl-search"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 4",
+      "priority": "P0",
+      "skill": "verification-before-completion",
+      "repository": "obra/superpowers",
+      "sourceUrl": "https://www.skills.sh/obra/superpowers/verification-before-completion",
+      "ecosystemFit": "Final QA gate",
+      "autonomyFit": "Requires evidence before a repo/report/spreadsheet task is marked complete.",
+      "manualCheckpoint": "Human override only with a logged reason.",
+      "installCommand": "npx skills add obra/superpowers --skill verification-before-completion"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 4",
+      "priority": "P0",
+      "skill": "xlsx",
+      "repository": "anthropics/skills",
+      "sourceUrl": "https://skills.sh/anthropics/skills/xlsx",
+      "ecosystemFit": "Spreadsheet/report packaging",
+      "autonomyFit": "Generate and verify tracker workbooks, audit spreadsheets and tabular evidence bundles.",
+      "manualCheckpoint": "Review before external distribution.",
+      "installCommand": "npx skills add https://github.com/anthropics/skills --skill xlsx"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Batch 4",
+      "priority": "P0",
+      "skill": "pdf",
+      "repository": "anthropics/skills",
+      "sourceUrl": "https://www.skills.sh/anthropics/skills/pdf",
+      "ecosystemFit": "PDF/report packaging",
+      "autonomyFit": "Create or inspect PDF audit packs and publication-ready evidence summaries.",
+      "manualCheckpoint": "Review before sharing externally.",
+      "installCommand": "npx skills add https://github.com/anthropics/skills --skill pdf"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Lane 1 later",
+      "priority": "P1",
+      "skill": "web-perf",
+      "displayName": "cloudflare web-perf",
+      "repository": "cloudflare/skills",
+      "sourceUrl": "https://www.skills.sh/cloudflare/skills",
+      "ecosystemFit": "Cloudflare/site performance",
+      "autonomyFit": "Assess Cloudflare, static asset, cache and performance patterns.",
+      "manualCheckpoint": "Manual approval before cache, DNS or Worker behaviour changes.",
+      "installCommand": "npx skills add cloudflare/skills --skill web-perf"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Lane 1 later",
+      "priority": "P1",
+      "skill": "sentry-cli",
+      "repository": "sentry/dev",
+      "sourceUrl": "https://www.skills.sh/sentry/dev/sentry-cli",
+      "ecosystemFit": "Monitoring",
+      "autonomyFit": "Operational error tracking support where Sentry is configured.",
+      "manualCheckpoint": "Manual setup for DSN, projects and alert rules.",
+      "installCommand": "npx skills add sentry/dev --skill sentry-cli"
+    },
+    {
+      "lane": "Lane 1 - Autonomous",
+      "batch": "Lane 1 later",
+      "priority": "P1",
+      "skill": "browser-use",
+      "repository": "browser-use/browser-use",
+      "sourceUrl": "https://www.skills.sh/browser-use/browser-use",
+      "ecosystemFit": "Visual browser automation backup",
+      "autonomyFit": "Assist where selectors are brittle or visual state matters.",
+      "manualCheckpoint": "Manual review for unpredictable visual automation behaviour.",
+      "installCommand": "npx skills add browser-use/browser-use"
+    }
+  ]
+}
