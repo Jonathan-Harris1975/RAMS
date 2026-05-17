@@ -11,7 +11,6 @@ from typing import Any
 
 from repo_mgmt import (
     audit_reader,
-    search_visibility_baseline,
     issue_normaliser,
     task_ranker,
     update_executor,
@@ -19,6 +18,7 @@ from repo_mgmt import (
 )
 from repo_mgmt.config import PipelineId, Settings, configured_worker_count
 from repo_mgmt.git_manager import GitManager
+from repo_mgmt.lane1_skills import build_lane1_skills_baseline
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.report_publisher import (
     CommitInfo,
@@ -212,9 +212,9 @@ def _make_report(
         tasks=tasks,
         validation=_validation_summary(tasks, cfg, pipeline_id),
         baseline_validation=baseline_validation,
-        skills_baseline=search_visibility_baseline.search_visibility_baseline_for(pipeline_id),
         commits=_commits(tasks),
         error=error,
+        skills_baseline=build_lane1_skills_baseline(pipeline_id=pipeline_id),
     )
 
 
