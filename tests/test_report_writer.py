@@ -42,6 +42,7 @@ def test_dry_run_writes_local_json(tmp_path, monkeypatch, settings, mock_r2):
         "validation",
         "commits",
         "publishStatus",
+        "reportQuality",
     }
     assert data["validation"]["outputTail"] == "ok"
     assert data["publishStatus"]["ok"] is True
@@ -85,3 +86,12 @@ def test_dry_run_uses_configured_report_dir(settings, mock_r2, tmp_path):
 def test_dry_run_default_report_dir_is_container_safe(settings, mock_r2):
     dest = publish(_report(True), settings, mock_r2)
     assert str(dest).startswith("/tmp/rams-reports/")
+
+
+def test_report_quality_metadata_is_serialised(tmp_path, monkeypatch, settings, mock_r2):
+    monkeypatch.chdir(tmp_path)
+    dest = publish(_report(True), settings, mock_r2)
+    data = json.loads(Path(dest).read_text())
+    assert data["reportQuality"]["lane"] == "Lane 1 autonomous reporting"
+    assert data["reportQuality"]["manualInterventionRequired"] is True
+    assert "future-output brand guardrails" in data["reportQuality"]["primaryGoal"]
