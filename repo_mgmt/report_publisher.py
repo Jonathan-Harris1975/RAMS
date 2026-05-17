@@ -165,29 +165,29 @@ def _convert(obj: Any) -> Any:
     if isinstance(obj, CommitInfo):
         return {"sha": obj.sha, "message": obj.message, "files": obj.files}
     if isinstance(obj, ValidationSummary):
-        data: dict[str, Any] = {
+        validation_data: dict[str, Any] = {
             "commands": obj.commands,
             "passed": obj.passed,
             "outputTail": obj.output_tail,
         }
         if obj.failed_command is not None:
-            data["failedCommand"] = obj.failed_command
+            validation_data["failedCommand"] = obj.failed_command
         if obj.return_code is not None:
-            data["returnCode"] = obj.return_code
+            validation_data["returnCode"] = obj.return_code
         if obj.affected_repo is not None:
-            data["affectedRepo"] = obj.affected_repo
+            validation_data["affectedRepo"] = obj.affected_repo
         if obj.actionable_hint is not None:
-            data["actionableHint"] = obj.actionable_hint
+            validation_data["actionableHint"] = obj.actionable_hint
         if obj.patching_skipped is not None:
-            data["patchingSkipped"] = obj.patching_skipped
-        return data
+            validation_data["patchingSkipped"] = obj.patching_skipped
+        return validation_data
     if isinstance(obj, PublishStatus):
-        data: dict[str, Any] = {"destination": obj.destination, "ok": obj.ok}
+        publish_data: dict[str, Any] = {"destination": obj.destination, "ok": obj.ok}
         if obj.error is not None:
-            data["error"] = obj.error
+            publish_data["error"] = obj.error
         if obj.fallback_path is not None:
-            data["fallbackPath"] = obj.fallback_path
-        return data
+            publish_data["fallbackPath"] = obj.fallback_path
+        return publish_data
     if isinstance(obj, RunReport):
         data = {
             "runId": obj.runId,
