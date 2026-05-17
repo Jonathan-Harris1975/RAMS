@@ -29,6 +29,8 @@ def build_lane1_skills_baseline(*, pipeline_id: str | None = None) -> dict[str, 
         batch = str(skill.get("batch") or "Unbatched")
         batch_counts[batch] = batch_counts.get(batch, 0) + 1
     return {
+        "batch": "Batch 1 - Search visibility baseline" if pipeline_id == "seo-aeo-geo" else "Lane 1 autonomous skills",
+        "mode": "reports-only",
         "generatedAt": datetime.now(tz=timezone.utc).isoformat(),
         "pipeline": pipeline_id,
         "schemaVersion": registry.get("schemaVersion"),

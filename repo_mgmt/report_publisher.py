@@ -74,8 +74,8 @@ class RunReport:
     baseline_validation: ValidationSummary | None = None
     commits: list[CommitInfo] = field(default_factory=list)
     error: str | None = None
+    skills_baseline: dict[str, Any] | None = None
     publish_status: PublishStatus = field(default_factory=PublishStatus)
-
 
 
 def _report_quality(report: "RunReport") -> dict[str, Any]:
@@ -164,6 +164,7 @@ def _operator_next_step(report: "RunReport", validation_failed: bool, has_code_f
     if has_manual:
         return "Triage manual-review tasks before starting another remediation run."
     return "No immediate manual action from the report metadata."
+
 
 def make_run_id() -> str:
     """Return a new ISO-UTC run identifier safe for use in paths."""
@@ -290,6 +291,8 @@ def _convert(obj: Any) -> Any:
             "publishStatus": _convert(obj.publish_status),
             "reportQuality": _report_quality(obj),
         }
+        if obj.skills_baseline is not None:
+            data["skillsBaseline"] = _convert(obj.skills_baseline)
         if obj.baseline_validation is not None:
             data["baselineValidation"] = _convert(obj.baseline_validation)
         if obj.error is not None:
