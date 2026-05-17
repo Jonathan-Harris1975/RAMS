@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from repo_mgmt import context_builder, patch_applier, patch_planner, validation_runner
+from repo_mgmt.automation_gate import evaluate_phase4c_auto_pr_gate
 from repo_mgmt.git_manager import TaskRepoSnapshot
 from repo_mgmt.patch_protocol import (
     PathTraversalError,
@@ -140,6 +141,7 @@ async def run_task(
     task.setdefault("unsafeWriteRefused", False)
     snapshot: TaskRepoSnapshot | None = None
     patch_started = False
+    post_patch_validation: validation_runner.ValidationResult | None = None
 
     try:
         if not dry_run and git_mgr is None:
@@ -219,6 +221,7 @@ async def run_task(
             validation = validation_runner.run(
                 pipeline_id, target_repo, cfg, dry_run=False
             )
+            post_patch_validation = validation
             task["validation"] = {
                 "commands": validation.commands,
                 "passed": validation.passed,
@@ -249,6 +252,25 @@ async def run_task(
                 return task
 
         modified = list(task.get("modified_files", modified))
+        phase4c_gate = evaluate_phase4c_auto_pr_gate(
+            task=task,
+            patch_doc=patch_doc,
+            modified_files=modified,
+            validation=post_patch_validation,
+        )
+        task["phase4cGate"] = phase4c_gate.to_report()
+        if not phase4c_gate.ok:
+            logger.warning(
+                "update_executor [%s]: Phase 4C auto-PR gate refused commit: %s",
+                task_id,
+                "; ".join(phase4c_gate.defects[:8]),
+            )
+            _restore_after_failure(git_mgr, snapshot, task)
+            task["status"] = "manual_review"
+            task["error"] = "Phase 4C auto-PR gate failed"
+            task["evidence"] = task.get("evidence", []) + phase4c_gate.defects
+            return task
+
         git_mgr.stage_task_files(modified)
         message = f"rms({pipeline_id}): {task_id} - {task.get('title', 'fix')}"
         sha = git_mgr.commit(message)
