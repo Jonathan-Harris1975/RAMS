@@ -11,6 +11,7 @@ from typing import Any
 
 from repo_mgmt import (
     audit_reader,
+    search_visibility_baseline,
     issue_normaliser,
     task_ranker,
     update_executor,
@@ -211,6 +212,7 @@ def _make_report(
         tasks=tasks,
         validation=_validation_summary(tasks, cfg, pipeline_id),
         baseline_validation=baseline_validation,
+        skills_baseline=search_visibility_baseline.search_visibility_baseline_for(pipeline_id),
         commits=_commits(tasks),
         error=error,
     )
