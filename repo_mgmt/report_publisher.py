@@ -73,10 +73,97 @@ class RunReport:
     )
     baseline_validation: ValidationSummary | None = None
     commits: list[CommitInfo] = field(default_factory=list)
-    skills_baseline: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     publish_status: PublishStatus = field(default_factory=PublishStatus)
 
+
+
+def _report_quality(report: "RunReport") -> dict[str, Any]:
+    """Return operator-facing quality gates for Lane 1 audit reports."""
+    pipeline_gates: dict[str, dict[str, Any]] = {
+        "seo-aeo-geo": {
+            "primaryGoal": "Verify search, answer-engine, and generative-engine discovery surfaces before patching.",
+            "requiredEvidence": [
+                "dynamic-route-manifest.json",
+                "sitemap.xml",
+                "llms.txt",
+                "llm-index.json",
+                "search-visibility-baseline.json",
+            ],
+            "blockedIfMissing": [
+                "canonical dynamic routes",
+                "transcript URLs in sitemap/discovery outputs",
+                "full-estate LLM discovery coverage",
+            ],
+        },
+        "mobile-ux": {
+            "primaryGoal": "Verify rendered mobile behaviour with screenshots before declaring release readiness.",
+            "requiredEvidence": [
+                "rendered browser automation",
+                "mobile viewport emulation",
+                "screenshot manifest",
+                "per-viewport root-cause grouping",
+            ],
+            "blockedIfMissing": [
+                "screenshots",
+                "viewport matrix",
+                "exact affected route/component mapping",
+            ],
+        },
+        "on-brand": {
+            "primaryGoal": "Verify future-output brand guardrails across blog, RSS, and podcast copy.",
+            "requiredEvidence": [
+                "evidence.json",
+                "confirmed defects ledger",
+                "future QA remediation plan",
+            ],
+            "blockedIfMissing": [
+                "LLM judgement when dryRun=false",
+                "source-level examples",
+                "pipeline-level smallest safe fixes",
+            ],
+        },
+    }
+    gate = pipeline_gates.get(report.pipeline, {})
+    summary = report.summary or {}
+    tasks = report.tasks or []
+    validation_failed = bool(summary.get("validationFailed")) or not bool(report.validation.passed)
+    code_fix_tasks = [task for task in tasks if task.get("classification") == "code_fix"]
+    manual_tasks = [
+        task
+        for task in tasks
+        if task.get("classification") == "manual_review" or task.get("status") == "manual_review"
+    ]
+    return {
+        "lane": "Lane 1 autonomous reporting",
+        "status": "approval_required" if report.dryRun or code_fix_tasks or manual_tasks or validation_failed else "report_only_clear",
+        "manualInterventionRequired": bool(report.dryRun or code_fix_tasks or manual_tasks or validation_failed),
+        "dryRun": report.dryRun,
+        "primaryGoal": gate.get("primaryGoal", "Verify audit evidence before any production mutation."),
+        "requiredEvidence": gate.get("requiredEvidence", []),
+        "blockedIfMissing": gate.get("blockedIfMissing", []),
+        "qualitySignals": {
+            "tasksGenerated": int(summary.get("tasksGenerated", len(tasks))),
+            "codeFixCandidates": int(summary.get("codeFixCandidates", 0)),
+            "manualReview": int(summary.get("manualReview", 0)),
+            "validationPassed": bool(report.validation.passed),
+            "baselineValidationPassed": None if report.baseline_validation is None else bool(report.baseline_validation.passed),
+        },
+        "operatorNextStep": _operator_next_step(report, validation_failed, bool(code_fix_tasks), bool(manual_tasks)),
+    }
+
+
+def _operator_next_step(report: "RunReport", validation_failed: bool, has_code_fix: bool, has_manual: bool) -> str:
+    """Return one concise next action for a RAMS operator."""
+    if validation_failed:
+        return "Fix validation failures before applying or merging generated changes."
+    if report.dryRun:
+        return "Review the dry-run plan, then rerun live mode only when the baseline is clean."
+    if has_code_fix:
+        return "Review the generated code-fix branch or pull request before production merge."
+    if has_manual:
+        return "Triage manual-review tasks before starting another remediation run."
+    return "No immediate manual action from the report metadata."
 
 def make_run_id() -> str:
     """Return a new ISO-UTC run identifier safe for use in paths."""
@@ -201,11 +288,10 @@ def _convert(obj: Any) -> Any:
             "validation": _convert(obj.validation),
             "commits": [_convert(commit) for commit in obj.commits],
             "publishStatus": _convert(obj.publish_status),
+            "reportQuality": _report_quality(obj),
         }
         if obj.baseline_validation is not None:
             data["baselineValidation"] = _convert(obj.baseline_validation)
-        if obj.skills_baseline:
-            data["skillsBaseline"] = _convert(obj.skills_baseline)
         if obj.error is not None:
             data["error"] = obj.error
         return data
