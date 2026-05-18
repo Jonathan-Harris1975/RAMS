@@ -95,6 +95,7 @@ jobs:
             -e RMS_LIVE_WRITE_ENABLED='false' \
             -e RMS_PUSH_ENABLED='false' \
             -e RMS_CREATE_PR='false' \
+            -e RMS_API_KEY='ci-local-rams-key' \
             rams:ci
           trap 'docker logs rams-ci-api || true; docker rm -f rams-ci-api || true' EXIT
           for i in {1..30}; do
@@ -102,7 +103,7 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:8000/health | tee /tmp/health.json
-          curl -fsS http://127.0.0.1:8000/readiness | tee /tmp/readiness.json
+          curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/readiness | tee /tmp/readiness.json
           python - <<'PY'
           import json
           from pathlib import Path
