@@ -43,9 +43,9 @@ app = FastAPI(
 async def _startup_checks() -> None:
     """Log a warning when API key authentication is not configured."""
     cfg = _get_cfg()
-    if cfg is None or not cfg.rms_api_key:
+    if cfg is None or not _usable_secret(cfg.rms_api_key):
         logger.warning(
-            "rms-api: RMS_API_KEY is not set — rebuild endpoints require it unless RMS_ALLOW_UNAUTHENTICATED_DEV=true"
+            "rms-api: RMS_API_KEY is not set — protected endpoints require it unless RMS_ALLOW_UNAUTHENTICATED_DEV=true"
         )
 
 PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
@@ -79,6 +79,14 @@ class AdmissionError(Exception):
         self.status_code = status_code
         self.error = error
         self.details = details
+
+
+def _usable_secret(value: str | None) -> str:
+    """Return a configured secret, treating unresolved Koyeb placeholders as missing."""
+    text = (value or "").strip()
+    if re.fullmatch(r"\{\{\s*secret\.[^}]+\}\}", text, flags=re.IGNORECASE):
+        return ""
+    return text
 
 
 def _make_run_id() -> str:
@@ -455,19 +463,39 @@ async def health() -> JSONResponse:
 
 
 @app.get("/readiness")
-async def readiness() -> JSONResponse:
+async def readiness(
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
     """Return dependency readiness details without changing /health."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
     return JSONResponse(status_code=200, content=_readiness_payload())
 
 
 
 
 def _auth_error_response(authorization: str | None) -> JSONResponse | None:
-    """Return a 401 response when optional bearer-token auth is enabled and fails."""
+    """Return an auth error for protected endpoints, leaving only / and /health public."""
     cfg_for_auth = _get_cfg()
-    expected_key = cfg_for_auth.rms_api_key if cfg_for_auth is not None else None
+    if cfg_for_auth is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "configuration unavailable", "dependencies": _dependency_details()},
+        )
+
+    expected_key = _usable_secret(cfg_for_auth.rms_api_key)
     if not expected_key:
-        return None
+        if cfg_for_auth.rms_allow_unauthenticated_dev:
+            return None
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "RMS_API_KEY is required for protected endpoints",
+                "hint": "Set RMS_API_KEY for deployed use, or set RMS_ALLOW_UNAUTHENTICATED_DEV=true for local-only development.",
+            },
+        )
+
     token: str | None = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[len("bearer "):].strip()
@@ -489,7 +517,7 @@ def _write_auth_error_response(authorization: str | None) -> JSONResponse | None
             status_code=503,
             content={"error": "configuration unavailable", "dependencies": _dependency_details()},
         )
-    if not cfg_for_auth.rms_api_key:
+    if not _usable_secret(cfg_for_auth.rms_api_key):
         if cfg_for_auth.rms_allow_unauthenticated_dev:
             return None
         return JSONResponse(
