@@ -158,15 +158,15 @@ def test_readiness_reports_dependency_readiness(
     assert deps["runtime"]["node"].startswith("v")
 
 
-def test_readiness_degraded_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readiness_requires_config_before_exposing_dependency_detail(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         api_mod, "load_settings", lambda: (_ for _ in ()).throw(RuntimeError("missing"))
     )
     with TestClient(api_mod.app) as client:
         response = client.get("/readiness")
     data = response.json()
-    assert response.status_code == 200
-    assert data["status"] == "degraded"
+    assert response.status_code == 503
+    assert data["error"] == "configuration unavailable"
     assert data["dependencies"]["config_loaded"] is False
 
 
@@ -242,6 +242,45 @@ def test_rebuild_endpoint_allows_local_dev_override_without_api_key(
         response = client.post("/rebuild/on-brand/run")
     assert response.status_code == 202
     assert len(fake_pipeline.calls) == 1
+
+
+def test_readiness_requires_api_key_when_dev_override_disabled(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(
+        repo_dirs, RMS_API_KEY="", RMS_ALLOW_UNAUTHENTICATED_DEV="false"
+    )
+    install_valid_api(monkeypatch, settings)
+    with TestClient(api_mod.app) as client:
+        response = client.get("/readiness")
+    assert response.status_code == 503
+    assert response.json()["error"] == "RMS_API_KEY is required for protected endpoints"
+
+
+def test_readiness_treats_unresolved_secret_placeholder_as_missing(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(
+        repo_dirs, RMS_API_KEY="{{secret.RMS_API_KEY}}", RMS_ALLOW_UNAUTHENTICATED_DEV="false"
+    )
+    install_valid_api(monkeypatch, settings)
+    with TestClient(api_mod.app) as client:
+        response = client.get("/readiness", headers={"Authorization": "Bearer {{secret.RMS_API_KEY}}"})
+    assert response.status_code == 503
+    assert response.json()["error"] == "RMS_API_KEY is required for protected endpoints"
+
+
+def test_readiness_accepts_bearer_api_key(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(
+        repo_dirs, RMS_API_KEY="unit-rms-key", RMS_ALLOW_UNAUTHENTICATED_DEV="false"
+    )
+    install_valid_api(monkeypatch, settings)
+    with TestClient(api_mod.app) as client:
+        response = client.get("/readiness", headers={"Authorization": "Bearer unit-rms-key"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
 
 
 def test_missing_config_returns_503_and_schedules_no_background(
