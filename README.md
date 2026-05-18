@@ -19,7 +19,7 @@ The production Docker image includes Python, Git, Node.js 20+, and npm so both w
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Liveness only: exact RMS health contract, with pipeline states only |
-| `GET` | `/readiness` | Dependency readiness for operators and pre-trigger deployment checks |
+| `GET` | `/readiness` | Authenticated dependency readiness for operators and pre-trigger deployment checks |
 | `POST` | `/rebuild/seo-aeo-geo/run` | Trigger SEO/AEO/GEO pipeline |
 | `POST` | `/rebuild/mobile-ux/run` | Trigger Mobile UX pipeline |
 | `POST` | `/rebuild/on-brand/run` | Trigger On-Brand pipeline |
@@ -41,7 +41,7 @@ The production Docker image includes Python, Git, Node.js 20+, and npm so both w
 
 ### `/readiness` response
 
-`/readiness` distinguishes local configuration from real dependency verification:
+`/readiness` is operator-only and requires `Authorization: Bearer $RMS_API_KEY`. It distinguishes local configuration from real dependency verification:
 
 ```json
 {
@@ -84,7 +84,7 @@ A fake R2 endpoint or invalid credentials must leave `r2_verified=false` and `st
 
 ## Trigger request
 
-`/rebuild/*` endpoints are write triggers and require `RMS_API_KEY` by default. Send it as a Bearer token:
+All non-health endpoints are protected. `/` and `/health` remain public for liveness probes; `/readiness`, `/reports/*`, and `/rebuild/*` require `RMS_API_KEY` by default. Send it as a Bearer token:
 
 ```bash
 curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
@@ -93,7 +93,7 @@ curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
   -d '{"dry_run":true}'
 ```
 
-If `RMS_API_KEY` is not configured, `/rebuild/*` endpoints fail closed with `503 Service Unavailable`. Local-only developer runs may opt in to unauthenticated triggers with `RMS_ALLOW_UNAUTHENTICATED_DEV=true`; do not use that override on a public service.
+If `RMS_API_KEY` is not configured, protected endpoints fail closed with `503 Service Unavailable`. Local-only developer runs may opt in to unauthenticated triggers with `RMS_ALLOW_UNAUTHENTICATED_DEV=true`; do not use that override on a public service.
 
 `dry_run` is optional. If omitted, RAMS uses `RMS_DRY_RUN`.
 
@@ -125,7 +125,7 @@ Returned when `RMS_API_KEY` is missing and unauthenticated developer mode is not
 
 ```json
 {
-  "error": "RMS_API_KEY is required for rebuild endpoints",
+  "error": "RMS_API_KEY is required for protected endpoints",
   "hint": "Set RMS_API_KEY for deployed use, or set RMS_ALLOW_UNAUTHENTICATED_DEV=true for local-only development."
 }
 ```
@@ -305,7 +305,7 @@ docker run --rm rams-production-check npm --version
 - Keep `RMS_LIVE_WRITE_ENABLED=false`
 - Keep `RMS_PUSH_ENABLED=false`
 - Keep `RMS_CREATE_PR=false`
-- Set `RMS_API_KEY` to a strong random secret before exposing rebuild endpoints
+- Set `RMS_API_KEY` to a strong random secret before exposing protected endpoints
 - Keep `RMS_ALLOW_UNAUTHENTICATED_DEV=false` on deployed services
 - Set real R2 and OpenRouter values
 - Set `RMS_WEBSITE_REPO_PATH` for `seo-aeo-geo` and `mobile-ux`
