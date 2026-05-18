@@ -3,6 +3,7 @@ set -euo pipefail
 
 IMAGE_NAME="${IMAGE_NAME:-rams-production-check}"
 PORT="${PORT:-8000}"
+RMS_RELEASE_GATE_API_KEY="${RMS_API_KEY:-example-local-rams-key}"
 
 python -V
 python -m compileall -q repo_mgmt tests
@@ -36,7 +37,7 @@ docker run --rm "$IMAGE_NAME" npm --version
 docker run --rm "$IMAGE_NAME" node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
 
 docker rm -f rams-release-gate >/dev/null 2>&1 || true
-docker run -d --name rams-release-gate -p "$PORT:8000" --env-file .env.example-dry-run "$IMAGE_NAME" >/dev/null
+docker run -d --name rams-release-gate -p "$PORT:8000" --env-file .env.example-dry-run -e RMS_API_KEY="$RMS_RELEASE_GATE_API_KEY" "$IMAGE_NAME" >/dev/null
 cleanup() { docker logs rams-release-gate || true; docker rm -f rams-release-gate >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
@@ -49,5 +50,5 @@ done
 
 curl -fsS "http://127.0.0.1:${PORT}/health"
 printf '\n'
-curl -fsS "http://127.0.0.1:${PORT}/readiness"
+curl -fsS -H "Authorization: Bearer ${RMS_RELEASE_GATE_API_KEY}" "http://127.0.0.1:${PORT}/readiness"
 printf '\n'
