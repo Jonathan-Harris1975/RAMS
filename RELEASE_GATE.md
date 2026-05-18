@@ -37,7 +37,7 @@ Then, in another shell:
 
 ```bash
 curl -sS http://localhost:8000/health
-curl -sS http://localhost:8000/readiness
+curl -sS -H "Authorization: Bearer $RMS_API_KEY" http://localhost:8000/readiness
 ```
 
 Expected `/health`:
@@ -46,7 +46,7 @@ Expected `/health`:
 {"status":"ok","pipelines":{"seo-aeo-geo":"idle","mobile-ux":"idle","on-brand":"idle"}}
 ```
 
-With fake credentials, `/readiness` must be `degraded` and must show `r2_verified=false`. With real staging configuration, readiness must be `ready` before accepting pipeline triggers.
+With fake credentials and a valid bearer token, `/readiness` must be `degraded` and must show `r2_verified=false`. With real staging configuration, readiness must be `ready` before accepting pipeline triggers.
 
 ## Gate 4: Dry-run smoke tests
 

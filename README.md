@@ -260,17 +260,17 @@ uvicorn repo_mgmt.api:app --host 0.0.0.0 --port 8000
 Use the included script:
 
 ```bash
-BASE_URL=http://localhost:8000 ./scripts/smoke_test.sh
+BASE_URL=http://localhost:8000 RMS_API_KEY="$RMS_API_KEY" ./scripts/smoke_test.sh
 ```
 
 Or run the equivalent calls manually:
 
 ```bash
 curl -sS "$BASE_URL/health"
-curl -sS "$BASE_URL/readiness"
-curl -sS -X POST "$BASE_URL/rebuild/seo-aeo-geo/run" -H "Content-Type: application/json" -d '{"dry_run":true}'
-curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" -H "Content-Type: application/json" -d '{"dry_run":true}'
-curl -sS -X POST "$BASE_URL/rebuild/on-brand/run" -H "Content-Type: application/json" -d '{"dry_run":true}'
+curl -sS -H "Authorization: Bearer $RMS_API_KEY" "$BASE_URL/readiness"
+curl -sS -X POST "$BASE_URL/rebuild/seo-aeo-geo/run" -H "Authorization: Bearer $RMS_API_KEY" -H "Content-Type: application/json" -d '{"dry_run":true}'
+curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" -H "Authorization: Bearer $RMS_API_KEY" -H "Content-Type: application/json" -d '{"dry_run":true}'
+curl -sS -X POST "$BASE_URL/rebuild/on-brand/run" -H "Authorization: Bearer $RMS_API_KEY" -H "Content-Type: application/json" -d '{"dry_run":true}'
 ```
 
 A duplicate POST while the same pipeline is running must return `409`.
