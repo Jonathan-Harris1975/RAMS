@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from repo_mgmt.schemas import RunReportModel
+from repo_mgmt.phase5_skills import phase5_skills_summary
 
 if TYPE_CHECKING:
     from repo_mgmt.config import Settings
@@ -74,8 +75,8 @@ class RunReport:
     baseline_validation: ValidationSummary | None = None
     commits: list[CommitInfo] = field(default_factory=list)
     error: str | None = None
-    skills_baseline: dict[str, Any] | None = None
     publish_status: PublishStatus = field(default_factory=PublishStatus)
+
 
 
 def _report_quality(report: "RunReport") -> dict[str, Any]:
@@ -103,11 +104,14 @@ def _report_quality(report: "RunReport") -> dict[str, Any]:
                 "mobile viewport emulation",
                 "screenshot manifest",
                 "per-viewport root-cause grouping",
+                "accessibility-appendix.json",
+                "WCAG 2.2 AA accessibility evidence",
             ],
             "blockedIfMissing": [
                 "screenshots",
                 "viewport matrix",
                 "exact affected route/component mapping",
+                "accessibility evidence rows for rendered route/viewports",
             ],
         },
         "on-brand": {
@@ -150,6 +154,7 @@ def _report_quality(report: "RunReport") -> dict[str, Any]:
             "baselineValidationPassed": None if report.baseline_validation is None else bool(report.baseline_validation.passed),
         },
         "operatorNextStep": _operator_next_step(report, validation_failed, bool(code_fix_tasks), bool(manual_tasks)),
+        "phase5Skills": phase5_skills_summary(report.pipeline),
     }
 
 
@@ -164,7 +169,6 @@ def _operator_next_step(report: "RunReport", validation_failed: bool, has_code_f
     if has_manual:
         return "Triage manual-review tasks before starting another remediation run."
     return "No immediate manual action from the report metadata."
-
 
 def make_run_id() -> str:
     """Return a new ISO-UTC run identifier safe for use in paths."""
@@ -291,8 +295,6 @@ def _convert(obj: Any) -> Any:
             "publishStatus": _convert(obj.publish_status),
             "reportQuality": _report_quality(obj),
         }
-        if obj.skills_baseline is not None:
-            data["skillsBaseline"] = _convert(obj.skills_baseline)
         if obj.baseline_validation is not None:
             data["baselineValidation"] = _convert(obj.baseline_validation)
         if obj.error is not None:

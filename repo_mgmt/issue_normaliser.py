@@ -643,6 +643,7 @@ def _ordered_artefacts(
             "repository-issue-appendix.json",
             "responsive-fix-appendix.json",
             "mandatory-mobile-scorecard.json",
+            "accessibility-appendix.json",
             "focused-page-appendix.json",
             "report.json",
             "summary.json",
@@ -706,6 +707,8 @@ def _looks_like_issue(value: dict[str, Any]) -> bool:
         return True
     if keys & {"classification"} and keys & {"affectedPaths"} and keys & {"requiredOutcome", "allowedFixClass"}:
         return True
+    if keys & {"issueCount", "issues"} and keys & {"route", "url"} and keys & {"status"}:
+        return True
     return False
 
 
@@ -729,6 +732,9 @@ def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict
     url_or_path = _first_text(candidate, "exactUrlOrFilePath", "filePathOrUrl", "url", "path")
     affected = _paths_from_route_or_url(route, url_or_path)
     check = _first_text(candidate, "check", "issueType", "category") or "mobile UX"
+    accessibility_items = candidate.get("issues") if isinstance(candidate.get("issues"), list) else []
+    if accessibility_items and str(candidate.get("status", "")).upper() == "FAIL":
+        check = "accessibilityCompliance"
     affected, governed_evidence = _mobile_governed_source_paths(
         affected, check, candidate
     )
@@ -740,6 +746,14 @@ def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict
         title_bits.append(f"{viewport}px")
     remediation = _first_text(candidate, "exactRemediation", "remediation", "recommendation")
     defect = _first_text(candidate, "defectDescription", "description", "consequence")
+    if accessibility_items and not defect:
+        defect = "; ".join(
+            str(item.get("message") or item.get("type") or item)
+            for item in accessibility_items[:5]
+            if isinstance(item, dict)
+        ) or "Accessibility compliance row failed."
+    if accessibility_items and not remediation:
+        remediation = "Resolve the listed accessibility-audit/WCAG defects, then rerun the Mobile UX hard-gate and confirm accessibilityCompliance PASS for the same route and viewport."
     if not remediation and not defect:
         return None
     evidence = _evidence_from_fields(
@@ -755,6 +769,12 @@ def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict
             "verificationMethod",
         ],
     )
+    if accessibility_items:
+        for item in accessibility_items[:8]:
+            if isinstance(item, dict):
+                evidence.append(
+                    f"accessibility-audit: {item.get('wcag', 'WCAG')} {item.get('type', 'issue')} {item.get('selector', '')} {item.get('message', '')}".strip()
+                )
     screenshot_refs = candidate.get("screenshotRefs")
     if isinstance(screenshot_refs, list) and screenshot_refs:
         evidence.append(f"screenshotRefs: {len(screenshot_refs)} attached in source artefact")
@@ -820,10 +840,28 @@ def _mobile_governed_source_paths(
         "escape",
         "outside click",
     )
+    accessibility_markers = (
+        "accessibilitycompliance",
+        "accessible name",
+        "aria-label",
+        "alt text",
+        "wcag",
+        "link purpose",
+        "heading order",
+        "form label",
+        "keyboard",
+        "focus",
+    )
     if any(marker in text for marker in header_nav_markers):
         governed = "assets/partials/header.html"
         return [governed], [
             "governedSource: remapped header/navigation defect to assets/partials/header.html to avoid rendered-page partial drift"
+        ]
+    if any(marker in text for marker in accessibility_markers):
+        candidates = [path for path in affected if path and path != "."]
+        governed = candidates or ["assets/partials/header.html", "assets/partials/footer.html", "assets/css/site.css"]
+        return governed, [
+            "phase5Accessibility: accessibility-audit finding mapped to governed website source paths; remediation remains PR-gated"
         ]
     return affected, []
 
