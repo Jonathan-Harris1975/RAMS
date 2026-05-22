@@ -76,6 +76,7 @@ class RunReport:
     commits: list[CommitInfo] = field(default_factory=list)
     error: str | None = None
     publish_status: PublishStatus = field(default_factory=PublishStatus)
+    skills_baseline: dict[str, Any] | None = None
 
 
 
@@ -295,6 +296,8 @@ def _convert(obj: Any) -> Any:
             "publishStatus": _convert(obj.publish_status),
             "reportQuality": _report_quality(obj),
         }
+        if obj.skills_baseline is not None:
+            data["skillsBaseline"] = _convert(obj.skills_baseline)
         if obj.baseline_validation is not None:
             data["baselineValidation"] = _convert(obj.baseline_validation)
         if obj.error is not None:

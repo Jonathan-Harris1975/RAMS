@@ -853,14 +853,18 @@ def _mobile_governed_source_paths(
         "focus",
     )
     if any(marker in text for marker in header_nav_markers):
-        governed = "assets/partials/header.html"
-        return [governed], [
+        governed_header = "assets/partials/header.html"
+        return [governed_header], [
             "governedSource: remapped header/navigation defect to assets/partials/header.html to avoid rendered-page partial drift"
         ]
     if any(marker in text for marker in accessibility_markers):
         candidates = [path for path in affected if path and path != "."]
-        governed = candidates or ["assets/partials/header.html", "assets/partials/footer.html", "assets/css/site.css"]
-        return governed, [
+        governed_accessibility = candidates or [
+            "assets/partials/header.html",
+            "assets/partials/footer.html",
+            "assets/css/site.css",
+        ]
+        return governed_accessibility, [
             "phase5Accessibility: accessibility-audit finding mapped to governed website source paths; remediation remains PR-gated"
         ]
     return affected, []
