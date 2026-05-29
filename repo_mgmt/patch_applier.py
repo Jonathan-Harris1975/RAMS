@@ -39,7 +39,18 @@ PROTECTED_PATHS: dict[str, frozenset[str]] = {
             "functions/transcripts/",
         ]
     ),
-    "on-brand": frozenset(),
+    # On-brand findings are future-guidance by default (editorial / prompt-level).
+    # These paths are an explicit backstop so the applier refuses a code_fix patch
+    # targeting content files even if the issue_normaliser classification was wrong.
+    "on-brand": frozenset(
+        [
+            "blog/posts/",
+            "blog/posts.json",
+            "transcripts/",
+            "data/podcast-episodes.json",
+            "assets/js/podcast-transcripts.min.js",
+        ]
+    ),
     "seo-aeo-geo": frozenset(),
 }
 
