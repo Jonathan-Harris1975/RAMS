@@ -33,11 +33,11 @@ class TestReadLatest:
         assert result == {}
 
     def test_passes_correct_key_for_each_pipeline(self, mock_r2: MagicMock) -> None:
-        mock_r2.get_object.return_value = b"{}"
+        mock_r2.get_object.return_value = b'{"ok": true}'
         for pid, expected_key in [
-            ("seo-aeo-geo", "audits/seo-aeo-geo/latest.json"),
-            ("mobile-ux", "audits/mobile-ux/latest.json"),
-            ("on-brand", "audits/on-brand/latest.json"),
+            ("seo-aeo-geo", "audits/seo-aeo-geo-council/latest.json"),
+            ("mobile-ux", "audits/mobile-ux-council/latest.json"),
+            ("on-brand", "audits/brand-social-council/latest.json"),
         ]:
             audit_reader.read_latest(pid, mock_r2, "audits")  # type: ignore[arg-type]
             mock_r2.get_object.assert_called_with(bucket="audits", key=expected_key)
@@ -95,3 +95,18 @@ class TestReadLatest:
         mock_r2.get_object.side_effect = get_object
         result = audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits")
         assert set(result["artefacts"]) == {"summary.json", "coverage.json"}
+
+    def test_prefers_seo_and_mobile_council_latest_with_raw_fallback(self, mock_r2: MagicMock) -> None:
+        payloads = {
+            "audits/seo-aeo-geo/latest.json": {"auditType": "seo-aeo-geo", "status": "raw"},
+            "audits/mobile-ux/latest.json": {"auditType": "mobile-ux", "status": "raw"},
+        }
+
+        def get_object(*, bucket: str, key: str) -> bytes:
+            if key not in payloads:
+                raise R2Error(f"missing {key}")
+            return json.dumps(payloads[key]).encode()
+
+        mock_r2.get_object.side_effect = get_object
+        assert audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits")["status"] == "raw"
+        assert audit_reader.read_latest("mobile-ux", mock_r2, "audits")["status"] == "raw"
