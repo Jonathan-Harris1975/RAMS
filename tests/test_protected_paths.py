@@ -60,7 +60,7 @@ def test_applier_raises_for_mobile_ux_blog(tmp_path: Path) -> None:
         apply(patch, tmp_path, dry_run=False, pipeline_id="mobile-ux")
 
 
-def test_applier_does_not_raise_for_on_brand_blog(tmp_path: Path) -> None:
+def test_applier_raises_for_on_brand_blog_content(tmp_path: Path) -> None:
     (tmp_path / "blog" / "posts").mkdir(parents=True)
     f = tmp_path / "blog" / "posts" / "index.html"
     f.write_text("<p>content</p>", encoding="utf-8")
@@ -77,6 +77,7 @@ def test_applier_does_not_raise_for_on_brand_blog(tmp_path: Path) -> None:
             }
         ],
     }
-    # on-brand has an empty protected set — no ProtectedPathError
-    apply(patch, tmp_path, dry_run=False, pipeline_id="on-brand")
-    assert f.read_text(encoding="utf-8") == "<p>new</p>"
+    # On-brand council findings are future guidance by default; content rewrites stay protected.
+    with pytest.raises(ProtectedPathError):
+        apply(patch, tmp_path, dry_run=False, pipeline_id="on-brand")
+    assert f.read_text(encoding="utf-8") == "<p>content</p>"

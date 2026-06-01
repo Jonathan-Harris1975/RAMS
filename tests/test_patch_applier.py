@@ -165,8 +165,8 @@ def test_protected_mobile_ux_blog(tmp_path: Path) -> None:
         apply(patch, tmp_path, dry_run=False, pipeline_id="mobile-ux")
 
 
-def test_not_protected_on_brand_blog(tmp_path: Path) -> None:
-    """on-brand has no protected paths at applier level - blog edits must succeed."""
+def test_protected_on_brand_blog_content(tmp_path: Path) -> None:
+    """on-brand code_fix patches must not mutate historic blog content files."""
     (tmp_path / "blog" / "posts" / "2026-W16").mkdir(parents=True)
     f = tmp_path / "blog" / "posts" / "2026-W16" / "index.html"
     f.write_text("<h1>Post</h1>", encoding="utf-8")
@@ -177,8 +177,9 @@ def test_not_protected_on_brand_blog(tmp_path: Path) -> None:
         replace="<h1>New</h1>",
         anchor="<h1>Post</h1>",
     )
-    apply(patch, tmp_path, dry_run=False, pipeline_id="on-brand")
-    assert f.read_text(encoding="utf-8") == "<h1>New</h1>"
+    with pytest.raises(ProtectedPathError):
+        apply(patch, tmp_path, dry_run=False, pipeline_id="on-brand")
+    assert f.read_text(encoding="utf-8") == "<h1>Post</h1>"
 
 
 def test_no_tmp_file_left_after_write(tmp_path: Path) -> None:
