@@ -27,10 +27,16 @@ logger = logging.getLogger(__name__)
 
 # Mapping from pipeline ID to R2 audit key.
 _AUDIT_KEY_MAP: dict[str, tuple[str, ...]] = {
-    "seo-aeo-geo": ("audits/seo-aeo-geo/latest.json",),
-    "mobile-ux": ("audits/mobile-ux/latest.json",),
-    # Brand/social council is the preferred on-brand master report when present.
-    # Fall back to the raw on-brand audit so staged deployments remain backward compatible.
+    # Council reports are preferred master reports when present.
+    # Raw source audits remain fallback inputs so staged deployments stay backward compatible.
+    "seo-aeo-geo": (
+        "audits/seo-aeo-geo-council/latest.json",
+        "audits/seo-aeo-geo/latest.json",
+    ),
+    "mobile-ux": (
+        "audits/mobile-ux-council/latest.json",
+        "audits/mobile-ux/latest.json",
+    ),
     "on-brand": (
         "audits/brand-social-council/latest.json",
         "audits/on-brand/latest.json",
@@ -54,6 +60,7 @@ _PIPELINE_ARTEFACT_PRIORITIES: dict[str, tuple[str, ...]] = {
         "reconciliation.json",
     ),
     "seo-aeo-geo": (
+        "repository-issue-appendix.json",
         "summary.json",
         "coverage.json",
         "report.json",
@@ -137,8 +144,8 @@ def _read_first_latest_snapshot(
 ) -> tuple[str, Any | None]:
     """Read the first available latest snapshot for a pipeline.
 
-    The on-brand pipeline prefers the brand/social council master report,
-    falling back to the raw on-brand report when the council has not run yet.
+    Pipelines prefer their council master reports, falling back to raw audit
+    reports when a council has not run yet.
     """
     keys = _AUDIT_KEY_MAP[pipeline_id]
     last_key = keys[-1]
