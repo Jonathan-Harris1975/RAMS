@@ -26,10 +26,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Mapping from pipeline ID to R2 audit key.
-_AUDIT_KEY_MAP: dict[str, str] = {
-    "seo-aeo-geo": "audits/seo-aeo-geo/latest.json",
-    "mobile-ux": "audits/mobile-ux/latest.json",
-    "on-brand": "audits/on-brand/latest.json",
+_AUDIT_KEY_MAP: dict[str, tuple[str, ...]] = {
+    "seo-aeo-geo": ("audits/seo-aeo-geo/latest.json",),
+    "mobile-ux": ("audits/mobile-ux/latest.json",),
+    # Brand/social council is the preferred on-brand master report when present.
+    # Fall back to the raw on-brand audit so staged deployments remain backward compatible.
+    "on-brand": (
+        "audits/brand-social-council/latest.json",
+        "audits/on-brand/latest.json",
+    ),
 }
 
 # Keep dereferencing bounded and JSON-only. Screenshot-heavy manifests can name
@@ -57,6 +62,7 @@ _PIPELINE_ARTEFACT_PRIORITIES: dict[str, tuple[str, ...]] = {
         "preflight.json",
     ),
     "on-brand": (
+        "repository-issue-appendix.json",
         "report.json",
         "evidence.json",
         "summary.json",
@@ -80,8 +86,7 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
         ``artefactKeys`` and ``artefactErrors`` dictionaries. Returns ``{}`` if
         the latest snapshot itself is absent or invalid.
     """
-    key = _AUDIT_KEY_MAP[pipeline_id]
-    data = _read_json_object(r2, bucket, key)
+    key, data = _read_first_latest_snapshot(pipeline_id, r2, bucket)
     if not data:
         return {}
     if not isinstance(data, dict):
@@ -125,6 +130,29 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
         logger.info("audit_reader: loaded %d-key snapshot from %r", len(data), key)
     return data
 
+
+
+def _read_first_latest_snapshot(
+    pipeline_id: "PipelineId", r2: "R2Client", bucket: str
+) -> tuple[str, Any | None]:
+    """Read the first available latest snapshot for a pipeline.
+
+    The on-brand pipeline prefers the brand/social council master report,
+    falling back to the raw on-brand report when the council has not run yet.
+    """
+    keys = _AUDIT_KEY_MAP[pipeline_id]
+    last_key = keys[-1]
+    for key in keys:
+        data = _read_json_object(r2, bucket, key, fail_soft=(key != last_key))
+        if data:
+            if key != last_key:
+                logger.info(
+                    "audit_reader: using preferred latest snapshot %r for %s",
+                    key,
+                    pipeline_id,
+                )
+            return key, data
+    return last_key, None
 
 def _read_json_object(
     r2: "R2Client",

@@ -649,7 +649,12 @@ def _ordered_artefacts(
             "summary.json",
         ],
         "seo-aeo-geo": ["summary.json", "report.json", "coverage.json", "evidence.json"],
-        "on-brand": ["report.json", "evidence.json", "summary.json"],
+        "on-brand": [
+            "repository-issue-appendix.json",
+            "report.json",
+            "evidence.json",
+            "summary.json",
+        ],
     }.get(pipeline_id, [])
     ordered: list[tuple[str, Any]] = []
     for name in priority:
@@ -955,13 +960,24 @@ def _map_on_brand_candidate(candidate: dict[str, Any], artefact_name: str) -> di
     source_type = _first_text(candidate, "sourceType")
     root_cause = _first_text(candidate, "rootCauseLevel")
     structural = bool(affected) and bool(_STRUCTURAL_RE.search(f"{issue_type} {remediation} {root_cause}"))
+    explicit_classification = _first_text(candidate, "classification", "status")
+    explicit_fix_class = _first_text(candidate, "fixClass", "allowedFixClass", "fix_class")
+    if explicit_classification in _VALID_CLASSIFICATIONS - {"code_fix"}:
+        classification = explicit_classification
+        fix_class = explicit_fix_class or "future_guidance"
+    elif structural:
+        classification = "code_fix"
+        fix_class = _derive_on_brand_fix_class(candidate)
+    else:
+        classification = "future_guidance"
+        fix_class = "future_guidance"
     return {
         "title": f"{issue_id}: {issue_type or 'on-brand finding'}",
         "description": _first_text(candidate, "whyItIsOffBrand", "description") or evidence_text or remediation,
         "severity": _map_severity(candidate.get("severity"), pipeline="on-brand"),
         "confidence": _confidence_from_candidate(candidate),
-        "fixClass": _derive_on_brand_fix_class(candidate) if structural else "future_guidance",
-        "classification": "code_fix" if structural else "future_guidance",
+        "fixClass": fix_class,
+        "classification": classification,
         "affectedPaths": affected,
         "evidence": _evidence_from_fields(
             candidate,
@@ -980,6 +996,9 @@ def _map_on_brand_candidate(candidate: dict[str, Any], artefact_name: str) -> di
         "sourceIssueId": issue_id,
         "sourceArtefact": artefact_name,
         "sourceType": source_type,
+        "sourceOwner": _first_text(candidate, "sourceOwner"),
+        "automationReadiness": _first_text(candidate, "automationReadiness"),
+        "councilMember": _first_text(candidate, "councilMember"),
     }
 
 
