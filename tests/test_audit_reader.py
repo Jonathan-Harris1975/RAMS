@@ -110,3 +110,42 @@ class TestReadLatest:
         mock_r2.get_object.side_effect = get_object
         assert audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits")["status"] == "raw"
         assert audit_reader.read_latest("mobile-ux", mock_r2, "audits")["status"] == "raw"
+
+    def test_on_brand_loads_podcast_supplemental_reports(self, mock_r2: MagicMock) -> None:
+        latest = {
+            "auditType": "brand-social-council",
+            "reportPrefix": "audits/brand-social-council/run-1",
+            "reportJsonUrl": "https://public.example/audits/brand-social-council/run-1/report.json",
+        }
+        council_report = {"findings": []}
+        podcast_latest = {
+            "auditType": "podcast-episode",
+            "reportPrefix": "audits/podcast-episode/run-1",
+            "repositoryIssueAppendixUrl": "https://public.example/audits/podcast-episode/run-1/repository-issue-appendix.json",
+        }
+        transcript_latest = {
+            "auditType": "podcast-transcript",
+            "reportPrefix": "audits/podcast-transcript/run-1",
+            "repositoryIssueAppendixUrl": "https://public.example/audits/podcast-transcript/run-1/repository-issue-appendix.json",
+        }
+        podcast_appendix = {"findings": [{"issueId": "PODCAST-EPISODE-001"}]}
+        transcript_appendix = {"findings": [{"issueId": "PODCAST-TRANSCRIPT-001"}]}
+        payloads = {
+            "audits/brand-social-council/latest.json": latest,
+            "audits/brand-social-council/run-1/report.json": council_report,
+            "audits/podcast-episode/latest.json": podcast_latest,
+            "audits/podcast-episode/run-1/repository-issue-appendix.json": podcast_appendix,
+            "audits/podcast-transcript/latest.json": transcript_latest,
+            "audits/podcast-transcript/run-1/repository-issue-appendix.json": transcript_appendix,
+        }
+
+        def get_object(*, bucket: str, key: str) -> bytes:
+            if key not in payloads:
+                raise R2Error(f"missing {key}")
+            return json.dumps(payloads[key]).encode()
+
+        mock_r2.get_object.side_effect = get_object
+        result = audit_reader.read_latest("on-brand", mock_r2, "audits")
+        assert result["artefacts"]["podcast-episode:repository-issue-appendix.json"] == podcast_appendix
+        assert result["artefacts"]["podcast-transcript:repository-issue-appendix.json"] == transcript_appendix
+        assert result["supplementalLatest"]["podcast-episode"]["auditType"] == "podcast-episode"
