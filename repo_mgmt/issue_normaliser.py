@@ -1339,7 +1339,7 @@ def _build_validated(
         "description": finding.get("description", ""),
         "fixClass": fix_class,
     }
-    for key in ("sourceIssueId", "sourceArtefact", "route", "viewport", "check", "sourceType"):
+    for key in ("sourceIssueId", "sourceArtefact", "route", "viewport", "check", "sourceType", "sourceOwner", "automationReadiness", "councilMember"):
         if key in finding and finding[key] not in (None, ""):
             issue[key] = finding[key]
     try:

@@ -43,6 +43,17 @@ _AUDIT_KEY_MAP: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Supplemental source-owner reports are merged into the on-brand RAMS evidence
+# pack. They are AIMS/R2-owned and must not replace the master council latest;
+# they simply give RAMS the separate podcast/transcript evidence without making
+# the static website audit carry those dynamic routes.
+_SUPPLEMENTAL_AUDIT_KEY_MAP: dict[str, tuple[str, ...]] = {
+    "on-brand": (
+        "audits/podcast-episode/latest.json",
+        "audits/podcast-transcript/latest.json",
+    ),
+}
+
 # Keep dereferencing bounded and JSON-only. Screenshot-heavy manifests can name
 # hundreds of artefacts; RAMS only needs structured evidence documents.
 _PIPELINE_ARTEFACT_PRIORITIES: dict[str, tuple[str, ...]] = {
@@ -117,11 +128,22 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
         artefacts[label] = child
         artefact_key_map[label] = artefact_key
 
+    supplemental = _empty_supplemental_bundle()
+    if _should_load_supplemental_reports(pipeline_id, data):
+        supplemental = _load_supplemental_snapshots(pipeline_id, r2, bucket)
+    if supplemental["artefacts"]:
+        artefacts.update(supplemental["artefacts"])
+        artefact_key_map.update(supplemental["artefactKeys"])
+    if supplemental["artefactErrors"]:
+        artefact_errors.update(supplemental["artefactErrors"])
+
     if artefacts:
         data = dict(data)
-        data["latest"] = {key_: value for key_, value in data.items() if key_ not in {"artefacts", "artefactKeys", "artefactErrors", "latest"}}
+        data["latest"] = {key_: value for key_, value in data.items() if key_ not in {"artefacts", "artefactKeys", "artefactErrors", "latest", "supplementalLatest"}}
         data["artefacts"] = artefacts
         data["artefactKeys"] = artefact_key_map
+        if supplemental["latest"]:
+            data["supplementalLatest"] = supplemental["latest"]
         if artefact_errors:
             data["artefactErrors"] = artefact_errors
         logger.info(
@@ -131,13 +153,76 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
             len(artefacts),
         )
     else:
-        if artefact_errors:
+        if artefact_errors or supplemental["latest"]:
             data = dict(data)
-            data["artefactErrors"] = artefact_errors
+            if supplemental["latest"]:
+                data["supplementalLatest"] = supplemental["latest"]
+            if artefact_errors:
+                data["artefactErrors"] = artefact_errors
         logger.info("audit_reader: loaded %d-key snapshot from %r", len(data), key)
     return data
 
 
+
+
+
+def _empty_supplemental_bundle() -> dict[str, Any]:
+    return {"latest": {}, "artefacts": {}, "artefactKeys": {}, "artefactErrors": {}}
+
+
+def _should_load_supplemental_reports(pipeline_id: str, latest: dict[str, Any]) -> bool:
+    if pipeline_id not in _SUPPLEMENTAL_AUDIT_KEY_MAP:
+        return False
+    return bool(
+        latest.get("auditType")
+        or latest.get("reportPrefix")
+        or any(str(key).endswith("Url") for key in latest)
+    )
+
+def _load_supplemental_snapshots(
+    pipeline_id: str, r2: "R2Client", bucket: str
+) -> dict[str, Any]:
+    """Load optional source-owner reports that support a master pipeline.
+
+    Supplemental reports are fail-soft and namespaced so their report.json,
+    summary.json and repository-issue-appendix.json artefacts do not collide
+    with the primary audit/council artefacts.
+    """
+    latest_by_label: dict[str, Any] = {}
+    artefacts: dict[str, Any] = {}
+    artefact_keys: dict[str, str] = {}
+    artefact_errors: dict[str, str] = {}
+
+    for latest_key in _SUPPLEMENTAL_AUDIT_KEY_MAP.get(pipeline_id, ()):
+        label = _supplemental_label(latest_key)
+        latest = _read_json_object(r2, bucket, latest_key, fail_soft=True)
+        if not isinstance(latest, dict) or not latest:
+            continue
+        latest_by_label[label] = latest
+        for child_label, artefact_key in _discover_artefact_keys(label, latest).items():
+            namespaced_label = f"{label}:{child_label}"
+            child = _read_json_object(r2, bucket, artefact_key, fail_soft=True)
+            if child is None:
+                artefact_errors[namespaced_label] = f"unreadable JSON artefact: {artefact_key}"
+                continue
+            artefacts[namespaced_label] = child
+            artefact_keys[namespaced_label] = artefact_key
+
+    return {
+        "latest": latest_by_label,
+        "artefacts": artefacts,
+        "artefactKeys": artefact_keys,
+        "artefactErrors": artefact_errors,
+    }
+
+
+def _supplemental_label(latest_key: str) -> str:
+    parts = PurePosixPath(latest_key).parts
+    try:
+        audit_index = parts.index("audits")
+        return parts[audit_index + 1]
+    except (ValueError, IndexError):
+        return PurePosixPath(latest_key).parent.name or "supplemental"
 
 def _read_first_latest_snapshot(
     pipeline_id: "PipelineId", r2: "R2Client", bucket: str
