@@ -139,6 +139,24 @@ Returned when `RMS_API_KEY` is missing and unauthenticated developer mode is not
 }
 ```
 
+
+## HIVE shared skill pool
+
+RAMS no longer carries a local `.agents` skill library. HIVE controls the shared skill pool in Cloudflare R2, and RAMS consumes the RAMS manifest in read-only mode.
+
+```text
+R2_PUBLIC_BASE_URL_HIVE_SKILLS=https://pub-da50a6512f164566955a3076a1c795ef.r2.dev
+R2_BUCKET_HIVE_SKILLS=hive-skills
+```
+
+RAMS expects the approved skill manifest at:
+
+```text
+https://pub-da50a6512f164566955a3076a1c795ef.r2.dev/manifests/rams-skills-manifest.json
+```
+
+Central skill metadata is report/planning context only. It does not authorise local marketplace installs, direct skill execution, auto-merge, auto-deploy, or Cloudflare/DNS mutation.
+
 ## Safety gates
 
 Live writes require all of the following:

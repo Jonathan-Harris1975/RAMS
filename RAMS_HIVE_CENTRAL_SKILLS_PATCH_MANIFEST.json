@@ -1,0 +1,49 @@
+{
+  "patch": "RAMS HIVE central skills R2 update",
+  "version": "v4-rams-r2-centralised",
+  "date": "2026-06-11",
+  "r2": {
+    "R2_PUBLIC_BASE_URL_HIVE_SKILLS": "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev",
+    "R2_BUCKET_HIVE_SKILLS": "hive-skills",
+    "rams_manifest": "manifests/rams-skills-manifest.json"
+  },
+  "summary": [
+    "RAMS now consumes the central HIVE/R2 skill pool through a read-only RAMS manifest.",
+    "Local .agents skill folder and Skills.sh install scripts are deprecated for RAMS.",
+    "Spreadsheet updated to V4 so RAMS mapping reflects central control."
+  ],
+  "updated_files": [
+    "repo_mgmt/hive_skill_pool.py",
+    "repo_mgmt/lane1_skills.py",
+    "repo_mgmt/phase5_skills.py",
+    "repo_mgmt/search_visibility_baseline.py",
+    "repo_mgmt/config.py",
+    ".env.template",
+    ".env.example-dry-run",
+    ".github/workflows/ci.yml",
+    "tests/conftest.py",
+    "tests/test_hive_skill_pool.py",
+    "tests/test_lane1_skills.py",
+    "tests/test_phase5_skills.py",
+    "tests/test_search_visibility_baseline.py",
+    "README.md",
+    "SKILLS_BATCH_1_SEARCH_VISIBILITY.md",
+    "SKILLS_LANE_1_AUTONOMOUS.md",
+    "SKILLS_PHASE_4_AUTO_GATES.md",
+    "SKILLS_PHASE_5_ORGANIC_GROWTH.md",
+    "HIVE_RAMS_CENTRAL_SKILLS.md",
+    "HIVE_RAMS_FILES_FOR_DELETION.txt"
+  ],
+  "spreadsheet": "HIVE_skills_availability_register_v4_rams_r2_centralised.xlsx",
+  "delete_from_repo": [
+    ".agents/",
+    "scripts/setup-batch-1-skills.sh",
+    "scripts/setup-lane-1-skills.sh"
+  ],
+  "verification": {
+    "compileall": "passed for repo_mgmt and tests",
+    "pytest": "231 passed, 2 warnings",
+    "spreadsheet_formula_error_scan": "0 matches",
+    "ruff": "not run in sandbox because ruff is not installed"
+  }
+}

@@ -1,0 +1,7 @@
+Delete these from the RAMS repo when applying the central HIVE skill pool patch:
+
+.agents/
+scripts/setup-batch-1-skills.sh
+scripts/setup-lane-1-skills.sh
+
+Reason: RAMS now consumes skills from the central HIVE R2 shared skill pool using manifests and indexes. Local skill folders and Skills.sh setup scripts would duplicate the central source of truth and risk drift.
