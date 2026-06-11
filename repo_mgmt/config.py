@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     r2_region: str = "auto"
     r2_bucket_audits: str = "audits"
     r2_public_base_url_audits: str = ""
+    r2_bucket_hive_skills: str = "hive-skills"
+    r2_public_base_url_hive_skills: str = "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev"
 
     # ── OpenRouter ─────────────────────────────────────────────────────────
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
