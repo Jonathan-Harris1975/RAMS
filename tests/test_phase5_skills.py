@@ -10,6 +10,9 @@ def test_phase5_mobile_ux_summary_includes_accessibility_skill() -> None:
 
     assert summary["phase"] == "5A/5B/5C"
     assert summary["activeSkills"] == {"accessibilityMobileUx": ["accessibility-audit"]}
+    assert summary["localAgentsFolderRequired"] is False
+    assert summary["manifestControlled"] is True
+    assert summary["skillSource"]["mode"] == "central-r2-read-only"
     assert "paid-ads" in summary["parkedSkills"]
 
 
@@ -28,6 +31,7 @@ def test_report_quality_adds_accessibility_evidence_to_mobile_ux() -> None:
 
     assert "accessibility-appendix.json" in quality["requiredEvidence"]
     assert quality["phase5Skills"]["activeSkills"] == {"accessibilityMobileUx": ["accessibility-audit"]}
+    assert quality["phase5Skills"]["manifestControlled"] is True
 
 
 def test_mobile_ux_accessibility_finding_maps_to_governed_source(settings) -> None:
