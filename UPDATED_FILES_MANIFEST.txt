@@ -1,0 +1,44 @@
+RAMS Koyeb eco-micro optimisation - updated/new files
+Generated: 12 June 2026
+
+File count (excluding this manifest): 39
+
+.env.example-dry-run
+.env.template
+.github/workflows/ci.yml
+Dockerfile
+RAMS_EMICRO_ENV_CHANGES.md
+RAMS_EMICRO_OPTIMISATION_REPORT.md
+RAMS_EMICRO_TEST_RESULTS.md
+README.md
+RELEASE_GATE.md
+benchmark-results/baseline.json
+benchmark-results/optimised.json
+repo_mgmt/api.py
+repo_mgmt/audit_reader.py
+repo_mgmt/config.py
+repo_mgmt/context_builder.py
+repo_mgmt/git_manager.py
+repo_mgmt/model_router.py
+repo_mgmt/patch_planner.py
+repo_mgmt/pipeline.py
+repo_mgmt/process_runner.py
+repo_mgmt/r2_client.py
+repo_mgmt/repo_bootstrap.py
+repo_mgmt/repo_index.py
+repo_mgmt/report_publisher.py
+repo_mgmt/runtime_guard.py
+repo_mgmt/update_executor.py
+repo_mgmt/validation_runner.py
+scripts/emicro_benchmark.py
+scripts/release_gate.sh
+scripts/smoke_test.sh
+tests/test_api.py
+tests/test_audit_reader.py
+tests/test_context_builder.py
+tests/test_git_manager.py
+tests/test_model_router.py
+tests/test_pipeline.py
+tests/test_r2_client.py
+tests/test_repo_index.py
+tests/test_validation_runner.py

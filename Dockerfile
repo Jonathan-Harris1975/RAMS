@@ -53,14 +53,28 @@ RUN useradd --create-home --shell /bin/bash rms \
 
 USER rms
 
-ENV RMS_HOST=0.0.0.0
-ENV RMS_PORT=8000
-ENV LOG_LEVEL=info
-ENV RMS_DRY_RUN=true
+# Conservative defaults for Koyeb eco-micro (0.25 vCPU / 512MB RAM).
+# Koyeb environment variables may override these without rebuilding the image.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    MALLOC_ARENA_MAX=2 \
+    WEB_CONCURRENCY=1 \
+    UVICORN_WORKERS=1 \
+    UV_THREADPOOL_SIZE=2 \
+    NODE_OPTIONS=--max-old-space-size=256 \
+    RMS_HOST=0.0.0.0 \
+    RMS_PORT=8000 \
+    LOG_LEVEL=info \
+    RMS_DRY_RUN=true \
+    RMS_LIVE_WRITE_ENABLED=false \
+    RMS_MAX_CONCURRENT_PIPELINES=1 \
+    RMS_MAX_ISSUES_PER_RUN=1 \
+    RMS_SINGLE_WORKER_MODE=true
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:' + __import__('os').getenv('RMS_PORT', __import__('os').getenv('PORT', '8000')) + '/health').raise_for_status()"
 
 CMD ["rms-api"]

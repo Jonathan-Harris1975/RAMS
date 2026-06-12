@@ -20,6 +20,7 @@ The production Docker image includes Python, Git, Node.js 20+, and npm so both w
 |---|---|---|
 | `GET` | `/health` | Liveness only: exact RMS health contract, with pipeline states only |
 | `GET` | `/readiness` | Authenticated dependency readiness for operators and pre-trigger deployment checks |
+| `GET` | `/ops/warmup` | Authenticated local warm-up; creates bounded HTTP clients without external requests or operational work |
 | `POST` | `/rebuild/seo-aeo-geo/run` | Trigger SEO/AEO/GEO pipeline |
 | `POST` | `/rebuild/mobile-ux/run` | Trigger Mobile UX pipeline |
 | `POST` | `/rebuild/on-brand/run` | Trigger On-Brand pipeline |
@@ -80,7 +81,17 @@ The production Docker image includes Python, Git, Node.js 20+, and npm so both w
 }
 ```
 
-A fake R2 endpoint or invalid credentials must leave `r2_verified=false` and `status=degraded`. Pipeline triggers are refused while R2 is not verified.
+A fake R2 endpoint or invalid credentials must leave `r2_verified=false` and `status=degraded`. Pipeline triggers are refused while R2 is not verified. Runtime version probes are cached for `RMS_READINESS_CACHE_SECONDS` so repeated readiness checks do not keep spawning subprocesses on a quarter-vCPU instance.
+
+### `/ops/warmup` contract
+
+`/ops/warmup` follows the AIMS operational warm-up principle: an ops request warms infrastructure, not business processing. It loads validated configuration and creates RAMS's tiny reusable HTTP client pools. It deliberately does **not** clone or refresh repositories, read R2, load audits, run validation, or call OpenRouter.
+
+```bash
+curl -sS -H "Authorization: Bearer $RMS_API_KEY" "$BASE_URL/ops/warmup"
+```
+
+The endpoint is suitable for a trusted pre-trigger warm-up. It must never be used as a hidden audit trigger.
 
 ## Trigger request
 
@@ -96,6 +107,8 @@ curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" \
 If `RMS_API_KEY` is not configured, protected endpoints fail closed with `503 Service Unavailable`. Local-only developer runs may opt in to unauthenticated triggers with `RMS_ALLOW_UNAUTHENTICATED_DEV=true`; do not use that override on a public service.
 
 `dry_run` is optional. If omitted, RAMS uses `RMS_DRY_RUN`.
+
+MAST already sends both `X-Trigger-Run-Key` and `X-Idempotency-Key`. RAMS accepts either header and stores a small in-process replay cache. A retry with the same run key returns the original `202` admission and run ID instead of launching duplicate work. The cache is intentionally bounded by `RMS_IDEMPOTENCY_CACHE_SIZE`; it is process-local and is not a distributed queue.
 
 ### `202 Accepted`
 
@@ -130,15 +143,18 @@ Returned when `RMS_API_KEY` is missing and unauthenticated developer mode is not
 }
 ```
 
-### `409 Conflict`
+### `409 Conflict` and `429 Too Many Requests`
+
+A duplicate request for the already active pipeline receives `409`. A request for a different pipeline while any RAMS pipeline is active receives `429`. Both include `Retry-After`, because eco-micro permits only one heavyweight pipeline globally.
 
 ```json
 {
-  "error": "pipeline already running",
-  "pipeline": "mobile-ux"
+  "error": "RAMS is busy",
+  "pipeline": "on-brand",
+  "activePipeline": "mobile-ux",
+  "activeRunId": "2026-06-12T12-00-00Z"
 }
 ```
-
 
 ## HIVE shared skill pool
 
@@ -198,7 +214,7 @@ Supported child artefacts include:
 - `seo-aeo-geo`: `summary.json`, `coverage.json`, `report.json`, `evidence.json`
 - `on-brand`: `report.json`, `evidence.json`, `summary.json`
 
-RAMS ignores non-JSON evidence such as screenshots during task generation. Missing child artefacts are logged and recorded in the enriched audit payload, but they do not abort the run. Extracted findings are capped per run to avoid creating huge dry-run reports from screenshot-heavy audits.
+RAMS ignores non-JSON evidence such as screenshots during task generation. Missing child artefacts are logged and recorded in the enriched audit payload, but they do not abort the run. Extracted findings are capped per run to avoid creating huge dry-run reports from screenshot-heavy audits. R2 reads are additionally bounded by object size, total evidence bytes and artefact count through the `RMS_MAX_AUDIT_*` settings.
 
 ## RunReport validation object
 
@@ -222,7 +238,7 @@ RMS_REPORT_DIR=/app/reports rms dry-run on-brand
 
 ## External scheduling model
 
-Accepted production deviation: RAMS does not start an in-process cron scheduler. Trigger pipelines externally by HTTP, for example from Koyeb scheduled jobs, GitHub Actions, or another trusted scheduler. `repo_mgmt/scheduler.py` intentionally rejects accidental in-process scheduling.
+Accepted production deviation: RAMS does not start an in-process cron scheduler. MAST remains the external scheduler and already spaces the monthly RAMS rebuild/report jobs. Trigger pipelines externally by authenticated HTTP. `repo_mgmt/scheduler.py` intentionally rejects accidental in-process scheduling. MAST run-key headers are used for idempotent replay, while a busy RAMS response carries `Retry-After`. No MAST source change is required for the current contract.
 
 ## Local setup
 
@@ -286,12 +302,13 @@ Or run the equivalent calls manually:
 ```bash
 curl -sS "$BASE_URL/health"
 curl -sS -H "Authorization: Bearer $RMS_API_KEY" "$BASE_URL/readiness"
+curl -sS -H "Authorization: Bearer $RMS_API_KEY" "$BASE_URL/ops/warmup"
 curl -sS -X POST "$BASE_URL/rebuild/seo-aeo-geo/run" -H "Authorization: Bearer $RMS_API_KEY" -H "Content-Type: application/json" -d '{"dry_run":true}'
 curl -sS -X POST "$BASE_URL/rebuild/mobile-ux/run" -H "Authorization: Bearer $RMS_API_KEY" -H "Content-Type: application/json" -d '{"dry_run":true}'
 curl -sS -X POST "$BASE_URL/rebuild/on-brand/run" -H "Authorization: Bearer $RMS_API_KEY" -H "Content-Type: application/json" -d '{"dry_run":true}'
 ```
 
-A duplicate POST while the same pipeline is running must return `409`.
+A duplicate POST while the same pipeline is running must return `409`; a different pipeline must return `429`. Reusing an accepted MAST idempotency key must return the original `202` run ID.
 
 ## Release gates
 
@@ -311,27 +328,60 @@ docker run --rm rams-production-check npm --version
 
 `./scripts/release_gate.sh` runs the same local gate plus Docker smoke checks when Docker is available.
 
-## Koyeb deployment notes
+## Koyeb eco-micro deployment notes
+
+RAMS is now tuned specifically for Koyeb `eco-micro`: 0.25 vCPU, 512MB RAM and 4GB ephemeral SSD. This is a single-lane road, not the M25.
 
 - Deployment type: one web service
+- Instance type: `eco-micro`
 - Instance count: `1`
-- Worker count: `1`
+- Worker count: `1`; `rms-api` also hard-codes one Uvicorn worker
 - Startup command: `rms-api`
 - Liveness path: `/health`
-- Operator readiness check: `/readiness`
-- Keep `RMS_DRY_RUN=true` for staging
-- Keep `RMS_LIVE_WRITE_ENABLED=false`
-- Keep `RMS_PUSH_ENABLED=false`
-- Keep `RMS_CREATE_PR=false`
-- Set `RMS_API_KEY` to a strong random secret before exposing protected endpoints
-- Keep `RMS_ALLOW_UNAUTHENTICATED_DEV=false` on deployed services
-- Set real R2 and OpenRouter values
-- Set `RMS_WEBSITE_REPO_PATH` for `seo-aeo-geo` and `mobile-ux`
-- Set `RMS_AIMS_REPO_PATH` for `on-brand`
-- For Koyeb, set `RMS_REPO_BOOTSTRAP_ENABLED=true`, `RMS_WEBSITE_REPO_URL`, `RMS_AIMS_REPO_URL`, and `RMS_GITHUB_TOKEN` when repos are private. `GITHUB_TOKEN` remains supported as a backwards-compatible alias
-- Ensure target repo paths exist in the container, or let the bootstrapper clone them on the first rebuild trigger
+- Operator readiness path: `/readiness`
+- Optional trusted warm-up path: `/ops/warmup`
+- Keep `RMS_MAX_CONCURRENT_PIPELINES=1` and `RMS_MAX_ISSUES_PER_RUN=1`
+- Keep `WEB_CONCURRENCY=1`, `UVICORN_WORKERS=1`, `UV_THREADPOOL_SIZE=2` and `NODE_OPTIONS=--max-old-space-size=256`
+- Keep `RMS_DRY_RUN=true`, `RMS_LIVE_WRITE_ENABLED=false`, `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false` until a deliberate gated live-write test
+- Keep `RMS_ALLOW_UNAUTHENTICATED_DEV=false` in Koyeb
+- Set `RMS_API_KEY` as a Koyeb secret
+- Store R2, GitHub and OpenRouter credentials as Koyeb secrets; do not paste secret values into repo files
+- Enable shallow bootstrap with `RMS_GIT_CLONE_DEPTH=1` when repositories are not mounted
+- Bound Git clone/fetch/status diagnostics with `RMS_GIT_OUTPUT_MAX_BYTES=65536`; Git and validation share the process-tree-safe runner
+- Keep at least `RMS_MIN_FREE_DISK_MB=256`; RAMS rejects new runs below the threshold
+- Local report and failed-clone cleanup is bounded to RAMS-owned temporary paths
+- Do not add `npm install` or `npm ci` to runtime validation on eco-micro. The target repositories must arrive with what their configured validation requires, or heavyweight full validation should remain a GitHub Actions merge gate
 
-Do not treat a green `/health` as deployment readiness. The little green lamp only proves the process is alive; `/readiness` is where the grown-up machinery reports its actual state. 🛠️
+### OpenRouter roles
+
+The environment template uses three explicit roles rather than one expensive model everywhere:
+
+| Role | Recommended model | Purpose |
+|---|---|---|
+| Primary | `qwen/qwen3.7-plus` | Cost-effective repository reasoning and bounded patch planning |
+| Secondary | `openai/gpt-5.4-mini` | Independent fallback after a retryable primary failure |
+| Triage | `openai/gpt-5.4-nano` | Classification and compact routing decisions |
+
+Provider routing defaults to `price`, prompts are not logged, usage/cost metadata is aggregated into run reports, and repository evidence is restricted to providers that satisfy `RMS_OPENROUTER_DATA_COLLECTION=deny`. Model availability and prices can change, so review the IDs before altering production environment values.
+
+### Memory, disk and shutdown behaviour
+
+- Audit evidence, source context, repository indexing, validation output and report serialisation are all bounded by environment settings.
+- Blocking R2, Git and validation work is moved off the FastAPI event loop while the effective heavy-work concurrency remains one.
+- Validation commands stay sequential and their process groups are terminated on timeout or shutdown.
+- SIGTERM stops new admissions, closes reusable HTTP clients and uses a shutdown grace below Koyeb's platform limit.
+- `/health` never contacts R2, Git, Node, npm or OpenRouter, so it remains cheap during a run.
+
+Do not treat a green `/health` as deployment readiness. It proves the process is alive; `/readiness` reports whether the grown-up machinery has its boots on. 🛠️
+
+### References
+
+- Koyeb instance reference: https://www.koyeb.com/docs/reference/instances
+- OpenRouter provider routing: https://openrouter.ai/docs/guides/routing/provider-selection
+- OpenRouter usage accounting: https://openrouter.ai/docs/cookbook/administration/usage-accounting
+- Qwen3.7 Plus: https://openrouter.ai/qwen/qwen3.7-plus
+- GPT-5.4 Mini: https://openrouter.ai/openai/gpt-5.4-mini
+- GPT-5.4 Nano: https://openrouter.ai/openai/gpt-5.4-nano
 
 ## Provenance
 
