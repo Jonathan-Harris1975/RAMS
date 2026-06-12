@@ -96,3 +96,23 @@ def test_node_index_discovers_express_and_audit_routes(tmp_path):
         and "/audits/seo-aeo-geo/run" in idx["route_strings"]
         and "/podcast/build" in idx["route_strings"]
     )
+
+
+def test_index_prunes_builtin_heavy_directories_without_gitignore(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+    (tmp_path / "node_modules" / "pkg" / "index.js").write_text("x")
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "dist" / "bundle.js").write_text("x")
+    (tmp_path / "kept.py").write_text("print('ok')")
+    index = build_static_index(tmp_path)
+    assert index["file_list"] == ["kept.py"]
+
+
+def test_index_stops_at_configured_file_limit(tmp_path: Path) -> None:
+    for number in range(5):
+        (tmp_path / f"file-{number}.txt").write_text(str(number))
+    index = build_static_index(tmp_path, max_files=3)
+    assert index["indexedFileCount"] == 3
+    assert index["truncated"] is True

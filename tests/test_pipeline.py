@@ -52,6 +52,16 @@ class TestPipelineRun:
     def test_is_running_returns_false_when_idle(self):
         assert pipeline_mod.is_running("on-brand") is False
 
+    def test_global_lock_blocks_a_different_pipeline(
+        self, settings, mock_r2, mock_router
+    ):
+        pipeline_mod._global_pipeline_lock.acquire()
+        try:
+            report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=True)
+            assert "another RAMS pipeline" in (report.error or "")
+        finally:
+            pipeline_mod._global_pipeline_lock.release()
+
     def test_max_issues_per_run_respected(
         self, settings, mock_r2, mock_router, tmp_repo, monkeypatch
     ):
@@ -113,7 +123,6 @@ class TestPipelineRun:
             "status"
         ] == "manual_review" and "Git/live preflight failed" in (report.error or "")
 
-
     def test_live_baseline_failure_blocks_code_fix_execution(
         self, settings, mock_r2, mock_router, sample_audit
     ):
@@ -127,7 +136,9 @@ class TestPipelineRun:
             patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router),
             patch("repo_mgmt.pipeline._preflight_live_repo", return_value=None),
             patch("repo_mgmt.pipeline._run_baseline_validation", return_value=baseline),
-            patch("repo_mgmt.update_executor.run_task", new_callable=AsyncMock) as run_task,
+            patch(
+                "repo_mgmt.update_executor.run_task", new_callable=AsyncMock
+            ) as run_task,
         ):
             report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=False)
 
@@ -156,7 +167,6 @@ class TestPipelineRun:
         assert report.runId == fixed and published.runId == fixed
         assert report.branch.endswith(f"/mobile-ux/{fixed}")
 
-
     def test_publish_failure_writes_local_fallback(
         self, settings, mock_r2, mock_router, sample_audit, tmp_repo, tmp_path
     ):
@@ -165,7 +175,10 @@ class TestPipelineRun:
         mock_r2.get_object.return_value = json.dumps(sample_audit).encode()
         with (
             patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router),
-            patch("repo_mgmt.pipeline.publish", side_effect=RuntimeError("r2 publish down")),
+            patch(
+                "repo_mgmt.pipeline.publish",
+                side_effect=RuntimeError("r2 publish down"),
+            ),
         ):
             report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=True)
         assert "report publish failed" in (report.error or "")

@@ -42,7 +42,9 @@ class TestReadLatest:
             audit_reader.read_latest(pid, mock_r2, "audits")  # type: ignore[arg-type]
             mock_r2.get_object.assert_called_with(bucket="audits", key=expected_key)
 
-    def test_dereferences_json_artefacts_from_latest_manifest(self, mock_r2: MagicMock) -> None:
+    def test_dereferences_json_artefacts_from_latest_manifest(
+        self, mock_r2: MagicMock
+    ) -> None:
         latest = {
             "auditType": "mobile-ux",
             "reportPrefix": "audits/mobile-ux/run-1",
@@ -96,9 +98,14 @@ class TestReadLatest:
         result = audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits")
         assert set(result["artefacts"]) == {"summary.json", "coverage.json"}
 
-    def test_prefers_seo_and_mobile_council_latest_with_raw_fallback(self, mock_r2: MagicMock) -> None:
+    def test_prefers_seo_and_mobile_council_latest_with_raw_fallback(
+        self, mock_r2: MagicMock
+    ) -> None:
         payloads = {
-            "audits/seo-aeo-geo/latest.json": {"auditType": "seo-aeo-geo", "status": "raw"},
+            "audits/seo-aeo-geo/latest.json": {
+                "auditType": "seo-aeo-geo",
+                "status": "raw",
+            },
             "audits/mobile-ux/latest.json": {"auditType": "mobile-ux", "status": "raw"},
         }
 
@@ -108,10 +115,17 @@ class TestReadLatest:
             return json.dumps(payloads[key]).encode()
 
         mock_r2.get_object.side_effect = get_object
-        assert audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits")["status"] == "raw"
-        assert audit_reader.read_latest("mobile-ux", mock_r2, "audits")["status"] == "raw"
+        assert (
+            audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits")["status"]
+            == "raw"
+        )
+        assert (
+            audit_reader.read_latest("mobile-ux", mock_r2, "audits")["status"] == "raw"
+        )
 
-    def test_on_brand_loads_podcast_supplemental_reports(self, mock_r2: MagicMock) -> None:
+    def test_on_brand_loads_podcast_supplemental_reports(
+        self, mock_r2: MagicMock
+    ) -> None:
         latest = {
             "auditType": "brand-social-council",
             "reportPrefix": "audits/brand-social-council/run-1",
@@ -146,6 +160,40 @@ class TestReadLatest:
 
         mock_r2.get_object.side_effect = get_object
         result = audit_reader.read_latest("on-brand", mock_r2, "audits")
-        assert result["artefacts"]["podcast-episode:repository-issue-appendix.json"] == podcast_appendix
-        assert result["artefacts"]["podcast-transcript:repository-issue-appendix.json"] == transcript_appendix
-        assert result["supplementalLatest"]["podcast-episode"]["auditType"] == "podcast-episode"
+        assert (
+            result["artefacts"]["podcast-episode:repository-issue-appendix.json"]
+            == podcast_appendix
+        )
+        assert (
+            result["artefacts"]["podcast-transcript:repository-issue-appendix.json"]
+            == transcript_appendix
+        )
+        assert (
+            result["supplementalLatest"]["podcast-episode"]["auditType"]
+            == "podcast-episode"
+        )
+
+
+def test_audit_reader_respects_artefact_count_budget(mock_r2: MagicMock) -> None:
+    latest = {
+        "auditType": "seo-aeo-geo",
+        "reportPrefix": "audits/seo-aeo-geo/run-1",
+        "summaryUrl": "https://example/audits/seo-aeo-geo/run-1/summary.json",
+        "coverageUrl": "https://example/audits/seo-aeo-geo/run-1/coverage.json",
+    }
+    payloads = {
+        "audits/seo-aeo-geo-council/latest.json": latest,
+        "audits/seo-aeo-geo/run-1/summary.json": {"summary": True},
+        "audits/seo-aeo-geo/run-1/coverage.json": {"coverage": True},
+    }
+
+    def get_object(*, bucket: str, key: str) -> bytes:
+        del bucket
+        if key not in payloads:
+            raise R2Error(f"missing {key}")
+        return json.dumps(payloads[key]).encode()
+
+    mock_r2.get_object.side_effect = get_object
+    result = audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits", max_artefacts=1)
+    assert len(result["artefacts"]) == 1
+    assert result["artefactErrors"]

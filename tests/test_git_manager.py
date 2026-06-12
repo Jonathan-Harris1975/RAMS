@@ -12,16 +12,24 @@ from repo_mgmt.git_manager import BranchSafetyError, GitManager
 
 def init_repo(path: Path, branch: str = "main") -> None:
     """Create a small Git repo with one committed file."""
-    subprocess.run(["git", "init", "-b", branch], cwd=path, check=True, stdout=subprocess.PIPE)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "init", "-b", branch], cwd=path, check=True, stdout=subprocess.PIPE
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=path, check=True
+    )
     subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True)
     (path / "README.md").write_text("hello\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, stdout=subprocess.PIPE)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=path, check=True, stdout=subprocess.PIPE
+    )
 
 
 @pytest.mark.parametrize("branch", ["main", "master"])
-def test_create_qa_branch_from_protected_branch_is_permitted(tmp_path: Path, branch: str) -> None:
+def test_create_qa_branch_from_protected_branch_is_permitted(
+    tmp_path: Path, branch: str
+) -> None:
     init_repo(tmp_path, branch)
     gm = GitManager(tmp_path)
     created = gm.create_branch("rms-qa/on-brand/run-1")
@@ -30,7 +38,9 @@ def test_create_qa_branch_from_protected_branch_is_permitted(tmp_path: Path, bra
 
 
 @pytest.mark.parametrize("branch", ["main", "master"])
-def test_committing_on_protected_branch_remains_blocked(tmp_path: Path, branch: str) -> None:
+def test_committing_on_protected_branch_remains_blocked(
+    tmp_path: Path, branch: str
+) -> None:
     init_repo(tmp_path, branch)
     gm = GitManager(tmp_path)
     (tmp_path / "README.md").write_text("changed\n", encoding="utf-8")
@@ -83,14 +93,43 @@ def test_task_restore_preserves_unrelated_untracked_file(tmp_path: Path) -> None
     assert (tmp_path / "unrelated.txt").read_text(encoding="utf-8") == "keep me\n"
 
 
-def test_git_manager_timeout_raises_git_manager_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Git subprocess timeouts are converted into safe GitManagerError failures."""
+def test_git_manager_timeout_raises_git_manager_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bounded Git timeouts are converted into safe GitManagerError failures."""
+    from repo_mgmt import git_manager
     from repo_mgmt.git_manager import GitManagerError
+    from repo_mgmt.process_runner import BoundedProcessResult
 
-    def timeout_run(*args: object, **kwargs: object) -> object:
-        raise subprocess.TimeoutExpired(cmd=["git", "status"], timeout=30)
-
-    monkeypatch.setattr(subprocess, "run", timeout_run)
+    monkeypatch.setattr(
+        git_manager,
+        "run_bounded",
+        lambda *args, **kwargs: BoundedProcessResult(
+            return_code=124,
+            output="TIMEOUT after 30s",
+            timed_out=True,
+            truncated=False,
+        ),
+    )
     gm = GitManager(tmp_path)
     with pytest.raises(GitManagerError, match="timed out"):
         gm.status_porcelain()
+
+
+def test_git_manager_passes_configured_output_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git commands use the configured diagnostic-output ceiling."""
+    from repo_mgmt import git_manager
+    from repo_mgmt.process_runner import BoundedProcessResult
+
+    captured: dict[str, object] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> BoundedProcessResult:
+        captured.update(kwargs)
+        return BoundedProcessResult(0, "true", False, False)
+
+    monkeypatch.setattr(git_manager, "run_bounded", fake_run)
+    gm = GitManager(tmp_path, max_output_bytes=12_345)
+    assert gm.is_git_repo() is True
+    assert captured["max_output_bytes"] == 12_345

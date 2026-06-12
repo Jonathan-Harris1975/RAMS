@@ -31,3 +31,26 @@ def test_output_tail_present(tmp_path: Path) -> None:
 def test_empty_commands_passes(tmp_path: Path) -> None:
     result = run_commands([], cwd=tmp_path)
     assert result.passed is True
+
+
+def test_output_is_bounded_by_lines_and_bytes(tmp_path: Path) -> None:
+    result = run_commands(
+        ["python -c \"print('x' * 1000); [print(i) for i in range(50)]\""],
+        cwd=tmp_path,
+        max_output_lines=5,
+        max_output_bytes=128,
+    )
+    assert result.passed is True
+    assert len(result.output_tail.encode()) <= 128
+    assert len(result.output_tail.splitlines()) <= 5
+
+
+def test_timeout_terminates_command(tmp_path: Path) -> None:
+    result = run_commands(
+        ['python -c "import time; time.sleep(5)"'],
+        cwd=tmp_path,
+        timeout_seconds=1,
+    )
+    assert result.passed is False
+    assert result.return_code == 124
+    assert "TIMEOUT" in result.output_tail

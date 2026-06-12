@@ -23,6 +23,12 @@ def reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
     api_mod._r2_verified = None
     api_mod._r2_verify_error = None
     api_mod._pipelines.clear()
+    api_mod._model_router = None
+    api_mod._active_pipeline = None
+    api_mod._active_run_id = None
+    api_mod._shutting_down = False
+    api_mod._idempotency.clear()
+    api_mod._runtime_details_cache = None
     for pipeline_id in api_mod._running:
         api_mod._running[pipeline_id] = False
     api_mod._bootstrap_attempted = False
@@ -132,7 +138,6 @@ def test_health_reports_exact_contract(
     }
 
 
-
 def test_readiness_reports_dependency_readiness(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
@@ -158,7 +163,9 @@ def test_readiness_reports_dependency_readiness(
     assert deps["runtime"]["node"].startswith("v")
 
 
-def test_readiness_requires_config_before_exposing_dependency_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readiness_requires_config_before_exposing_dependency_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         api_mod, "load_settings", lambda: (_ for _ in ()).throw(RuntimeError("missing"))
     )
@@ -211,8 +218,6 @@ def test_already_running_conflict_schedules_no_background(
     assert fake_pipeline.calls == []
 
 
-
-
 def test_rebuild_endpoint_requires_api_key_when_dev_override_disabled(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
@@ -261,11 +266,15 @@ def test_readiness_treats_unresolved_secret_placeholder_as_missing(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
     settings = make_settings(
-        repo_dirs, RMS_API_KEY="{{secret.RMS_API_KEY}}", RMS_ALLOW_UNAUTHENTICATED_DEV="false"
+        repo_dirs,
+        RMS_API_KEY="{{secret.RMS_API_KEY}}",
+        RMS_ALLOW_UNAUTHENTICATED_DEV="false",
     )
     install_valid_api(monkeypatch, settings)
     with TestClient(api_mod.app) as client:
-        response = client.get("/readiness", headers={"Authorization": "Bearer {{secret.RMS_API_KEY}}"})
+        response = client.get(
+            "/readiness", headers={"Authorization": "Bearer {{secret.RMS_API_KEY}}"}
+        )
     assert response.status_code == 503
     assert response.json()["error"] == "RMS_API_KEY is required for protected endpoints"
 
@@ -278,7 +287,9 @@ def test_readiness_accepts_bearer_api_key(
     )
     install_valid_api(monkeypatch, settings)
     with TestClient(api_mod.app) as client:
-        response = client.get("/readiness", headers={"Authorization": "Bearer unit-rms-key"})
+        response = client.get(
+            "/readiness", headers={"Authorization": "Bearer unit-rms-key"}
+        )
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
 
@@ -353,7 +364,9 @@ def test_invalid_repo_path_returns_503_and_schedules_no_background(
 def test_body_cannot_override_dry_run_without_live_gate(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
-    settings = make_settings(repo_dirs, RMS_DRY_RUN="true", RMS_LIVE_WRITE_ENABLED="false")
+    settings = make_settings(
+        repo_dirs, RMS_DRY_RUN="true", RMS_LIVE_WRITE_ENABLED="false"
+    )
     fake_pipeline = FakePipeline()
     install_valid_api(monkeypatch, settings, fake_pipeline)
     with TestClient(api_mod.app) as client:
@@ -562,3 +575,55 @@ def test_latest_live_report_returns_pending_while_pipeline_running(
     assert response.status_code == 202
     assert response.json()["status"] == "pending"
     assert response.json()["key"].endswith("/mobile-ux/latest.json")
+
+
+def test_cross_pipeline_run_is_globally_rejected_on_emicro(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    api_mod._running["mobile-ux"] = True
+    with TestClient(api_mod.app) as client:
+        response = client.post("/rebuild/on-brand/run")
+    assert response.status_code == 429
+    assert response.json()["activePipeline"] == "mobile-ux"
+    assert response.headers["Retry-After"] == str(settings.rms_busy_retry_after_seconds)
+    assert fake_pipeline.calls == []
+
+
+def test_idempotency_key_replays_original_run_id(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    headers = {"X-Idempotency-Key": "mast-job-2026-06-12"}
+    with TestClient(api_mod.app) as client:
+        first = client.post("/rebuild/on-brand/run", headers=headers)
+        second = client.post("/rebuild/on-brand/run", headers=headers)
+    assert first.status_code == second.status_code == 202
+    assert second.json()["idempotentReplay"] is True
+    assert second.json()["runId"] == first.json()["runId"]
+    assert len(fake_pipeline.calls) == 1
+
+
+def test_ops_warmup_is_local_only(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    install_valid_api(monkeypatch, settings)
+    fake_router = MagicMock()
+    fake_router.warmup.return_value = {
+        "ready": True,
+        "maxConnections": 2,
+        "maxKeepaliveConnections": 1,
+    }
+    monkeypatch.setattr(api_mod, "_get_model_router", lambda: fake_router)
+    with TestClient(api_mod.app) as client:
+        response = client.get("/ops/warmup")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "warm"
+    assert "OpenRouter requests" in payload["excludedWork"]
+    fake_router.warmup.assert_called_once_with()
