@@ -33,11 +33,12 @@ logger = logging.getLogger(__name__)
 
 _PIPELINE_IDS = ("seo-aeo-geo", "mobile-ux", "on-brand")
 _pipeline_locks = {pipeline: threading.Lock() for pipeline in _PIPELINE_IDS}
+_global_pipeline_lock = threading.Lock()
 
 
 def is_running(pipeline_id: PipelineId) -> bool:
-    """Return true when the internal pipeline lock is held."""
-    return _pipeline_locks[pipeline_id].locked()
+    """Return true when this pipeline or RAMS's global eMicro lock is held."""
+    return _pipeline_locks[pipeline_id].locked() or _global_pipeline_lock.locked()
 
 
 def _date() -> str:
@@ -62,12 +63,16 @@ def _summary(tasks: list[dict[str, Any]], snapshots: int) -> dict[str, int]:
         "snapshotsRead": snapshots,
         "tasksGenerated": len(tasks),
         "codeFixCandidates": code_fix_candidates,
-        "codeFixesAttempted": sum(1 for task in tasks if bool(task.get("patchAttempted"))),
+        "codeFixesAttempted": sum(
+            1 for task in tasks if bool(task.get("patchAttempted"))
+        ),
         "baselineValidationFailed": sum(
             1 for task in tasks if bool(task.get("baselineValidationFailed"))
         ),
         "patchApplied": patch_applied,
-        "validationFailed": sum(1 for task in tasks if bool(task.get("validationFailed"))),
+        "validationFailed": sum(
+            1 for task in tasks if bool(task.get("validationFailed"))
+        ),
         "commitCreated": commit_created,
         "manualReview": manual_review,
         "skipped": sum(
@@ -144,8 +149,12 @@ def _mark_code_fixes_manual(
             task["error"] = reason
             task["patchAttempted"] = False
             task["patchApplied"] = False
-            task["baselineValidationFailed"] = baseline_validation is not None and not baseline_validation.passed
-            task["patchingSkippedBecauseBaselineFailed"] = task["baselineValidationFailed"]
+            task["baselineValidationFailed"] = (
+                baseline_validation is not None and not baseline_validation.passed
+            )
+            task["patchingSkippedBecauseBaselineFailed"] = task[
+                "baselineValidationFailed"
+            ]
             task["evidence"] = list(task.get("evidence", [])) + [reason]
             if baseline_validation is not None:
                 task["baselineValidation"] = _validation_to_task_block(
@@ -200,6 +209,7 @@ def _make_report(
     cfg: Settings,
     error: str | None,
     baseline_validation: ValidationSummary | None = None,
+    ai_usage: dict[str, Any] | None = None,
 ) -> RunReport:
     """Construct a RunReport from current pipeline state."""
     return RunReport(
@@ -215,6 +225,7 @@ def _make_report(
         commits=_commits(tasks),
         error=error,
         skills_baseline=build_lane1_skills_baseline(pipeline_id=pipeline_id),
+        ai_usage=ai_usage,
     )
 
 
@@ -255,7 +266,13 @@ def _preflight_live_repo(target_repo: Path, cfg: Settings) -> None:
         )
     if not target_repo.exists() or not target_repo.is_dir():
         raise RuntimeError(f"target repo path is missing or invalid: {target_repo}")
-    git_mgr = GitManager(target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled)
+    git_mgr = GitManager(
+        target_repo,
+        cfg.rms_qa_branch_prefix,
+        cfg.rms_push_enabled,
+        cfg.rms_git_timeout_seconds,
+        cfg.rms_git_output_max_bytes,
+    )
     if not git_mgr.is_git_repo():
         raise RuntimeError(f"target repo is not a Git worktree: {target_repo}")
     git_mgr.assert_clean_worktree()
@@ -403,6 +420,22 @@ class RmsPipeline:
         return approved.get(self.pipeline_id, frozenset())
 
 
+def _start_router_run(router: Any, run_id: str) -> None:
+    """Reset usage metrics when supported by the configured router."""
+    method = getattr(router, "start_run", None)
+    if callable(method):
+        method(run_id)
+
+
+def _router_usage(router: Any) -> dict[str, Any] | None:
+    """Return router usage only when it is a real JSON dictionary."""
+    method = getattr(router, "usage_summary", None)
+    if not callable(method):
+        return None
+    result = method()
+    return result if isinstance(result, dict) else None
+
+
 async def _run_async(
     pipeline_id: PipelineId,
     cfg: Settings,
@@ -436,8 +469,32 @@ async def _run_async(
             baseline_validation=None,
         )
 
+    if not _global_pipeline_lock.acquire(False):
+        lock.release()
+        return _make_report(
+            run_id=actual_run_id,
+            pipeline_id=pipeline_id,
+            target_repo=target_repo,
+            branch=branch,
+            dry_run=dry_run,
+            tasks=[],
+            snapshots=0,
+            cfg=cfg,
+            error="another RAMS pipeline is already running on this eMicro instance",
+            baseline_validation=None,
+        )
+
+    _start_router_run(router, actual_run_id)
     try:
-        audit = audit_reader.read_latest(pipeline_id, r2, cfg.r2_bucket_audits)
+        audit = await asyncio.to_thread(
+            audit_reader.read_latest,
+            pipeline_id,
+            r2,
+            cfg.r2_bucket_audits,
+            max_artefacts=cfg.rms_max_audit_artefacts,
+            max_object_bytes=cfg.rms_max_audit_object_bytes,
+            max_total_bytes=cfg.rms_max_audit_total_bytes,
+        )
         snapshots = 1 if audit else 0
         issues = await asyncio.to_thread(
             issue_normaliser.normalise, audit, pipeline_id, _date(), cfg, router
@@ -448,26 +505,32 @@ async def _run_async(
         git_mgr = None
         if not dry_run and queues.code_fix:
             try:
-                _preflight_live_repo(target_repo, cfg)
-                baseline_validation = _run_baseline_validation(
-                    pipeline_id, target_repo, cfg
+                await asyncio.to_thread(_preflight_live_repo, target_repo, cfg)
+                baseline_validation = await asyncio.to_thread(
+                    _run_baseline_validation, pipeline_id, target_repo, cfg
                 )
                 if not baseline_validation.passed:
                     failed_command = baseline_validation.output_tail.splitlines()[-1:]
-                    detail = failed_command[0] if failed_command else "validation failed"
+                    detail = (
+                        failed_command[0] if failed_command else "validation failed"
+                    )
                     raise RuntimeError(
                         "baseline validation failed before patch; "
                         f"live code_fix writes skipped: {detail}"
                     )
                 git_mgr = GitManager(
-                    target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled
+                    target_repo,
+                    cfg.rms_qa_branch_prefix,
+                    cfg.rms_push_enabled,
+                    cfg.rms_git_timeout_seconds,
+                    cfg.rms_git_output_max_bytes,
                 )
-                git_mgr.create_branch(branch)
+                await asyncio.to_thread(git_mgr.create_branch, branch)
             except Exception as exc:
-                error = f"Git/live preflight failed; live code_fix writes skipped: {exc}"
-                tasks = _mark_code_fixes_manual(
-                    selected, error, baseline_validation
+                error = (
+                    f"Git/live preflight failed; live code_fix writes skipped: {exc}"
                 )
+                tasks = _mark_code_fixes_manual(selected, error, baseline_validation)
                 selected = []
 
         for issue in selected:
@@ -497,8 +560,9 @@ async def _run_async(
             cfg=cfg,
             error=error,
             baseline_validation=baseline_validation,
+            ai_usage=_router_usage(router),
         )
-        _publish_report(report, cfg, r2)
+        await asyncio.to_thread(_publish_report, report, cfg, r2)
         return report
     except Exception as exc:
         report = _make_report(
@@ -512,10 +576,12 @@ async def _run_async(
             cfg=cfg,
             error=str(exc),
             baseline_validation=baseline_validation,
+            ai_usage=_router_usage(router),
         )
-        _publish_report(report, cfg, r2)
+        await asyncio.to_thread(_publish_report, report, cfg, r2)
         return report
     finally:
+        _global_pipeline_lock.release()
         lock.release()
 
 

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .process_runner import run_bounded
+
 _PROTECTED_BRANCHES = frozenset({"main", "master"})
 _DEFAULT_GIT_TIMEOUT_SECONDS = 30
+_DEFAULT_GIT_OUTPUT_MAX_BYTES = 65_536
 
 
 class BranchSafetyError(Exception):
@@ -46,36 +48,36 @@ class GitManager:
         branch_prefix: str = "rms-qa/",
         push_enabled: bool = False,
         timeout_seconds: int = _DEFAULT_GIT_TIMEOUT_SECONDS,
+        max_output_bytes: int = _DEFAULT_GIT_OUTPUT_MAX_BYTES,
     ) -> None:
         """Initialise a branch-safe Git wrapper for one target repository."""
         self.target_repo = Path(target_repo)
         self.branch_prefix = branch_prefix
         self.push_enabled = push_enabled
         self.timeout_seconds = timeout_seconds
+        self.max_output_bytes = max_output_bytes
 
     def _git(self, *args: str) -> str:
-        """Run git with timeout and prompts disabled, returning stdout."""
+        """Run Git with a bounded output tail and prompts disabled."""
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-        try:
-            p = subprocess.run(
-                ["git", *args],
-                cwd=self.target_repo,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=self.timeout_seconds,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as exc:
+        result = run_bounded(
+            ["git", *args],
+            cwd=self.target_repo,
+            timeout_seconds=self.timeout_seconds,
+            max_output_bytes=self.max_output_bytes,
+            max_output_lines=1_000,
+            env=env,
+            output_label="git",
+        )
+        if result.timed_out:
             raise GitManagerError(
                 f"git {' '.join(args)} timed out after {self.timeout_seconds}s"
-            ) from exc
-        if p.returncode != 0:
-            raise GitManagerError(
-                p.stderr.strip() or p.stdout.strip() or f"git {' '.join(args)} failed"
             )
-        return p.stdout.strip()
+        if result.return_code != 0:
+            raise GitManagerError(
+                result.output.strip() or f"git {' '.join(args)} failed"
+            )
+        return result.output.strip()
 
     def _git_no_output(self, *args: str) -> None:
         """Run git and discard stdout."""

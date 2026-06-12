@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
 import shutil
 import subprocess
+import threading
+import time
+from collections import OrderedDict
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path as FilePath
+from collections.abc import AsyncIterator
 from typing import Annotated, Any, Literal
 
 from fastapi import BackgroundTasks, Body, FastAPI, Header, Path
@@ -29,30 +35,57 @@ from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.pipeline import RmsPipeline
 from repo_mgmt.r2_client import R2Client, R2Error
 from repo_mgmt.repo_bootstrap import BootstrapResult, bootstrap_repositories
+from repo_mgmt.runtime_guard import cleanup_stale_reports
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="Repo Management Suite",
-    description="Autonomous repository audit and patch pipeline service.",
-    version="1.0.0",
-)
 
-
-@app.on_event("startup")
-async def _startup_checks() -> None:
-    """Log a warning when API key authentication is not configured."""
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Initialise local state and close clients within Koyeb shutdown handling."""
+    global _shutting_down, _model_router
+    _shutting_down = False
     cfg = _get_cfg()
     if cfg is None or not _usable_secret(cfg.rms_api_key):
         logger.warning(
             "rms-api: RMS_API_KEY is not set — protected endpoints require it unless RMS_ALLOW_UNAUTHENTICATED_DEV=true"
         )
+    if cfg is not None and cfg.rms_temp_cleanup_enabled:
+        deleted = await asyncio.to_thread(
+            cleanup_stale_reports, cfg.report_dir(), cfg.rms_temp_max_age_hours
+        )
+        if deleted:
+            logger.info("rms-api: removed %d stale local report(s)", deleted)
+    try:
+        yield
+    finally:
+        _shutting_down = True
+        router = _model_router
+        _model_router = None
+        _pipelines.clear()
+        if router is not None:
+            await router.aclose()
+
+
+app = FastAPI(
+    title="Repo Management Suite",
+    description="Autonomous repository audit and patch pipeline service.",
+    version="1.1.0",
+    lifespan=_lifespan,
+)
 
 PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
 _PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
 
 _pipelines: dict[PipelineId, RmsPipeline] = {}
 _running: dict[PipelineId, bool] = {pipeline_id: False for pipeline_id in _PIPELINE_IDS}
+_model_router: ModelRouter | None = None
+_active_pipeline: PipelineId | None = None
+_active_run_id: str | None = None
+_shutting_down = False
+_admission_lock = threading.Lock()
+_idempotency: OrderedDict[str, tuple[PipelineId, str, bool]] = OrderedDict()
+_runtime_details_cache: tuple[float, dict[str, object]] | None = None
 
 _cfg: Settings | None = None
 _cfg_error: str | None = None
@@ -73,7 +106,9 @@ class RunRequest(BaseModel):
 class AdmissionError(Exception):
     """Raised when an endpoint request cannot be safely admitted."""
 
-    def __init__(self, status_code: int, error: str, details: dict[str, object]) -> None:
+    def __init__(
+        self, status_code: int, error: str, details: dict[str, object]
+    ) -> None:
         """Initialise an admission error with an HTTP status and JSON details."""
         super().__init__(error)
         self.status_code = status_code
@@ -186,19 +221,27 @@ def _node_major_ok(version_text: str) -> bool:
 
 
 def _validation_runtime_details() -> dict[str, object]:
-    """Return public version checks for validation/runtime dependencies."""
+    """Return cached public checks for validation/runtime dependencies."""
+    global _runtime_details_cache
+    cfg = _get_cfg()
+    ttl = cfg.rms_readiness_cache_seconds if cfg is not None else 300
+    now = time.monotonic()
+    if _runtime_details_cache is not None and now - _runtime_details_cache[0] < ttl:
+        return dict(_runtime_details_cache[1])
     python_ok, python_version = _version_output("python --version")
     git_ok, git_version = _version_output("git --version")
     node_ok, node_version = _version_output("node --version")
     npm_ok, npm_version = _version_output("npm --version")
     node_ok = node_ok and _node_major_ok(node_version)
-    return {
+    details: dict[str, object] = {
         "ready": python_ok and git_ok and node_ok and npm_ok,
         "python": python_version,
         "git": git_version,
         "node": node_version,
         "npm": npm_version,
     }
+    _runtime_details_cache = (now, details)
+    return dict(details)
 
 
 def _model_router_ready(cfg: Settings | None) -> bool:
@@ -221,7 +264,9 @@ def _repo_ready(path: FilePath) -> bool:
     return path.exists() and path.is_dir()
 
 
-def _ensure_repos_bootstrapped(cfg: Settings, pipeline_id: PipelineId | None = None) -> list[BootstrapResult]:
+def _ensure_repos_bootstrapped(
+    cfg: Settings, pipeline_id: PipelineId | None = None
+) -> list[BootstrapResult]:
     """Run repo bootstrap once per process when explicitly enabled.
 
     Bootstrap only the repository required by the requested pipeline. This avoids
@@ -235,7 +280,9 @@ def _ensure_repos_bootstrapped(cfg: Settings, pipeline_id: PipelineId | None = N
     elif pipeline_id == "on-brand":
         label = "aims"
     existing = {result.label: result for result in _bootstrap_results}
-    if not existing.get(label, BootstrapResult(label, "", False, False, "missing")).ready:
+    if not existing.get(
+        label, BootstrapResult(label, "", False, False, "missing")
+    ).ready:
         _bootstrap_attempted = True
         try:
             new_results = bootstrap_repositories(cfg, pipeline_id=pipeline_id)
@@ -329,7 +376,58 @@ def _readiness_payload() -> dict[str, object]:
     deps = _dependency_details()
     ready_values = [value for value in deps.values() if isinstance(value, bool)]
     status = "ready" if ready_values and all(ready_values) else "degraded"
-    return {"status": status, "pipelines": _pipeline_states(), "dependencies": deps}
+    return {
+        "status": status,
+        "pipelines": _pipeline_states(),
+        "dependencies": deps,
+        "admission": _active_status(),
+    }
+
+
+def _get_model_router() -> ModelRouter | None:
+    """Return the single reusable OpenRouter client for this eMicro process."""
+    global _model_router
+    cfg = _get_cfg()
+    if cfg is None:
+        return None
+    if _model_router is None:
+        _model_router = ModelRouter(cfg)
+    return _model_router
+
+
+def _active_status() -> dict[str, object]:
+    """Return compact non-secret global admission state."""
+    return {
+        "acceptingRuns": not _shutting_down
+        and _active_pipeline is None
+        and not any(_running.values()),
+        "activePipeline": _active_pipeline
+        or next((p for p, running in _running.items() if running), None),
+        "activeRunId": _active_run_id,
+        "shuttingDown": _shutting_down,
+        "maxConcurrentPipelines": (
+            _cfg.rms_max_concurrent_pipelines if _cfg is not None else 1
+        ),
+    }
+
+
+def _disk_free_mb(path: FilePath) -> int:
+    """Return free disk space for the closest existing parent."""
+    candidate = path.expanduser()
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return int(shutil.disk_usage(candidate).free // (1024 * 1024))
+
+
+def _remember_idempotency(
+    key: str, value: tuple[PipelineId, str, bool], cfg: Settings
+) -> None:
+    if not key:
+        return
+    _idempotency[key] = value
+    _idempotency.move_to_end(key)
+    while len(_idempotency) > cfg.rms_idempotency_cache_size:
+        _idempotency.popitem(last=False)
 
 
 def _get_pipeline(pipeline_id: PipelineId) -> RmsPipeline | None:
@@ -341,7 +439,10 @@ def _get_pipeline(pipeline_id: PipelineId) -> RmsPipeline | None:
 
     pipeline = _pipelines.get(pipeline_id)
     if pipeline is None or pipeline.cfg is not cfg or pipeline.r2 is not r2:
-        pipeline = RmsPipeline.for_id(pipeline_id, cfg, r2, ModelRouter(cfg))
+        router = _get_model_router()
+        if router is None:
+            return None
+        pipeline = RmsPipeline.for_id(pipeline_id, cfg, r2, router)
         _pipelines[pipeline_id] = pipeline
     return pipeline
 
@@ -354,6 +455,13 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
             503,
             "configuration unavailable",
             {"dependencies": _dependency_details()},
+        )
+    free_mb = _disk_free_mb(FilePath(cfg.rms_repo_base_dir))
+    if free_mb < cfg.rms_min_free_disk_mb:
+        raise AdmissionError(
+            507,
+            "insufficient local disk space",
+            {"freeDiskMb": free_mb, "requiredFreeDiskMb": cfg.rms_min_free_disk_mb},
         )
     if _get_r2() is None or not _verify_r2():
         raise AdmissionError(
@@ -406,7 +514,13 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
             },
         )
 
-    git_mgr = GitManager(target_repo, cfg.rms_qa_branch_prefix, cfg.rms_push_enabled)
+    git_mgr = GitManager(
+        target_repo,
+        cfg.rms_qa_branch_prefix,
+        cfg.rms_push_enabled,
+        cfg.rms_git_timeout_seconds,
+        cfg.rms_git_output_max_bytes,
+    )
     if not git_mgr.is_git_repo():
         raise AdmissionError(
             503,
@@ -429,7 +543,8 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
 
 
 async def _run_pipeline_bg(pipeline_id: PipelineId, dry_run: bool, run_id: str) -> None:
-    """Await a pipeline run and clear state safely."""
+    """Await a pipeline run and clear global eMicro admission state safely."""
+    global _active_pipeline, _active_run_id
     _running[pipeline_id] = True
     try:
         pipeline = _get_pipeline(pipeline_id)
@@ -447,7 +562,11 @@ async def _run_pipeline_bg(pipeline_id: PipelineId, dry_run: bool, run_id: str) 
     except Exception:
         logger.exception("api: unhandled error in pipeline %r", pipeline_id)
     finally:
-        _running[pipeline_id] = False
+        with _admission_lock:
+            _running[pipeline_id] = False
+            if _active_run_id == run_id:
+                _active_pipeline = None
+                _active_run_id = None
 
 
 @app.get("/")
@@ -462,6 +581,40 @@ async def health() -> JSONResponse:
     return JSONResponse(status_code=200, content=_health_payload())
 
 
+@app.get("/ops/warmup")
+async def ops_warmup(
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Warm local configuration and HTTP pools without starting operational work."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg = _get_cfg()
+    router = _get_model_router()
+    if cfg is None or router is None:
+        return JSONResponse(
+            status_code=503, content={"status": "degraded", **_active_status()}
+        )
+    client = router.warmup()
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "warm",
+            "service": "RAMS",
+            "warmupScope": ["configuration", "bounded-http-clients"],
+            "excludedWork": [
+                "repositories",
+                "R2",
+                "audits",
+                "validation",
+                "OpenRouter requests",
+            ],
+            "client": client,
+            **_active_status(),
+        },
+    )
+
+
 @app.get("/readiness")
 async def readiness(
     authorization: Annotated[str | None, Header()] = None,
@@ -473,15 +626,16 @@ async def readiness(
     return JSONResponse(status_code=200, content=_readiness_payload())
 
 
-
-
 def _auth_error_response(authorization: str | None) -> JSONResponse | None:
     """Return an auth error for protected endpoints, leaving only / and /health public."""
     cfg_for_auth = _get_cfg()
     if cfg_for_auth is None:
         return JSONResponse(
             status_code=503,
-            content={"error": "configuration unavailable", "dependencies": _dependency_details()},
+            content={
+                "error": "configuration unavailable",
+                "dependencies": _dependency_details(),
+            },
         )
 
     expected_key = _usable_secret(cfg_for_auth.rms_api_key)
@@ -498,7 +652,7 @@ def _auth_error_response(authorization: str | None) -> JSONResponse | None:
 
     token: str | None = None
     if authorization and authorization.lower().startswith("bearer "):
-        token = authorization[len("bearer "):].strip()
+        token = authorization[len("bearer ") :].strip()
     if token == expected_key:
         return None
     return JSONResponse(
@@ -508,14 +662,16 @@ def _auth_error_response(authorization: str | None) -> JSONResponse | None:
     )
 
 
-
 def _write_auth_error_response(authorization: str | None) -> JSONResponse | None:
     """Fail closed for public rebuild endpoints unless explicitly authorised."""
     cfg_for_auth = _get_cfg()
     if cfg_for_auth is None:
         return JSONResponse(
             status_code=503,
-            content={"error": "configuration unavailable", "dependencies": _dependency_details()},
+            content={
+                "error": "configuration unavailable",
+                "dependencies": _dependency_details(),
+            },
         )
     if not _usable_secret(cfg_for_auth.rms_api_key):
         if cfg_for_auth.rms_allow_unauthenticated_dev:
@@ -536,7 +692,10 @@ def _report_config_or_response() -> tuple[Settings | None, JSONResponse | None]:
     if cfg is None:
         return None, JSONResponse(
             status_code=503,
-            content={"error": "configuration unavailable", "dependencies": _dependency_details()},
+            content={
+                "error": "configuration unavailable",
+                "dependencies": _dependency_details(),
+            },
         )
     return cfg, None
 
@@ -556,7 +715,9 @@ def _dry_run_report_run_id(path: FilePath, pipeline_id: PipelineId) -> str:
     return ""
 
 
-def _dry_run_report_records(cfg: Settings, pipeline_id: PipelineId) -> list[dict[str, Any]]:
+def _dry_run_report_records(
+    cfg: Settings, pipeline_id: PipelineId
+) -> list[dict[str, Any]]:
     """Return newest-first metadata for local dry-run reports for *pipeline_id*."""
     report_dir = _safe_report_dir(cfg)
     if not report_dir.exists():
@@ -587,7 +748,9 @@ def _dry_run_report_records(cfg: Settings, pipeline_id: PipelineId) -> list[dict
     return sorted(records, key=lambda item: str(item["runId"]), reverse=True)
 
 
-def _dry_run_report_path(cfg: Settings, pipeline_id: PipelineId, run_id: str) -> FilePath | None:
+def _dry_run_report_path(
+    cfg: Settings, pipeline_id: PipelineId, run_id: str
+) -> FilePath | None:
     """Return the safe path for a local dry-run report, or None if invalid/missing."""
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z", run_id) is None:
         return None
@@ -600,7 +763,9 @@ def _dry_run_report_path(cfg: Settings, pipeline_id: PipelineId, run_id: str) ->
     return path if path.is_file() else None
 
 
-def _read_json_report(path: FilePath) -> tuple[dict[str, Any] | list[Any] | None, str | None]:
+def _read_json_report(
+    path: FilePath,
+) -> tuple[dict[str, Any] | list[Any] | None, str | None]:
     """Read a local JSON report file and return payload plus optional error."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -613,7 +778,9 @@ def _read_json_report(path: FilePath) -> tuple[dict[str, Any] | list[Any] | None
     return None, "report JSON root must be an object or array"
 
 
-def _live_report_key(cfg: Settings, pipeline_id: PipelineId, run_id: str | None = None) -> str:
+def _live_report_key(
+    cfg: Settings, pipeline_id: PipelineId, run_id: str | None = None
+) -> str:
     """Return the R2 key for a live report or latest pointer."""
     prefix = cfg.rms_report_prefix.strip("/")
     if run_id is None:
@@ -636,7 +803,15 @@ def _read_r2_json_report(
     if r2 is None:
         return None, _r2_error or "R2 client unavailable", 503
     try:
-        raw = r2.get_object(cfg.r2_bucket_audits, key)
+        limited = getattr(type(r2), "get_object_limited", None)
+        if callable(limited):
+            raw = r2.get_object_limited(
+                cfg.r2_bucket_audits, key, cfg.rms_report_max_bytes
+            )
+        else:
+            raw = r2.get_object(cfg.r2_bucket_audits, key)
+            if len(raw) > cfg.rms_report_max_bytes:
+                return None, "live report exceeds configured size limit", 413
     except R2Error as exc:
         message = str(exc)
         if "NoSuchKey" in message or "404" in message or "Not Found" in message:
@@ -663,7 +838,9 @@ async def list_all_dry_run_reports(
         return auth_error
     cfg, error_response = _report_config_or_response()
     if error_response is not None or cfg is None:
-        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+        return error_response or JSONResponse(
+            status_code=503, content={"error": "configuration unavailable"}
+        )
     pipelines: dict[str, object] = {}
     for pipeline_id in _PIPELINE_IDS:
         records = _dry_run_report_records(cfg, pipeline_id)
@@ -693,7 +870,9 @@ async def list_pipeline_dry_run_reports(
         return auth_error
     cfg, error_response = _report_config_or_response()
     if error_response is not None or cfg is None:
-        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+        return error_response or JSONResponse(
+            status_code=503, content={"error": "configuration unavailable"}
+        )
     typed_pipeline_id: PipelineId = pipeline_id
     records = _dry_run_report_records(cfg, typed_pipeline_id)
     return JSONResponse(
@@ -719,7 +898,9 @@ async def get_latest_dry_run_report(
         return auth_error
     cfg, error_response = _report_config_or_response()
     if error_response is not None or cfg is None:
-        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+        return error_response or JSONResponse(
+            status_code=503, content={"error": "configuration unavailable"}
+        )
     typed_pipeline_id: PipelineId = pipeline_id
     records = _dry_run_report_records(cfg, typed_pipeline_id)
     if not records:
@@ -745,12 +926,18 @@ async def get_latest_dry_run_report(
     latest_run_id = str(records[0]["runId"])
     path = _dry_run_report_path(cfg, typed_pipeline_id, latest_run_id)
     if path is None:
-        return JSONResponse(status_code=404, content={"error": "dry-run report not found"})
+        return JSONResponse(
+            status_code=404, content={"error": "dry-run report not found"}
+        )
     payload, read_error = _read_json_report(path)
     if read_error:
         return JSONResponse(
             status_code=500,
-            content={"error": read_error, "pipeline": typed_pipeline_id, "filename": path.name},
+            content={
+                "error": read_error,
+                "pipeline": typed_pipeline_id,
+                "filename": path.name,
+            },
         )
     return JSONResponse(status_code=200, content=payload)
 
@@ -767,7 +954,9 @@ async def get_dry_run_report(
         return auth_error
     cfg, error_response = _report_config_or_response()
     if error_response is not None or cfg is None:
-        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+        return error_response or JSONResponse(
+            status_code=503, content={"error": "configuration unavailable"}
+        )
     typed_pipeline_id: PipelineId = pipeline_id
     path = _dry_run_report_path(cfg, typed_pipeline_id, run_id)
     if path is None:
@@ -795,7 +984,11 @@ async def get_dry_run_report(
     if read_error:
         return JSONResponse(
             status_code=500,
-            content={"error": read_error, "pipeline": typed_pipeline_id, "filename": path.name},
+            content={
+                "error": read_error,
+                "pipeline": typed_pipeline_id,
+                "filename": path.name,
+            },
         )
     return JSONResponse(status_code=200, content=payload)
 
@@ -811,7 +1004,9 @@ async def get_live_report_index(
         return auth_error
     cfg, error_response = _report_config_or_response()
     if error_response is not None or cfg is None:
-        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+        return error_response or JSONResponse(
+            status_code=503, content={"error": "configuration unavailable"}
+        )
     typed_pipeline_id: PipelineId = pipeline_id
     return JSONResponse(
         status_code=200,
@@ -836,7 +1031,9 @@ async def get_latest_live_report(
         return auth_error
     cfg, error_response = _report_config_or_response()
     if error_response is not None or cfg is None:
-        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+        return error_response or JSONResponse(
+            status_code=503, content={"error": "configuration unavailable"}
+        )
     typed_pipeline_id: PipelineId = pipeline_id
     key = _live_report_key(cfg, typed_pipeline_id)
     payload, read_error, status_code = _read_r2_json_report(cfg, typed_pipeline_id, key)
@@ -876,11 +1073,17 @@ async def get_live_report(
         return auth_error
     cfg, error_response = _report_config_or_response()
     if error_response is not None or cfg is None:
-        return error_response or JSONResponse(status_code=503, content={"error": "configuration unavailable"})
+        return error_response or JSONResponse(
+            status_code=503, content={"error": "configuration unavailable"}
+        )
     if not _valid_run_id(run_id):
         return JSONResponse(
             status_code=404,
-            content={"error": "live report not found", "pipeline": pipeline_id, "runId": run_id},
+            content={
+                "error": "live report not found",
+                "pipeline": pipeline_id,
+                "runId": run_id,
+            },
         )
     typed_pipeline_id: PipelineId = pipeline_id
     key = _live_report_key(cfg, typed_pipeline_id, run_id)
@@ -917,32 +1120,95 @@ async def trigger_run(
     background_tasks: BackgroundTasks,
     body: RunRequest = Body(default=RunRequest()),
     authorization: Annotated[str | None, Header()] = None,
+    x_idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
+    x_trigger_run_key: Annotated[str | None, Header(alias="X-Trigger-Run-Key")] = None,
 ) -> JSONResponse:
-    """Trigger a pipeline run and return the single source-of-truth run ID."""
+    """Admit at most one heavyweight RAMS pipeline across all pipeline IDs."""
+    global _active_pipeline, _active_run_id
     auth_error = _write_auth_error_response(authorization)
     if auth_error is not None:
         return auth_error
 
     typed_pipeline_id: PipelineId = pipeline_id
-    if _running.get(typed_pipeline_id):
+    cfg = _get_cfg()
+    if cfg is None:
         return JSONResponse(
-            status_code=409,
-            content={
-                "error": "pipeline already running",
-                "pipeline": typed_pipeline_id,
-            },
+            status_code=503, content={"error": "configuration unavailable"}
         )
+    idem_key = (x_idempotency_key or x_trigger_run_key or "").strip()[:256]
+    with _admission_lock:
+        if idem_key and idem_key in _idempotency:
+            saved_pipeline, saved_run_id, saved_dry_run = _idempotency[idem_key]
+            if saved_pipeline != typed_pipeline_id:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "idempotency key belongs to another pipeline",
+                        "pipeline": saved_pipeline,
+                    },
+                )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "runId": saved_run_id,
+                    "pipeline": saved_pipeline,
+                    "dryRun": saved_dry_run,
+                    "idempotentReplay": True,
+                },
+                headers={"X-Run-Id": saved_run_id},
+            )
+        running_pipeline = _active_pipeline or next(
+            (p for p, running in _running.items() if running), None
+        )
+        if _shutting_down:
+            return JSONResponse(
+                status_code=503, content={"error": "service shutting down"}
+            )
+        if running_pipeline is not None:
+            same = running_pipeline == typed_pipeline_id
+            status_code = 409 if same else 429
+            return JSONResponse(
+                status_code=status_code,
+                content={
+                    "error": "pipeline already running" if same else "RAMS is busy",
+                    "pipeline": typed_pipeline_id,
+                    "activePipeline": running_pipeline,
+                    "activeRunId": _active_run_id,
+                },
+                headers={"Retry-After": str(cfg.rms_busy_retry_after_seconds)},
+            )
+        run_id = _make_run_id()
+        _active_pipeline = typed_pipeline_id
+        _active_run_id = run_id
+        _running[typed_pipeline_id] = True
 
     try:
-        dry_run = _admit_request(typed_pipeline_id, body.dry_run)
+        dry_run = await asyncio.to_thread(
+            _admit_request, typed_pipeline_id, body.dry_run
+        )
     except AdmissionError as exc:
+        with _admission_lock:
+            _running[typed_pipeline_id] = False
+            if _active_run_id == run_id:
+                _active_pipeline = None
+                _active_run_id = None
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": exc.error, **exc.details},
         )
+    except Exception as exc:
+        with _admission_lock:
+            _running[typed_pipeline_id] = False
+            if _active_run_id == run_id:
+                _active_pipeline = None
+                _active_run_id = None
+        logger.exception("api: admission failed")
+        return JSONResponse(
+            status_code=503, content={"error": f"admission failed: {exc}"}
+        )
 
-    run_id = _make_run_id()
-    _running[typed_pipeline_id] = True
+    with _admission_lock:
+        _remember_idempotency(idem_key, (typed_pipeline_id, run_id, dry_run), cfg)
     background_tasks.add_task(_run_pipeline_bg, typed_pipeline_id, dry_run, run_id)
 
     return JSONResponse(
@@ -960,7 +1226,9 @@ def serve() -> None:
     host = cfg.rms_host if cfg is not None else "0.0.0.0"
     port_raw = os.getenv("RMS_PORT") or os.getenv("PORT")
     try:
-        port = int(port_raw) if port_raw else (cfg.rms_port if cfg is not None else 8000)
+        port = (
+            int(port_raw) if port_raw else (cfg.rms_port if cfg is not None else 8000)
+        )
     except ValueError:
         logger.warning("rms-api: invalid port %r; falling back to 8000", port_raw)
         port = 8000
@@ -979,4 +1247,8 @@ def serve() -> None:
         port=port,
         log_level=log_level,
         reload=False,
+        workers=1,
+        timeout_graceful_shutdown=(
+            cfg.rms_shutdown_grace_seconds if cfg is not None else 25
+        ),
     )

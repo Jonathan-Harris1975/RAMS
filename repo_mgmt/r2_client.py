@@ -90,10 +90,39 @@ class R2Client:
             response = self._client.get_object(Bucket=bucket, Key=key)
             body: bytes = response["Body"].read()
             return body
-        except ClientError as exc:
+        except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
             raise R2Error(
                 f"R2 get_object failed for bucket={bucket!r} key={key!r}: {exc}"
             ) from exc
+
+    def get_object_limited(self, bucket: str, key: str, max_bytes: int) -> bytes:
+        """Retrieve at most ``max_bytes`` and reject oversized R2 objects."""
+        body_stream: object | None = None
+        try:
+            response = self._client.get_object(Bucket=bucket, Key=key)
+            content_length = response.get("ContentLength")
+            body_stream = response["Body"]
+            if isinstance(content_length, int) and content_length > max_bytes:
+                raise R2Error(
+                    f"R2 object exceeds {max_bytes} bytes for bucket={bucket!r} key={key!r}"
+                )
+            read = getattr(body_stream, "read")
+            body = bytes(read(max_bytes + 1))
+            if len(body) > max_bytes:
+                raise R2Error(
+                    f"R2 object exceeds {max_bytes} bytes for bucket={bucket!r} key={key!r}"
+                )
+            return body
+        except R2Error:
+            raise
+        except (ClientError, EndpointConnectionError, BotoCoreError, OSError) as exc:
+            raise R2Error(
+                f"R2 get_object failed for bucket={bucket!r} key={key!r}: {exc}"
+            ) from exc
+        finally:
+            close = getattr(body_stream, "close", None)
+            if callable(close):
+                close()
 
     def put_object(
         self,
@@ -121,7 +150,7 @@ class R2Client:
                 Body=body,
                 ContentType=content_type,
             )
-        except ClientError as exc:
+        except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
             raise R2Error(
                 f"R2 put_object failed for bucket={bucket!r} key={key!r}: {exc}"
             ) from exc

@@ -13,12 +13,12 @@ import base64
 import logging
 import os
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 from repo_mgmt.config import PipelineId, Settings
+from repo_mgmt.process_runner import run_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -137,25 +137,34 @@ def _operator_hint(output: str, *, url: str, token: str | None) -> str:
     return f"{output}\nOperator hint: " + " ".join(dict.fromkeys(hints))
 
 
-def _run(command: list[str], *, cwd: Path | None, token: str | None, url: str) -> None:
+def _run(
+    command: list[str],
+    *,
+    cwd: Path | None,
+    token: str | None,
+    url: str,
+    timeout_seconds: int,
+    max_output_bytes: int,
+) -> None:
     """Run a Git command and raise a scrubbed RuntimeError on failure."""
     logger.debug("repo_bootstrap: running %s", _safe_command_for_log(command, token))
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env.setdefault("GIT_ASKPASS", "true")
-    result = subprocess.run(
+    result = run_bounded(
         command,
         cwd=cwd,
         env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-        timeout=180,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        max_output_lines=200,
+        output_label="git",
     )
-    if result.returncode != 0:
-        output = _scrub_output(result.stdout.strip(), token)
-        output = _operator_hint(output or f"git exited with {result.returncode}", url=url, token=token)
+    if result.return_code != 0:
+        output = _scrub_output(result.output.strip(), token)
+        output = _operator_hint(
+            output or f"git exited with {result.return_code}", url=url, token=token
+        )
         raise RuntimeError(output)
 
 
@@ -164,7 +173,14 @@ def _is_git_worktree(path: Path) -> bool:
     return path.is_dir() and (path / ".git").exists()
 
 
-def _clone_or_refresh(target: BootstrapTarget, token: str | None) -> BootstrapResult:
+def _clone_or_refresh(
+    target: BootstrapTarget,
+    token: str | None,
+    *,
+    timeout_seconds: int,
+    clone_depth: int,
+    max_output_bytes: int,
+) -> BootstrapResult:
     """Clone a missing repo or refresh an existing worktree to the configured branch."""
     url = target.url.strip()
     if not url:
@@ -207,8 +223,30 @@ def _clone_or_refresh(target: BootstrapTarget, token: str | None) -> BootstrapRe
         target.path.parent.mkdir(parents=True, exist_ok=True)
         git = _git_base_command(token, url)
         if _is_git_worktree(target.path):
-            _run([*git, "fetch", "--depth", "1", "origin", target.branch], cwd=target.path, token=token, url=url)
-            _run([*git, "checkout", "-B", target.branch, "FETCH_HEAD"], cwd=target.path, token=token, url=url)
+            _run(
+                [
+                    *git,
+                    "fetch",
+                    "--no-tags",
+                    "--depth",
+                    str(clone_depth),
+                    "origin",
+                    target.branch,
+                ],
+                cwd=target.path,
+                token=token,
+                url=url,
+                timeout_seconds=timeout_seconds,
+                max_output_bytes=max_output_bytes,
+            )
+            _run(
+                [*git, "checkout", "-B", target.branch, "FETCH_HEAD"],
+                cwd=target.path,
+                token=token,
+                url=url,
+                timeout_seconds=timeout_seconds,
+                max_output_bytes=max_output_bytes,
+            )
             return BootstrapResult(
                 label=target.label,
                 path=str(target.path),
@@ -225,7 +263,9 @@ def _clone_or_refresh(target: BootstrapTarget, token: str | None) -> BootstrapRe
                 *git,
                 "clone",
                 "--depth",
-                "1",
+                str(clone_depth),
+                "--no-tags",
+                "--single-branch",
                 "--branch",
                 target.branch,
                 url,
@@ -234,6 +274,8 @@ def _clone_or_refresh(target: BootstrapTarget, token: str | None) -> BootstrapRe
             cwd=None,
             token=token,
             url=url,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=max_output_bytes,
         )
         return BootstrapResult(
             label=target.label,
@@ -243,6 +285,8 @@ def _clone_or_refresh(target: BootstrapTarget, token: str | None) -> BootstrapRe
             action="cloned",
         )
     except Exception as exc:
+        if target.path.exists() and not _is_git_worktree(target.path):
+            shutil.rmtree(target.path, ignore_errors=True)
         logger.warning(
             "repo_bootstrap: %s bootstrap failed for %s: %s",
             target.label,
@@ -277,7 +321,9 @@ def targets_from_settings(cfg: Settings) -> list[BootstrapTarget]:
     ]
 
 
-def targets_for_pipeline(cfg: Settings, pipeline_id: PipelineId) -> list[BootstrapTarget]:
+def targets_for_pipeline(
+    cfg: Settings, pipeline_id: PipelineId
+) -> list[BootstrapTarget]:
     """Return only the bootstrap target required by *pipeline_id*."""
     if pipeline_id in {"seo-aeo-geo", "mobile-ux"}:
         return [
@@ -305,7 +351,11 @@ def bootstrap_repositories(
     pipeline_id: PipelineId | None = None,
 ) -> list[BootstrapResult]:
     """Clone or refresh configured target repositories when explicitly enabled."""
-    targets = targets_for_pipeline(cfg, pipeline_id) if pipeline_id else targets_from_settings(cfg)
+    targets = (
+        targets_for_pipeline(cfg, pipeline_id)
+        if pipeline_id
+        else targets_from_settings(cfg)
+    )
     if not cfg.rms_repo_bootstrap_enabled:
         return [
             BootstrapResult(
@@ -319,7 +369,13 @@ def bootstrap_repositories(
         ]
 
     results = [
-        _clone_or_refresh(target, cfg.github_token_value)
+        _clone_or_refresh(
+            target,
+            cfg.github_token_value,
+            timeout_seconds=cfg.rms_git_timeout_seconds,
+            clone_depth=cfg.rms_git_clone_depth,
+            max_output_bytes=cfg.rms_git_output_max_bytes,
+        )
         for target in targets
     ]
     logger.info(

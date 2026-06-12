@@ -71,7 +71,9 @@ class Settings(BaseSettings):
     r2_bucket_audits: str = "audits"
     r2_public_base_url_audits: str = ""
     r2_bucket_hive_skills: str = "hive-skills"
-    r2_public_base_url_hive_skills: str = "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev"
+    r2_public_base_url_hive_skills: str = (
+        "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev"
+    )
 
     # ── OpenRouter ─────────────────────────────────────────────────────────
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
@@ -79,6 +81,34 @@ class Settings(BaseSettings):
     openrouter_primary_model: str = ""
     openrouter_secondary_model: str = ""
     openrouter_triage_model: str = ""
+    openrouter_http_referer: str = ""
+    openrouter_app_name: str = "RAMS"
+
+    # eMicro-safe OpenRouter transport and generation controls.
+    rms_openrouter_connect_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
+    rms_openrouter_read_timeout_seconds: float = Field(default=90.0, ge=10.0, le=300.0)
+    rms_openrouter_write_timeout_seconds: float = Field(default=30.0, ge=5.0, le=120.0)
+    rms_openrouter_pool_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
+    rms_openrouter_max_connections: int = Field(default=2, ge=1, le=4)
+    rms_openrouter_max_keepalive_connections: int = Field(default=1, ge=0, le=2)
+    rms_openrouter_keepalive_expiry_seconds: float = Field(
+        default=30.0, ge=5.0, le=120.0
+    )
+    rms_openrouter_max_retries: int = Field(default=0, ge=0, le=2)
+    rms_openrouter_retry_base_seconds: float = Field(default=1.0, ge=0.1, le=10.0)
+    rms_openrouter_retry_max_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
+    rms_openrouter_provider_sort: Literal["price", "throughput", "latency"] = "price"
+    rms_openrouter_allow_fallbacks: bool = True
+    rms_openrouter_data_collection: Literal["allow", "deny"] = "deny"
+    rms_primary_max_tokens: int = Field(default=3072, ge=512, le=8192)
+    rms_secondary_max_tokens: int = Field(default=3072, ge=512, le=8192)
+    rms_triage_max_tokens: int = Field(default=128, ge=32, le=512)
+    rms_primary_temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    rms_triage_temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    rms_top_p: float = Field(default=0.9, ge=0.1, le=1.0)
+    rms_openrouter_log_usage: bool = True
+    rms_openrouter_log_cost: bool = True
+    rms_openrouter_log_prompts: bool = False
 
     # ── Target repo paths ──────────────────────────────────────────────────
     # Current architecture:
@@ -117,7 +147,35 @@ class Settings(BaseSettings):
     # ── Behaviour defaults ─────────────────────────────────────────────────
     rms_dry_run: bool = True  # SAFE DEFAULT — never omit
     rms_live_write_enabled: bool = False
-    rms_max_issues_per_run: int = 5
+    rms_max_issues_per_run: int = Field(default=1, ge=1, le=5)
+    rms_max_concurrent_pipelines: int = Field(default=1, ge=1, le=1)
+
+    # eMicro resource ceilings. These bound RAM, disk, subprocess output and
+    # evidence sent to model providers without weakening live-write gates.
+    rms_max_audit_artefacts: int = Field(default=8, ge=1, le=20)
+    rms_max_audit_object_bytes: int = Field(default=1_048_576, ge=65_536, le=8_388_608)
+    rms_max_audit_total_bytes: int = Field(default=4_194_304, ge=262_144, le=33_554_432)
+    rms_max_context_files: int = Field(default=8, ge=1, le=40)
+    rms_max_context_file_bytes: int = Field(default=131_072, ge=8_192, le=1_048_576)
+    rms_max_context_total_bytes: int = Field(default=524_288, ge=65_536, le=4_194_304)
+    rms_max_indexed_files: int = Field(default=20_000, ge=100, le=100_000)
+    rms_validation_timeout_seconds: int = Field(default=240, ge=10, le=900)
+    rms_validation_output_max_lines: int = Field(default=120, ge=20, le=1000)
+    rms_validation_output_max_bytes: int = Field(
+        default=131_072, ge=8_192, le=1_048_576
+    )
+    rms_git_timeout_seconds: int = Field(default=120, ge=10, le=600)
+    rms_git_output_max_bytes: int = Field(default=65_536, ge=8_192, le=1_048_576)
+    rms_git_clone_depth: int = Field(default=1, ge=1, le=5)
+    rms_temp_cleanup_enabled: bool = True
+    rms_temp_max_age_hours: int = Field(default=24, ge=1, le=168)
+    rms_min_free_disk_mb: int = Field(default=256, ge=64, le=1024)
+    rms_shutdown_grace_seconds: int = Field(default=25, ge=5, le=29)
+    rms_readiness_cache_seconds: int = Field(default=300, ge=10, le=1800)
+    rms_idempotency_cache_size: int = Field(default=128, ge=16, le=1024)
+    rms_busy_retry_after_seconds: int = Field(default=60, ge=5, le=900)
+    rms_report_max_bytes: int = Field(default=4_194_304, ge=262_144, le=16_777_216)
+
     rms_report_prefix: str = "qa-suite/reports"
     rms_report_dir: str = "/tmp/rams-reports"
     rms_qa_branch_prefix: str = "rms-qa/"
@@ -151,18 +209,32 @@ class Settings(BaseSettings):
         "rms_single_worker_mode",
         "rms_repo_bootstrap_enabled",
         "rms_allow_unauthenticated_dev",
+        "rms_openrouter_allow_fallbacks",
+        "rms_openrouter_log_usage",
+        "rms_openrouter_log_cost",
+        "rms_openrouter_log_prompts",
+        "rms_temp_cleanup_enabled",
         mode="before",
     )
     @classmethod
     def _validate_bool_fields(cls, value: object, info: object) -> bool:
         """Parse boolean environment values with fail-closed defaults."""
         field_name = getattr(info, "field_name", "")
-        safe_default = True if field_name in {
-            "rms_dry_run",
-            "rms_validate_after_each_task",
-            "rms_revert_on_validation_failure",
-            "rms_single_worker_mode",
-        } else False
+        safe_default = (
+            True
+            if field_name
+            in {
+                "rms_dry_run",
+                "rms_validate_after_each_task",
+                "rms_revert_on_validation_failure",
+                "rms_single_worker_mode",
+                "rms_openrouter_allow_fallbacks",
+                "rms_openrouter_log_usage",
+                "rms_openrouter_log_cost",
+                "rms_temp_cleanup_enabled",
+            }
+            else False
+        )
         parsed, _ = _parse_bool(value, safe_default=safe_default)
         return parsed
 
@@ -174,13 +246,15 @@ class Settings(BaseSettings):
         self._rms_dry_run_env_raw = dry_raw
         self._rms_live_write_env_raw = live_raw
         self._rms_dry_run_env_present = dry_raw is not None
-        self._rms_dry_run_env_parseable = _parse_bool(
-            dry_raw, safe_default=True
-        )[1] if dry_raw is not None else False
+        self._rms_dry_run_env_parseable = (
+            _parse_bool(dry_raw, safe_default=True)[1] if dry_raw is not None else False
+        )
         self._rms_live_write_env_present = live_raw is not None
-        self._rms_live_write_env_parseable = _parse_bool(
-            live_raw, safe_default=False
-        )[1] if live_raw is not None else False
+        self._rms_live_write_env_parseable = (
+            _parse_bool(live_raw, safe_default=False)[1]
+            if live_raw is not None
+            else False
+        )
 
         missing: list[str] = []
         required = {
@@ -209,7 +283,6 @@ class Settings(BaseSettings):
                 f"Missing required configuration fields: {', '.join(missing)}"
             )
         return self
-
 
     @property
     def dry_run_env_raw(self) -> str | None:

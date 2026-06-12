@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from repo_mgmt import context_builder, patch_applier, patch_planner, validation_runner
+from repo_mgmt import patch_applier, patch_planner, validation_runner
 from repo_mgmt.automation_gate import evaluate_phase4c_auto_pr_gate
 from repo_mgmt.git_manager import TaskRepoSnapshot
 from repo_mgmt.patch_protocol import (
@@ -36,7 +38,9 @@ def _change_files(patch_doc: dict[str, Any]) -> list[str]:
     return files
 
 
-_PARTIAL_PATHS = frozenset({"assets/partials/header.html", "assets/partials/footer.html"})
+_PARTIAL_PATHS = frozenset(
+    {"assets/partials/header.html", "assets/partials/footer.html"}
+)
 _WEBSITE_PIPELINES = frozenset({"seo-aeo-geo", "mobile-ux"})
 
 
@@ -150,7 +154,6 @@ async def run_task(
             return task
 
         task["patchAttempted"] = True
-        context_builder.load_context(task.get("affectedPaths", []), target_repo)
         patch_doc = await patch_planner.plan_async(
             task, target_repo, pipeline_id, cfg, model_router
         )
@@ -196,7 +199,7 @@ async def run_task(
         task["modified_files"] = modified
 
         if _post_patch_sync_required(modified_candidates, pipeline_id):
-            sync_result = _run_post_patch_sync(target_repo)
+            sync_result = await asyncio.to_thread(_run_post_patch_sync, target_repo)
             task["postPatchSync"] = sync_result
             if not sync_result["passed"]:
                 logger.warning(
@@ -218,8 +221,8 @@ async def run_task(
             task["modified_files"] = _status_paths(git_mgr)
 
         if cfg.rms_validate_after_each_task:
-            validation = validation_runner.run(
-                pipeline_id, target_repo, cfg, dry_run=False
+            validation = await asyncio.to_thread(
+                validation_runner.run, pipeline_id, target_repo, cfg, False
             )
             post_patch_validation = validation
             task["validation"] = {
@@ -229,7 +232,9 @@ async def run_task(
                 "failedCommand": validation.failed_command,
                 "returnCode": validation.return_code,
                 "affectedRepo": str(target_repo),
-                "actionableHint": None if validation.passed else (
+                "actionableHint": None
+                if validation.passed
+                else (
                     f"Fix the post-patch validation failure, then rerun {validation.failed_command or 'the validation command'}."
                 ),
                 "patchingSkipped": False,

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import PurePosixPath
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
@@ -88,9 +89,25 @@ _PIPELINE_ARTEFACT_PRIORITIES: dict[str, tuple[str, ...]] = {
     ),
 }
 _MAX_ARTEFACTS_PER_RUN = 12
+_DEFAULT_MAX_OBJECT_BYTES = 2 * 1024 * 1024
+_DEFAULT_MAX_TOTAL_BYTES = 8 * 1024 * 1024
 
 
-def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[str, object]:
+@dataclass
+class _ReadBudget:
+    remaining_bytes: int
+    remaining_artefacts: int
+
+
+def read_latest(
+    pipeline_id: "PipelineId",
+    r2: "R2Client",
+    bucket: str,
+    *,
+    max_artefacts: int = _MAX_ARTEFACTS_PER_RUN,
+    max_object_bytes: int = _DEFAULT_MAX_OBJECT_BYTES,
+    max_total_bytes: int = _DEFAULT_MAX_TOTAL_BYTES,
+) -> dict[str, object]:
     """
     Read and enrich the latest audit JSON for *pipeline_id* from R2.
 
@@ -104,7 +121,12 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
         ``artefactKeys`` and ``artefactErrors`` dictionaries. Returns ``{}`` if
         the latest snapshot itself is absent or invalid.
     """
-    key, data = _read_first_latest_snapshot(pipeline_id, r2, bucket)
+    budget = _ReadBudget(
+        remaining_bytes=max_total_bytes, remaining_artefacts=max_artefacts
+    )
+    key, data = _read_first_latest_snapshot(
+        pipeline_id, r2, bucket, budget=budget, max_object_bytes=max_object_bytes
+    )
     if not data:
         return {}
     if not isinstance(data, dict):
@@ -120,8 +142,19 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
     artefact_key_map: dict[str, str] = {}
     artefact_errors: dict[str, str] = {}
 
-    for label, artefact_key in list(artefact_keys.items())[:_MAX_ARTEFACTS_PER_RUN]:
-        child = _read_json_object(r2, bucket, artefact_key, fail_soft=True)
+    for label, artefact_key in artefact_keys.items():
+        if budget.remaining_artefacts <= 0 or budget.remaining_bytes <= 0:
+            artefact_errors[label] = "RAMS audit evidence budget exhausted"
+            break
+        child = _read_json_object(
+            r2,
+            bucket,
+            artefact_key,
+            fail_soft=True,
+            budget=budget,
+            max_object_bytes=max_object_bytes,
+            count_as_artefact=True,
+        )
         if child is None:
             artefact_errors[label] = f"unreadable JSON artefact: {artefact_key}"
             continue
@@ -130,7 +163,9 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
 
     supplemental = _empty_supplemental_bundle()
     if _should_load_supplemental_reports(pipeline_id, data):
-        supplemental = _load_supplemental_snapshots(pipeline_id, r2, bucket)
+        supplemental = _load_supplemental_snapshots(
+            pipeline_id, r2, bucket, budget=budget, max_object_bytes=max_object_bytes
+        )
     if supplemental["artefacts"]:
         artefacts.update(supplemental["artefacts"])
         artefact_key_map.update(supplemental["artefactKeys"])
@@ -139,7 +174,18 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
 
     if artefacts:
         data = dict(data)
-        data["latest"] = {key_: value for key_, value in data.items() if key_ not in {"artefacts", "artefactKeys", "artefactErrors", "latest", "supplementalLatest"}}
+        data["latest"] = {
+            key_: value
+            for key_, value in data.items()
+            if key_
+            not in {
+                "artefacts",
+                "artefactKeys",
+                "artefactErrors",
+                "latest",
+                "supplementalLatest",
+            }
+        }
         data["artefacts"] = artefacts
         data["artefactKeys"] = artefact_key_map
         if supplemental["latest"]:
@@ -163,9 +209,6 @@ def read_latest(pipeline_id: "PipelineId", r2: "R2Client", bucket: str) -> dict[
     return data
 
 
-
-
-
 def _empty_supplemental_bundle() -> dict[str, Any]:
     return {"latest": {}, "artefacts": {}, "artefactKeys": {}, "artefactErrors": {}}
 
@@ -179,8 +222,14 @@ def _should_load_supplemental_reports(pipeline_id: str, latest: dict[str, Any]) 
         or any(str(key).endswith("Url") for key in latest)
     )
 
+
 def _load_supplemental_snapshots(
-    pipeline_id: str, r2: "R2Client", bucket: str
+    pipeline_id: str,
+    r2: "R2Client",
+    bucket: str,
+    *,
+    budget: _ReadBudget,
+    max_object_bytes: int,
 ) -> dict[str, Any]:
     """Load optional source-owner reports that support a master pipeline.
 
@@ -195,15 +244,37 @@ def _load_supplemental_snapshots(
 
     for latest_key in _SUPPLEMENTAL_AUDIT_KEY_MAP.get(pipeline_id, ()):
         label = _supplemental_label(latest_key)
-        latest = _read_json_object(r2, bucket, latest_key, fail_soft=True)
+        latest = _read_json_object(
+            r2,
+            bucket,
+            latest_key,
+            fail_soft=True,
+            budget=budget,
+            max_object_bytes=max_object_bytes,
+        )
         if not isinstance(latest, dict) or not latest:
             continue
         latest_by_label[label] = latest
         for child_label, artefact_key in _discover_artefact_keys(label, latest).items():
             namespaced_label = f"{label}:{child_label}"
-            child = _read_json_object(r2, bucket, artefact_key, fail_soft=True)
+            if budget.remaining_artefacts <= 0 or budget.remaining_bytes <= 0:
+                artefact_errors[namespaced_label] = (
+                    "RAMS audit evidence budget exhausted"
+                )
+                break
+            child = _read_json_object(
+                r2,
+                bucket,
+                artefact_key,
+                fail_soft=True,
+                budget=budget,
+                max_object_bytes=max_object_bytes,
+                count_as_artefact=True,
+            )
             if child is None:
-                artefact_errors[namespaced_label] = f"unreadable JSON artefact: {artefact_key}"
+                artefact_errors[namespaced_label] = (
+                    f"unreadable JSON artefact: {artefact_key}"
+                )
                 continue
             artefacts[namespaced_label] = child
             artefact_keys[namespaced_label] = artefact_key
@@ -224,8 +295,14 @@ def _supplemental_label(latest_key: str) -> str:
     except (ValueError, IndexError):
         return PurePosixPath(latest_key).parent.name or "supplemental"
 
+
 def _read_first_latest_snapshot(
-    pipeline_id: "PipelineId", r2: "R2Client", bucket: str
+    pipeline_id: "PipelineId",
+    r2: "R2Client",
+    bucket: str,
+    *,
+    budget: _ReadBudget,
+    max_object_bytes: int,
 ) -> tuple[str, Any | None]:
     """Read the first available latest snapshot for a pipeline.
 
@@ -235,7 +312,14 @@ def _read_first_latest_snapshot(
     keys = _AUDIT_KEY_MAP[pipeline_id]
     last_key = keys[-1]
     for key in keys:
-        data = _read_json_object(r2, bucket, key, fail_soft=(key != last_key))
+        data = _read_json_object(
+            r2,
+            bucket,
+            key,
+            fail_soft=(key != last_key),
+            budget=budget,
+            max_object_bytes=max_object_bytes,
+        )
         if data:
             if key != last_key:
                 logger.info(
@@ -246,19 +330,40 @@ def _read_first_latest_snapshot(
             return key, data
     return last_key, None
 
+
 def _read_json_object(
     r2: "R2Client",
     bucket: str,
     key: str,
     *,
     fail_soft: bool = False,
+    budget: _ReadBudget | None = None,
+    max_object_bytes: int = _DEFAULT_MAX_OBJECT_BYTES,
+    count_as_artefact: bool = False,
 ) -> Any | None:
-    """Read one R2 key and parse JSON, optionally returning None on failure."""
+    """Read one bounded R2 JSON object, optionally returning None on failure."""
+    if budget is not None and budget.remaining_bytes <= 0:
+        return None
+    allowed = max_object_bytes
+    if budget is not None:
+        allowed = min(allowed, budget.remaining_bytes)
     try:
-        raw = r2.get_object(bucket=bucket, key=key)
+        limited = getattr(type(r2), "get_object_limited", None)
+        if callable(limited):
+            raw = r2.get_object_limited(bucket=bucket, key=key, max_bytes=allowed)
+        else:
+            raw = r2.get_object(bucket=bucket, key=key)
+            if len(raw) > allowed:
+                raise ValueError(f"object exceeds {allowed} byte RAMS limit")
+        if budget is not None:
+            budget.remaining_bytes -= len(raw)
+            if count_as_artefact:
+                budget.remaining_artefacts -= 1
     except Exception as exc:
         if fail_soft:
-            logger.warning("audit_reader: could not fetch child artefact %r: %s", key, exc)
+            logger.warning(
+                "audit_reader: could not fetch child artefact %r: %s", key, exc
+            )
             return None
         logger.warning(
             "audit_reader: could not fetch %r from bucket %r: %s — returning empty audit",
@@ -272,7 +377,9 @@ def _read_json_object(
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         if fail_soft:
-            logger.warning("audit_reader: child artefact %r is not valid JSON: %s", key, exc)
+            logger.warning(
+                "audit_reader: child artefact %r is not valid JSON: %s", key, exc
+            )
             return None
         logger.warning(
             "audit_reader: %r is not valid JSON: %s — returning empty audit",

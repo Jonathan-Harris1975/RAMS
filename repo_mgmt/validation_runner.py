@@ -1,16 +1,19 @@
-"""Canonical validation runner for RAMS."""
+"""Sequential, memory-bounded validation runner for RAMS."""
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from repo_mgmt.process_runner import run_bounded
 
 if TYPE_CHECKING:
     from repo_mgmt.config import PipelineId, Settings
 
 DEFAULT_TIMEOUT_SECONDS = 300
+DEFAULT_MAX_OUTPUT_LINES = 200
+DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024
 
 
 @dataclass
@@ -24,55 +27,62 @@ class ValidationResult:
     failed_command: str | None = None
 
 
-def _tail_200(text: str) -> str:
-    """Return the final 200 lines from validation output."""
-    return "\n".join(text.splitlines()[-200:])
+def _run_command(
+    cmd: str,
+    cwd: Path,
+    timeout_seconds: int,
+    max_output_lines: int,
+    max_output_bytes: int,
+) -> tuple[int, str, bool]:
+    """Run one operator-configured validation chain with bounded diagnostics."""
+    result = run_bounded(
+        cmd,
+        cwd=cwd,
+        timeout_seconds=timeout_seconds,
+        max_output_lines=max_output_lines,
+        max_output_bytes=max_output_bytes,
+        shell=True,
+        output_label="validation",
+    )
+    return result.return_code, result.output, result.timed_out
 
 
 def run_commands(
-    commands: list[str], cwd: Path, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    commands: list[str],
+    cwd: Path,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    *,
+    max_output_lines: int = DEFAULT_MAX_OUTPUT_LINES,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
 ) -> ValidationResult:
-    """Run validation commands sequentially with a timeout per command."""
+    """Run commands sequentially while bounding output retained in memory."""
     tail = ""
     for cmd in commands:
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=cwd,
-                shell=True,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            out = exc.stdout or ""
-            if isinstance(out, bytes):
-                out = out.decode("utf-8", errors="replace")
-            return ValidationResult(
-                False,
-                commands,
-                _tail_200(out + f"\nTIMEOUT after {timeout_seconds}s"),
-                124,
-                cmd,
-            )
-        tail = _tail_200(proc.stdout or "")
-        if proc.returncode != 0:
-            return ValidationResult(False, commands, tail, proc.returncode, cmd)
+        return_code, tail, _ = _run_command(
+            cmd,
+            cwd,
+            timeout_seconds,
+            max_output_lines,
+            max_output_bytes,
+        )
+        if return_code != 0:
+            return ValidationResult(False, commands, tail, return_code, cmd)
     return ValidationResult(True, commands, tail, 0, None)
 
 
 def run(
-    pipeline_id: "PipelineId",
+    pipeline_id: PipelineId,
     repo_root: Path,
-    cfg: "Settings",
+    cfg: Settings,
     dry_run: bool = True,
-    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: int | None = None,
 ) -> ValidationResult:
-    """Run the configured validation commands for one pipeline target repo."""
+    """Run configured validation commands for one target repo."""
     _ = dry_run
     return run_commands(
         cfg.validation_commands_for(pipeline_id),
         cwd=repo_root,
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=timeout_seconds or cfg.rms_validation_timeout_seconds,
+        max_output_lines=cfg.rms_validation_output_max_lines,
+        max_output_bytes=cfg.rms_validation_output_max_bytes,
     )

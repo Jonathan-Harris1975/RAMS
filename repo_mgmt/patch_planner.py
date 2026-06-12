@@ -10,9 +10,9 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from repo_mgmt import context_builder
 from repo_mgmt.patch_applier import PROTECTED_PATHS
 from repo_mgmt.patch_protocol import (
-    PathTraversalError,
     PatchSchemaError,
     is_protected,
     validate_patch,
@@ -23,8 +23,9 @@ if TYPE_CHECKING:
     from repo_mgmt.model_router import ModelRouter
 
 logger = logging.getLogger(__name__)
-_MAX_FILE_BYTES = 256 * 1024
-_FENCED_JSON_RE = re.compile(r"^```(?:json)?\s*(?P<body>.*?)\s*```$", re.DOTALL | re.IGNORECASE)
+_FENCED_JSON_RE = re.compile(
+    r"^```(?:json)?\s*(?P<body>.*?)\s*```$", re.DOTALL | re.IGNORECASE
+)
 
 
 class PatchPlanError(Exception):
@@ -167,7 +168,9 @@ def _complete_for_plan(model_router: "ModelRouter", prompt: str, system: str) ->
     except TypeError:
         # Older tests or compatible routers may not yet expose json_mode.
         try:
-            return str(model_router.complete(prompt=prompt, system=system, max_tokens=4096))
+            return str(
+                model_router.complete(prompt=prompt, system=system, max_tokens=4096)
+            )
         except Exception as exc:
             raise PatchPlanError(f"LLM call failed: {exc}") from exc
     except Exception as exc:
@@ -245,14 +248,19 @@ def _prepare_plan_inputs(
     settings: "Settings",
 ) -> tuple[str, list[str], str]:
     """Build task id, affected path list, and model prompt for patch planning."""
-    _ = settings
     task_id = str(issue.get("taskId", "<unknown>"))
     if issue.get("classification") != "code_fix":
         raise PatchPlanError(
             f"plan() called on non-code_fix issue (classification={issue.get('classification')!r})"
         )
     affected_paths = [str(path) for path in issue.get("affectedPaths", [])]
-    context_files = _load_context(affected_paths, target_repo)
+    context_files = context_builder.load_context(
+        affected_paths,
+        target_repo,
+        max_files=settings.rms_max_context_files,
+        max_file_bytes=settings.rms_max_context_file_bytes,
+        max_total_bytes=settings.rms_max_context_total_bytes,
+    )
     return task_id, affected_paths, _build_prompt(issue, context_files, pipeline_id)
 
 
@@ -306,7 +314,9 @@ def _canonicalise_anchor_patch(data: Any, task_id: str) -> Any:
             canonical_changes.append(change)
             continue
         canonical = dict(change)
-        _copy_first_present(canonical, "file", ["path", "filePath", "repoPath", "filename"])
+        _copy_first_present(
+            canonical, "file", ["path", "filePath", "repoPath", "filename"]
+        )
         _copy_first_present(canonical, "operation", ["action", "op", "type"])
         _copy_first_present(
             canonical,
@@ -321,7 +331,16 @@ def _canonicalise_anchor_patch(data: Any, task_id: str) -> Any:
         _copy_first_present(
             canonical,
             "replace",
-            ["replacement", "replaceWith", "newText", "new", "insert", "content", "text", "updated"],
+            [
+                "replacement",
+                "replaceWith",
+                "newText",
+                "new",
+                "insert",
+                "content",
+                "text",
+                "updated",
+            ],
         )
         _copy_first_present(canonical, "rationale", ["explanation", "reason", "why"])
 
@@ -330,7 +349,11 @@ def _canonicalise_anchor_patch(data: Any, task_id: str) -> Any:
         elif canonical.get("find") and "replace" in canonical:
             canonical["operation"] = "replace"
 
-        if not canonical.get("rationale") and canonical.get("file") and canonical.get("operation"):
+        if (
+            not canonical.get("rationale")
+            and canonical.get("file")
+            and canonical.get("operation")
+        ):
             canonical["rationale"] = f"Bounded patch proposed for {task_id}."
 
         for alias in (
@@ -370,7 +393,9 @@ def _canonicalise_anchor_patch(data: Any, task_id: str) -> Any:
     return {**data, "changes": canonical_changes}
 
 
-def _copy_first_present(target: dict[str, Any], canonical_key: str, aliases: list[str]) -> None:
+def _copy_first_present(
+    target: dict[str, Any], canonical_key: str, aliases: list[str]
+) -> None:
     """Copy the first non-empty alias into *canonical_key* when absent."""
     if target.get(canonical_key) not in (None, ""):
         return
@@ -418,29 +443,6 @@ def _validate_plan_scope(
             raise PatchPlanError(
                 f"change[{index}] targets protected path {file_path!r} for {pipeline_id!r}"
             )
-
-
-def _load_context(affected_paths: list[str], repo_root: Path) -> dict[str, str]:
-    """Load bounded text context from affected paths only."""
-    real_root = repo_root.resolve()
-    out: dict[str, str] = {}
-    for rel in affected_paths:
-        try:
-            resolved = (real_root / rel).resolve()
-            resolved.relative_to(real_root)
-        except ValueError as exc:
-            logger.warning("patch_planner: rejecting path outside repo: %r", rel)
-            raise PathTraversalError(
-                f"context path {rel!r} resolves outside repo root"
-            ) from exc
-        if not resolved.is_file():
-            logger.warning("patch_planner: file not found: %r", rel)
-            continue
-        if resolved.stat().st_size > _MAX_FILE_BYTES:
-            logger.warning("patch_planner: skipping oversized file: %r", rel)
-            continue
-        out[rel] = resolved.read_text(encoding="utf-8", errors="replace")
-    return out
 
 
 def _build_prompt(
