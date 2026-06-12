@@ -52,3 +52,5 @@ curl -fsS "http://127.0.0.1:${PORT}/health"
 printf '\n'
 curl -fsS -H "Authorization: Bearer ${RMS_RELEASE_GATE_API_KEY}" "http://127.0.0.1:${PORT}/readiness"
 printf '\n'
+curl -fsS -H "Authorization: Bearer ${RMS_RELEASE_GATE_API_KEY}" "http://127.0.0.1:${PORT}/ops/warmup"
+printf '\n'

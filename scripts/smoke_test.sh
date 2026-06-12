@@ -14,6 +14,8 @@ printf 'GET /health\n'
 curl -sS "$BASE_URL/health"
 printf '\n\nGET /readiness\n'
 curl -sS "${AUTH_ARGS[@]}" "$BASE_URL/readiness"
+printf '\n\nGET /ops/warmup\n'
+curl -sS "${AUTH_ARGS[@]}" "$BASE_URL/ops/warmup"
 
 for pipeline in seo-aeo-geo mobile-ux on-brand; do
   printf '\n\nPOST /rebuild/%s/run\n' "$pipeline"
