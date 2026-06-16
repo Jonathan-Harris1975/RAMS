@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hmac
 import logging
 import os
 import re
@@ -18,7 +19,7 @@ from pathlib import Path as FilePath
 from collections.abc import AsyncIterator
 from typing import Annotated, Any, Literal
 
-from fastapi import BackgroundTasks, Body, FastAPI, Header, Path
+from fastapi import BackgroundTasks, Body, FastAPI, Header, Path, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -73,6 +74,23 @@ app = FastAPI(
     version="1.1.0",
     lifespan=_lifespan,
 )
+
+
+@app.middleware("http")
+async def production_response_headers(request: Request, call_next):
+    """Attach conservative API security headers to every response."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
+    request_id = request.headers.get("X-Request-ID", "").strip()[:128]
+    if request_id:
+        response.headers.setdefault("X-Request-ID", request_id)
+    return response
 
 PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
 _PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
@@ -577,7 +595,13 @@ async def root() -> JSONResponse:
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    """Return the exact RMS health contract: status plus pipeline states."""
+    """Return the exact RAMS liveness contract: status plus pipeline states."""
+    return JSONResponse(status_code=200, content=_health_payload())
+
+
+@app.get("/livez")
+async def livez() -> JSONResponse:
+    """Return a Kubernetes/Koyeb-compatible liveness response."""
     return JSONResponse(status_code=200, content=_health_payload())
 
 
@@ -616,14 +640,17 @@ async def ops_warmup(
 
 
 @app.get("/readiness")
+@app.get("/readyz")
 async def readiness(
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
-    """Return dependency readiness details without changing /health."""
+    """Return authenticated dependency readiness detail."""
     auth_error = _auth_error_response(authorization)
     if auth_error is not None:
         return auth_error
-    return JSONResponse(status_code=200, content=_readiness_payload())
+    payload = _readiness_payload()
+    status_code = 200 if payload.get("status") == "ready" else 503
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 def _auth_error_response(authorization: str | None) -> JSONResponse | None:
@@ -653,7 +680,7 @@ def _auth_error_response(authorization: str | None) -> JSONResponse | None:
     token: str | None = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[len("bearer ") :].strip()
-    if token == expected_key:
+    if token is not None and hmac.compare_digest(token, expected_key):
         return None
     return JSONResponse(
         status_code=401,
