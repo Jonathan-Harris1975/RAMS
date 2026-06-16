@@ -1,3 +1,7 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # RAMS eco-micro release gate
 
 This gate protects the Koyeb `eco-micro` deployment contract: one process, one Uvicorn worker, one heavyweight RAMS pipeline at a time, bounded memory/disk use, and fail-closed live writes.

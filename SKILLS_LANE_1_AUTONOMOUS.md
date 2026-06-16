@@ -1,3 +1,7 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # RAMS Lane 1 Skills — Central HIVE Pool
 
 Lane 1 skill metadata is now centrally controlled by HIVE in the shared R2 `hive-skills` bucket. RAMS consumes the RAMS manifest in read-only mode instead of carrying a local `.agents` skill library.

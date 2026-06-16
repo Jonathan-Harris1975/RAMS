@@ -1,3 +1,7 @@
+> **Document status:** Historical implementation record  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # RAMS Phase 5 Organic Growth and Accessibility Skills — Central HIVE Pool
 
 Phase 5 keeps the same organic-first policy, but skill metadata now comes from the central HIVE/R2 shared skill pool.

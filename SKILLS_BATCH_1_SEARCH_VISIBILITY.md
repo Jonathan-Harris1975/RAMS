@@ -1,3 +1,7 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # RAMS Search Visibility Skills — Central HIVE Pool
 
 RAMS no longer installs Batch 1 search visibility skills into the local repo. The `seo-audit` and `ai-seo` descriptors are centrally controlled by HIVE in the shared Cloudflare R2 skill pool.

@@ -1,3 +1,7 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # RAMS eco-micro environment changes
 
 **Target:** Koyeb `eco-micro`, 0.25 vCPU, 512MB RAM, 4GB ephemeral SSD  

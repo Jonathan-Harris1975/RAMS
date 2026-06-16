@@ -1,3 +1,7 @@
+> **Document status:** Historical implementation record  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # RAMS Phase 4 Autonomous Gates — Central HIVE Pool
 
 Phase 4 remains governed by automated fail-closed gates, but the skill metadata is now sourced from the central HIVE/R2 shared skill pool rather than local repo skill files.
