@@ -22,6 +22,8 @@ from typing import Annotated, Any, Literal
 from fastapi import BackgroundTasks, Body, FastAPI, Header, Path, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from repo_mgmt import pipeline as pipeline_mod  # noqa: F401
 from repo_mgmt.config import (
@@ -77,7 +79,9 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def production_response_headers(request: Request, call_next):
+async def production_response_headers(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     """Attach conservative API security headers to every response."""
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
