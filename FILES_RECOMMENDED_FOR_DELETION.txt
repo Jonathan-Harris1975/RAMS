@@ -1,0 +1,97 @@
+HIVE ECOSYSTEM FILE-DELETION REVIEW
+Reviewed: 16 June 2026
+
+No files were deleted automatically. Apply the "Definite" items in the next normal pull request. Review/archive items should be removed only after confirming that no deployment script, Pages project or human process still references them.
+
+============================================================
+DEFINITE DELETE
+============================================================
+
+HIVE
+- .pytest_cache/
+  Generated pytest cache. It is not source code and should be ignored.
+
+HIVE-UI
+- scripts/1
+  Stray three-byte file with no build or runtime purpose. It is absent from the updated repository patch.
+
+RAMS
+- repo_mgmt/__pycache__/
+- tests/__pycache__/
+  Generated Python bytecode caches. They are not deployment source.
+
+WEBSITE
+- expert-sitemap-live-gate-fix.zip
+  Historical patch bundle committed inside the live repository. Keep release bundles outside the deployment source tree.
+
+============================================================
+RENAME OR CONSOLIDATE
+============================================================
+
+AIMS
+- config/production.defaults.env..txt
+  Rename to config/production.defaults.env.txt after checking scripts for the double-dot filename.
+- KOYEB_BLOG_PODCAST_FIX_NOTES.md
+- services/KOYEB_BLOG_PODCAST_FIX_NOTES.md
+  Duplicate operational history. Retain one canonical copy under docs/archive/ and remove the duplicate.
+
+============================================================
+ARCHIVE / REVIEW BEFORE DELETE
+============================================================
+
+HIVE
+- V1.23_UPDATED_FILES_MANIFEST.txt
+- V1.24_UPDATED_FILES_MANIFEST.txt
+- PRODUCTION_READY_UPDATED_FILES_MANIFEST.txt
+- FROZEN_FILES_SHA256.txt
+- V1.24_FROZEN_FILES_SHA256.txt
+  Historical release evidence. Move to docs/releases/archive/ if no automation reads these root files.
+
+HIVE-UI
+- V0.6.0_UPDATED_FILES_MANIFEST.txt
+- V0.7.0_UPDATED_FILES_MANIFEST.txt
+- V0.8.0_UPDATED_FILES_MANIFEST.txt
+  Historical manifests. Consolidate under docs/releases/archive/.
+
+AIMS
+- AIMS_HIVE_SKILL_POOL_UPDATED_FILES_MANIFEST.txt
+- AIMS_HIVE_SKILL_POOL_FILES_FOR_DELETION.txt
+- AIMS_HIVE_CENTRAL_SKILLS_PATCH_MANIFEST.json
+- old root-level patch/fix notes after their content is represented in CHANGELOG and operations documentation
+  Keep only documents still used by CI or active deployment runbooks.
+
+RAMS
+- HIVE_RAMS_FILES_FOR_DELETION.txt
+- UPDATED_FILES_MANIFEST.txt
+- RAMS_HIVE_CENTRAL_SKILLS_PATCH_MANIFEST.json
+- superseded eMicro optimisation/test reports after archiving
+  These are release-history artefacts rather than runtime inputs.
+
+MAST
+- MAST_ZERNIO_SOCIAL_PERFORMANCE_UPDATE_MANIFEST.txt
+  Archive once the corresponding change is represented in CHANGES.md.
+
+IRS
+- cloudflare-bulk-redirects-images.csv
+  Optional alternate deployment representation. Keep if Bulk Redirects remains an active fallback; otherwise archive to avoid registry drift.
+
+WEBSITE
+- HIVE_SKILLS_FILES_FOR_DELETION.txt
+- PATCH_MANIFEST.txt
+- UPDATED_FILES_MANIFEST.txt
+  Historical release administration; archive if not consumed by automation.
+- Sitemap.xml
+- Sitemap.xml.js
+  Review-only compatibility mirrors. The governed public sitemap is sitemap.xml; remove these only after redirect and crawler tests prove they are unnecessary.
+
+============================================================
+KEEP
+============================================================
+
+WEBSITE
+- jonathan-harris-site-url-inventory-remediated-release-ready.xlsm
+  Governed ebook source workbook.
+- sitemap.xml
+  Canonical published sitemap.
+- ebook structured-summary.md files
+  Published content assets, not operational documentation.
