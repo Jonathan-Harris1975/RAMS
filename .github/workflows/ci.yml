@@ -106,15 +106,15 @@ jobs:
             curl -fsS http://127.0.0.1:8000/health && break
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8000/health | tee /tmp/health.json
-          curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/readiness | tee /tmp/readiness.json
+          curl -fsS http://127.0.0.1:8000/livez | tee /tmp/health.json
+          curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/readyz | tee /tmp/readiness.json
           curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/ops/warmup | tee /tmp/warmup.json
           python - <<'PY'
           import json
           from pathlib import Path
           health = json.loads(Path('/tmp/health.json').read_text())
           readiness = json.loads(Path('/tmp/readiness.json').read_text())
-warmup = json.loads(Path('/tmp/warmup.json').read_text())
+          warmup = json.loads(Path('/tmp/warmup.json').read_text())
           assert health == {
               'status': 'ok',
               'pipelines': {'seo-aeo-geo': 'idle', 'mobile-ux': 'idle', 'on-brand': 'idle'},
@@ -124,6 +124,6 @@ warmup = json.loads(Path('/tmp/warmup.json').read_text())
           assert deps['r2_verified'] is False
           assert deps['validation_runtime_ready'] is True
           assert readiness['status'] == 'degraded'
-assert warmup['status'] == 'warm'
-assert 'OpenRouter requests' in warmup['excludedWork']
+          assert warmup['status'] == 'warm'
+          assert 'OpenRouter requests' in warmup['excludedWork']
           PY
