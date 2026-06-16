@@ -15,10 +15,10 @@ jobs:
         python-version: ["3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
@@ -53,8 +53,8 @@ jobs:
     name: Lint and type check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -71,7 +71,7 @@ jobs:
     name: Docker runtime and API smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build Docker image
         run: docker build --target runtime -t rams:ci .
       - name: Verify runtime binaries
@@ -102,12 +102,24 @@ jobs:
             -e RMS_API_KEY='ci-local-rams-key' \
             rams:ci
           trap 'docker logs rams-ci-api || true; docker rm -f rams-ci-api || true' EXIT
+          api_started=false
           for i in {1..30}; do
-            curl -fsS http://127.0.0.1:8000/health && break
+            if curl -fsS http://127.0.0.1:8000/health >/tmp/startup-health.json; then
+              api_started=true
+              break
+            fi
             sleep 1
           done
+          test "$api_started" = "true"
+
           curl -fsS http://127.0.0.1:8000/livez | tee /tmp/health.json
-          curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/readyz | tee /tmp/readiness.json
+          readiness_http_status="$(curl -sS \
+            -o /tmp/readiness.json \
+            -w '%{http_code}' \
+            -H 'Authorization: Bearer ci-local-rams-key' \
+            http://127.0.0.1:8000/readyz)"
+          test "$readiness_http_status" = "503"
+          cat /tmp/readiness.json
           curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/ops/warmup | tee /tmp/warmup.json
           python - <<'PY'
           import json
