@@ -119,6 +119,21 @@ def install_valid_api(
     return mock_r2
 
 
+def install_ready_validation_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate readiness unit tests from GitHub runner binary availability."""
+    monkeypatch.setattr(
+        api_mod,
+        "_validation_runtime_details",
+        lambda: {
+            "ready": True,
+            "python": "Python test",
+            "git": "git version test",
+            "node": "v20.0.0",
+            "npm": "10.0.0",
+        },
+    )
+
+
 def test_health_reports_exact_contract(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
@@ -144,6 +159,7 @@ def test_readiness_reports_dependency_readiness(
     """Readiness exposes dependency detail moved out of /health."""
     settings = make_settings(repo_dirs)
     install_valid_api(monkeypatch, settings)
+    install_ready_validation_runtime(monkeypatch)
     with TestClient(api_mod.app) as client:
         response = client.get("/readiness")
     data = response.json()
@@ -177,12 +193,13 @@ def test_readiness_accepts_configured_on_demand_repo_bootstrap(
         RMS_AIMS_REPO_URL="https://github.com/example/aims.git",
     )
     install_valid_api(monkeypatch, settings)
+    install_ready_validation_runtime(monkeypatch)
 
     with TestClient(api_mod.app) as client:
         response = client.get("/readiness")
 
     data = response.json()
-    assert response.status_code == 200
+    assert response.status_code == 200, data
     assert data["status"] == "ready"
     deps = data["dependencies"]
     assert deps["website_repo_ready"] is True
