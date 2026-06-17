@@ -139,3 +139,26 @@ jobs:
           assert warmup['status'] == 'warm'
           assert 'OpenRouter requests' in warmup['excludedWork']
           PY
+
+  notify_failure:
+    name: Notify central operations on CI failure
+    needs: [test, lint, docker]
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send redacted HIVE operational event
+        env:
+          OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
+          OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
+        run: >-
+          python scripts/ops_notify.py
+          --service RAMS
+          --event-type ci_failed
+          --title "RAMS GitHub Actions failed"
+          --summary "The governed CI workflow failed. Open the linked run for the failing job and logs."
+          --event-id "github:${{ github.repository }}:${{ github.run_id }}:${{ github.run_attempt }}"
+          --release-id "${{ github.sha }}"
+          --url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
