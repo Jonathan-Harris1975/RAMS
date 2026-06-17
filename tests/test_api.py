@@ -22,6 +22,11 @@ def reset_api_state(monkeypatch: pytest.MonkeyPatch) -> None:
     api_mod._r2_error = None
     api_mod._r2_verified = None
     api_mod._r2_verify_error = None
+    api_mod._r2_verified_at = None
+    api_mod._r2_last_success_at = None
+    api_mod._r2_last_failure_at = None
+    api_mod._r2_check_count = 0
+    api_mod._r2_monitor_task = None
     api_mod._pipelines.clear()
     api_mod._model_router = None
     api_mod._active_pipeline = None
@@ -678,3 +683,23 @@ def test_ops_warmup_is_local_only(
     assert payload["status"] == "warm"
     assert "OpenRouter requests" in payload["excludedWork"]
     fake_router.warmup.assert_called_once_with()
+
+
+def test_operational_excellence_reports_audit_verification(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs, RMS_API_KEY="test-key", RMS_RELEASE_ID="release-123")
+    mock_r2 = MagicMock()
+    mock_r2.verify_bucket.return_value = True
+    monkeypatch.setattr(api_mod, "load_settings", lambda: settings)
+    monkeypatch.setattr(api_mod, "R2Client", lambda cfg: mock_r2)
+    with TestClient(api_mod.app) as client:
+        response = client.get(
+            "/ops/excellence", headers={"Authorization": "Bearer test-key"}
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "healthy"
+    assert payload["releaseId"] == "release-123"
+    assert payload["auditStorage"]["verified"] is True
+    assert payload["auditStorage"]["reportRetentionDays"] == 180
