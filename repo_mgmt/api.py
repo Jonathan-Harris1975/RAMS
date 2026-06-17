@@ -35,6 +35,7 @@ from repo_mgmt.config import (
 )
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt.model_router import ModelRouter
+from repo_mgmt.ops_alerts import send_operational_event
 from repo_mgmt.pipeline import RmsPipeline
 from repo_mgmt.r2_client import R2Client, R2Error
 from repo_mgmt.repo_bootstrap import BootstrapResult, bootstrap_repositories
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Initialise local state and close clients within Koyeb shutdown handling."""
-    global _shutting_down, _model_router
+    global _shutting_down, _model_router, _r2_monitor_task
     _shutting_down = False
     cfg = _get_cfg()
     if cfg is None or not _usable_secret(cfg.rms_api_key):
@@ -59,10 +60,19 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
         )
         if deleted:
             logger.info("rms-api: removed %d stale local report(s)", deleted)
+    if cfg is not None and _r2_configured(cfg):
+        _r2_monitor_task = asyncio.create_task(_r2_monitor_loop(cfg))
     try:
         yield
     finally:
         _shutting_down = True
+        if _r2_monitor_task is not None:
+            _r2_monitor_task.cancel()
+            try:
+                await _r2_monitor_task
+            except asyncio.CancelledError:
+                pass
+            _r2_monitor_task = None
         router = _model_router
         _model_router = None
         _pipelines.clear()
@@ -115,6 +125,11 @@ _r2: R2Client | None = None
 _r2_error: str | None = None
 _r2_verified: bool | None = None
 _r2_verify_error: str | None = None
+_r2_verified_at: float | None = None
+_r2_last_success_at: str | None = None
+_r2_last_failure_at: str | None = None
+_r2_check_count = 0
+_r2_monitor_task: asyncio.Task[None] | None = None
 _bootstrap_attempted: bool = False
 _bootstrap_results: list[BootstrapResult] = []
 
@@ -194,23 +209,61 @@ def _r2_configured(cfg: Settings | None) -> bool:
     )
 
 
-def _verify_r2() -> bool:
-    """Probe R2 once and cache the verified/not-verified result."""
-    global _r2_verified, _r2_verify_error
-    if _r2_verified is not None:
-        return _r2_verified
+def _verify_r2(*, force: bool = False) -> bool:
+    """Probe R2 with a bounded TTL and record non-secret verification evidence."""
+    global _r2_verified, _r2_verify_error, _r2_verified_at
+    global _r2_last_success_at, _r2_last_failure_at, _r2_check_count
     cfg = _get_cfg()
+    now = time.monotonic()
+    ttl = cfg.rms_r2_verify_interval_seconds if cfg is not None else 900
+    if (
+        not force
+        and _r2_verified is not None
+        and _r2_verified_at is not None
+        and now - _r2_verified_at < ttl
+    ):
+        return _r2_verified
+    previous = _r2_verified
     r2 = _get_r2() if cfg is not None else None
+    _r2_check_count += 1
+    _r2_verified_at = now
     if cfg is None or r2 is None or not _r2_configured(cfg):
         _r2_verified = False
-        return False
-    try:
-        _r2_verified = bool(r2.verify_bucket(cfg.r2_bucket_audits))
-    except Exception as exc:
-        _r2_verified = False
-        _r2_verify_error = str(exc)
-        logger.warning("api: R2 verification failed: %s", exc)
-    return _r2_verified
+        _r2_verify_error = "R2 is not fully configured"
+    else:
+        try:
+            _r2_verified = bool(r2.verify_bucket(cfg.r2_bucket_audits))
+            _r2_verify_error = None if _r2_verified else "R2 bucket verification returned false"
+        except Exception as exc:
+            _r2_verified = False
+            _r2_verify_error = str(exc)[:240]
+            logger.warning("api: R2 verification failed: %s", exc.__class__.__name__)
+    checked_at = datetime.now(tz=timezone.utc).isoformat()
+    if _r2_verified:
+        _r2_last_success_at = checked_at
+    else:
+        _r2_last_failure_at = checked_at
+        if cfg is not None and previous is not False:
+            send_operational_event(
+                cfg,
+                {
+                    "event_id": f"rams:r2-verification:{checked_at}",
+                    "severity": "critical",
+                    "event_type": "audit_bucket_verification_failed",
+                    "title": "RAMS audit-bucket verification failed",
+                    "summary": "RAMS could not verify the governed audits bucket.",
+                    "release_id": cfg.rms_release_id or None,
+                    "details": {"bucket": cfg.r2_bucket_audits, "checkCount": _r2_check_count},
+                },
+            )
+    return bool(_r2_verified)
+
+
+async def _r2_monitor_loop(cfg: Settings) -> None:
+    """Periodically verify the governed audit bucket for the life of the service."""
+    while True:
+        await asyncio.to_thread(_verify_r2, force=True)
+        await asyncio.sleep(cfg.rms_r2_verify_interval_seconds)
 
 
 def _version_output(command: str) -> tuple[bool, str]:
@@ -684,6 +737,37 @@ async def ops_warmup(
             ],
             "client": client,
             **_active_status(),
+        },
+    )
+
+
+@app.get("/ops/excellence")
+async def operational_excellence(
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Return professional-operations evidence without exposing credentials."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    cfg = _get_cfg()
+    verified = await asyncio.to_thread(_verify_r2)
+    return JSONResponse(
+        status_code=200 if verified else 503,
+        content={
+            "status": "healthy" if verified else "degraded",
+            "service": "RAMS",
+            "releaseId": cfg.rms_release_id if cfg else "",
+            "auditStorage": {
+                "verified": verified,
+                "checkCount": _r2_check_count,
+                "lastSuccessAt": _r2_last_success_at,
+                "lastFailureAt": _r2_last_failure_at,
+                "verificationIntervalSeconds": cfg.rms_r2_verify_interval_seconds if cfg else None,
+                "reportRetentionDays": cfg.rms_report_retention_days if cfg else None,
+                "error": _r2_verify_error,
+            },
+            "repositoryBootstrap": _bootstrap_details(cfg),
+            "admission": _active_status(),
         },
     )
 

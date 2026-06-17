@@ -78,6 +78,7 @@ class RunReport:
     publish_status: PublishStatus = field(default_factory=PublishStatus)
     skills_baseline: dict[str, Any] | None = None
     ai_usage: dict[str, Any] | None = None
+    release_evidence: dict[str, Any] | None = None
 
 
 def _report_quality(report: "RunReport") -> dict[str, Any]:
@@ -194,6 +195,17 @@ def make_run_id() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
 
 
+def _attach_release_evidence(report: RunReport, cfg: "Settings") -> None:
+    """Attach bounded release metadata without credentials or provider payloads."""
+    report.release_evidence = {
+        "releaseId": cfg.rms_release_id or None,
+        "reportRetentionDays": cfg.rms_report_retention_days,
+        "publishedAt": datetime.now(tz=timezone.utc).isoformat(),
+        "targetBranch": report.branch,
+        "dryRun": report.dryRun,
+    }
+
+
 def publish(report: RunReport, cfg: "Settings", r2: "R2Client") -> str:
     """
     Serialise *report* and write it to the appropriate destination.
@@ -202,6 +214,8 @@ def publish(report: RunReport, cfg: "Settings", r2: "R2Client") -> str:
     report and latest pointer to R2. R2 errors are deliberately propagated so
     callers can record a fallback report and log the stack trace.
     """
+    _attach_release_evidence(report, cfg)
+
     if report.dryRun:
         local_path = _local_report_path(report, cfg, prefix="dry-run")
         report.publish_status = PublishStatus(destination=str(local_path), ok=True)
@@ -237,6 +251,7 @@ def write_local_fallback(
     reason: str,
 ) -> str:
     """Write a local fallback report after a failed publish attempt."""
+    _attach_release_evidence(report, cfg)
     fallback_path = _local_report_path(report, cfg, prefix="fallback")
     report.publish_status = PublishStatus(
         destination="local_fallback",

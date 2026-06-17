@@ -176,6 +176,15 @@ class Settings(BaseSettings):
     rms_busy_retry_after_seconds: int = Field(default=60, ge=5, le=900)
     rms_report_max_bytes: int = Field(default=4_194_304, ge=262_144, le=16_777_216)
 
+    # Professional operations: recurring storage verification, retention metadata,
+    # release evidence and central HIVE operational alerts.
+    rms_r2_verify_interval_seconds: int = Field(default=900, ge=60, le=86_400)
+    rms_report_retention_days: int = Field(default=180, ge=7, le=3650)
+    rms_release_id: str = ""
+    ops_alert_webhook_url: str = ""
+    ops_alert_webhook_token: str = ""
+    ops_alert_timeout_seconds: float = Field(default=8.0, ge=1.0, le=30.0)
+
     rms_report_prefix: str = "qa-suite/reports"
     rms_report_dir: str = "/tmp/rams-reports"
     rms_qa_branch_prefix: str = "rms-qa/"
