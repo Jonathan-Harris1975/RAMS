@@ -41,3 +41,7 @@ python -m mypy repo_mgmt --no-incremental --show-error-codes
 Use the multi-stage Docker image. The runtime is non-root and includes Python, Git, Node.js and npm because target repositories require mixed validation commands. Keep a single RAMS worker and one concurrent pipeline on the current Koyeb instance unless profiling supports a change.
 
 Production writes remain disabled until the dry-run evidence, release gate and explicit live-write settings are all satisfied. See [`RELEASE_GATE.md`](RELEASE_GATE.md), [`SECURITY.md`](SECURITY.md) and [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
+## Professional operations
+
+Authenticated `/ops/excellence` reports periodic audits-bucket verification, release evidence and retention settings. CI and Koyeb failures are delivered to HIVE-UI Ops through the shared redacted event contract. See [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md).
