@@ -163,6 +163,40 @@ def test_readiness_reports_dependency_readiness(
     assert deps["runtime"]["node"].startswith("v")
 
 
+def test_readiness_accepts_configured_on_demand_repo_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    """Idle ephemeral Koyeb worktrees must not make RAMS look degraded."""
+    website, aims = repo_dirs
+    website.rmdir()
+    aims.rmdir()
+    settings = make_settings(
+        repo_dirs,
+        RMS_REPO_BOOTSTRAP_ENABLED="true",
+        RMS_WEBSITE_REPO_URL="https://github.com/example/website.git",
+        RMS_AIMS_REPO_URL="https://github.com/example/aims.git",
+    )
+    install_valid_api(monkeypatch, settings)
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/readiness")
+
+    data = response.json()
+    assert response.status_code == 200
+    assert data["status"] == "ready"
+    deps = data["dependencies"]
+    assert deps["website_repo_ready"] is True
+    assert deps["aims_repo_ready"] is True
+    assert deps["repo_bootstrap"]["materialized"] == {
+        "website": False,
+        "aims": False,
+    }
+    assert deps["repo_bootstrap"]["ready_on_demand"] == {
+        "website": True,
+        "aims": True,
+    }
+
+
 def test_readiness_requires_config_before_exposing_dependency_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
