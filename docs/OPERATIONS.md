@@ -1,24 +1,10 @@
 # RAMS production operations
 
-**Status:** Production-controlled  
-**Last reviewed:** 16 June 2026
+**Status:** Paid Koyeb production service  
+**Last reviewed:** 17 June 2026
 
-## Deployment and probes
+Use public `/livez` for process liveness and bearer-protected `/readyz`, `/readiness`, `/ops/warmup` and `/ops/excellence` for operational evidence. Keep one worker and one concurrent pipeline unless production profiling justifies a change.
 
-RAMS runs from the root Dockerfile on Koyeb. Use `/livez` for liveness and authenticated `/readyz` for dependency readiness. Keep one worker and one concurrent pipeline on the current instance.
+RAMS verifies the governed audits bucket periodically, records release/retention evidence in reports and alerts HIVE when a previously healthy storage check fails. Repository checkouts are materialised on demand beneath `/tmp/rams-repos`.
 
-## Safe operating mode
-
-The normal production posture is dry-run-first. Live writes require `RMS_LIVE_WRITE_ENABLED=true`, an approved release gate, valid repository credentials and successful target validation. Never use missing validation tools as a reason to bypass the gate.
-
-## Routine checks
-
-1. Confirm `/livez` and `/readyz`.
-2. Run `/ops/warmup` with the RAMS bearer token.
-3. Verify R2 audit access and target repository paths.
-4. Execute a single dry-run audit and inspect the evidence pack.
-5. Resume scheduled workloads only after the review queue is clear.
-
-## Rollback
-
-Revert to the previous Koyeb deployment or commit. Preserve generated evidence and logs before rerunning a failed audit.
+For recovery, preserve audit evidence, repair repository authentication or validation tooling, warm the service, confirm readiness and run one dry-run audit before live writes. See [`OPERATIONAL_ALERTING.md`](OPERATIONAL_ALERTING.md).
