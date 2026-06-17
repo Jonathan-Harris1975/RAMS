@@ -286,6 +286,29 @@ def _repo_ready(path: FilePath) -> bool:
     return path.exists() and path.is_dir()
 
 
+def _bootstrap_target_ready_on_demand(
+    cfg: Settings,
+    *,
+    label: str,
+    repo_url: str,
+) -> bool:
+    """Return whether an ephemeral target can be materialised when work starts.
+
+    Koyeb production instances intentionally keep repository worktrees in
+    ephemeral storage. A missing idle worktree is therefore not a dependency
+    failure when bootstrap is enabled and its target URL is resolved. A prior
+    failed bootstrap remains a real degraded condition until a later attempt
+    succeeds.
+    """
+
+    if not cfg.rms_repo_bootstrap_enabled or not _usable_secret(repo_url):
+        return False
+    result = next((item for item in _bootstrap_results if item.label == label), None)
+    if result is not None and result.attempted and not result.ready:
+        return False
+    return True
+
+
 def _ensure_repos_bootstrapped(
     cfg: Settings, pipeline_id: PipelineId | None = None
 ) -> list[BootstrapResult]:
@@ -345,11 +368,29 @@ def _dependency_details() -> dict[str, object]:
     aims_ready = False
     validation_runtime = _validation_runtime_details()
     pipeline_repo_paths: dict[str, str] = {}
+    repo_materialized: dict[str, bool] = {"website": False, "aims": False}
+    repo_ready_on_demand: dict[str, bool] = {"website": False, "aims": False}
     if cfg is not None:
         website_path = cfg.repo_path_for("seo-aeo-geo")
         aims_path = cfg.repo_path_for("on-brand")
-        website_ready = _repo_ready(website_path)
-        aims_ready = _repo_ready(aims_path)
+        repo_materialized = {
+            "website": _repo_ready(website_path),
+            "aims": _repo_ready(aims_path),
+        }
+        repo_ready_on_demand = {
+            "website": _bootstrap_target_ready_on_demand(
+                cfg,
+                label="website",
+                repo_url=cfg.rms_website_repo_url,
+            ),
+            "aims": _bootstrap_target_ready_on_demand(
+                cfg,
+                label="aims",
+                repo_url=cfg.rms_aims_repo_url,
+            ),
+        }
+        website_ready = repo_materialized["website"] or repo_ready_on_demand["website"]
+        aims_ready = repo_materialized["aims"] or repo_ready_on_demand["aims"]
         pipeline_repo_paths = {
             "seo-aeo-geo": str(website_path),
             "mobile-ux": str(cfg.repo_path_for("mobile-ux")),
@@ -362,7 +403,11 @@ def _dependency_details() -> dict[str, object]:
         "website_repo_ready": website_ready,
         "aims_repo_ready": aims_ready,
         "pipeline_repo_paths": pipeline_repo_paths,
-        "repo_bootstrap": _bootstrap_details(cfg),
+        "repo_bootstrap": {
+            **_bootstrap_details(cfg),
+            "materialized": repo_materialized,
+            "ready_on_demand": repo_ready_on_demand,
+        },
         "validation_runtime_ready": bool(validation_runtime["ready"]),
         "model_router_ready": _model_router_ready(cfg),
         "single_worker_mode": configured_worker_count() == 1,
