@@ -1,5 +1,5 @@
 > **Document status:** Historical implementation record  
-> **Last reviewed:** 16 June 2026  
+> **Last reviewed:** 21 June 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # RAMS Koyeb eco-micro optimisation report
@@ -8,7 +8,7 @@
 **Target:** Koyeb `eco-micro`, 0.25 vCPU, 512MB RAM, 4GB ephemeral SSD  
 **Primary repository:** `RAMS-main.zip`  
 **Reference repository:** `MAST-main.zip`  
-**Deployment environment export:** not supplied with this RAMS task; production secret values were therefore not inspected or changed.
+**Deployment environment note:** This file is a historical optimisation report. For current production deployment values and secret bindings, use `RAMS-KOYEB-PRODUCTION-ENV.txt` and `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`.
 
 ## Executive summary
 
@@ -223,7 +223,7 @@ Remaining MAST limitation:
 7. Keep the initial deployment in dry-run mode.
 8. Call `/ops/warmup`, then `/readiness`.
 9. Run one manually triggered dry-run pipeline and inspect its R2/local report and AI usage.
-10. Do not enable live writes until the target validation commands are confirmed to fit within the deployed 512MB instance.
+10. For the paid production instance, live-write permission is governed by `RMS_DRY_RUN=false` and `RMS_LIVE_WRITE_ENABLED=true`; branch pushing and pull request creation remain separate controls and are intentionally disabled unless an operator enables them after clean evidence.
 
 ## Rollback
 

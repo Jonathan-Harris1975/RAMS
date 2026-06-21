@@ -1,11 +1,11 @@
-> **Document status:** Production reference  
-> **Last reviewed:** 16 June 2026  
-> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+> **Document status:** Historical implementation record, superseded for production deployment  
+> **Last reviewed:** 21 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy, release gate and operations guide.
 
 # RAMS eco-micro environment changes
 
 **Target:** Koyeb `eco-micro`, 0.25 vCPU, 512MB RAM, 4GB ephemeral SSD  
-**Important:** A production RAMS environment export was not attached. “Current” below refers to the supplied repository templates where known; deployed values and all secrets require Koyeb confirmation.
+**Important:** This file is a historical eco-micro sizing note. For production deployment, use `RAMS-KOYEB-PRODUCTION-ENV.txt` and `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`.
 
 ## Recommended OpenRouter roles
 
@@ -133,8 +133,8 @@ No production variable is recommended for removal without the actual Koyeb expor
 1. Apply non-secret runtime/resource values.
 2. Confirm repo URLs, paths and validation commands.
 3. Add secrets through Koyeb Secrets.
-4. Deploy with all live-write controls false.
-5. Verify `/health`, authenticated `/ops/warmup`, then `/readiness`.
-6. Run one dry-run pipeline.
-7. Inspect report AI usage, validation tail, disk guard and runtime logs.
-8. Keep live writes disabled until the actual AIMS build proves it fits eco-micro.
+4. For dry-run/staging, deploy with `RMS_DRY_RUN=true` and `RMS_LIVE_WRITE_ENABLED=false`.
+5. For the paid production instance, live-write permission may use `RMS_DRY_RUN=false` and `RMS_LIVE_WRITE_ENABLED=true`, while `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false` remain deliberately governed.
+6. Verify `/health`, `/livez`, authenticated `/ops/warmup`, `/readiness`, `/readyz` and `/ops/excellence`.
+7. Run one dry-run pipeline.
+8. Inspect report AI usage, validation tail, disk guard and runtime logs before considering any non-dry-run request.
