@@ -451,6 +451,45 @@ def test_single_worker_limitation_visible_in_readiness(
     assert response.json()["dependencies"]["single_worker_mode"] is False
 
 
+def test_ops_excellence_exposes_production_control_evidence(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(
+        repo_dirs,
+        RMS_DRY_RUN="false",
+        RMS_LIVE_WRITE_ENABLED="true",
+        RMS_PUSH_ENABLED="false",
+        RMS_CREATE_PR="false",
+        RMS_RELEASE_ID="unit-release",
+    )
+    install_valid_api(monkeypatch, settings)
+
+    with TestClient(api_mod.app) as client:
+        response = client.get("/ops/excellence")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["releaseId"] == "unit-release"
+    assert payload["deploymentContract"]["target"] == "paid Koyeb production instance"
+    assert payload["deploymentContract"]["healthCheckPath"] == "/health"
+    assert payload["deploymentContract"]["maxConcurrentPipelines"] == 1
+    assert payload["deploymentContract"]["warmupExternalWork"] is False
+    controls = payload["liveWriteControls"]
+    assert controls["dryRunDefault"] is False
+    assert controls["liveWriteEnabled"] is True
+    assert controls["liveWritePermitted"] is True
+    assert controls["pushEnabled"] is False
+    assert controls["createPr"] is False
+    assert "Pushing and PR creation remain disabled" in controls["meaning"]
+    assert payload["modelProviderPolicy"] == {
+        "promptLogging": False,
+        "dataCollection": "deny",
+        "fallbacksEnabled": True,
+        "maxRetries": 0,
+    }
+    assert "/rebuild/{pipeline_id}/run" in payload["protectedEndpoints"]
+
+
 def _write_dry_run_report(report_dir: Path, pipeline: str, run_id: str) -> Path:
     """Write a minimal dry-run report fixture to the configured report directory."""
     report_dir.mkdir(parents=True, exist_ok=True)

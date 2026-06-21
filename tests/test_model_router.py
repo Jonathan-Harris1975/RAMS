@@ -31,7 +31,7 @@ def _success(content: str = "ok", model: str = "actual/model") -> httpx.Response
 
 
 class FakeClient:
-    def __init__(self, responses: list[httpx.Response]) -> None:
+    def __init__(self, responses: list[httpx.Response | Exception]) -> None:
         self.responses = responses
         self.calls: list[dict[str, Any]] = []
         self.closed = False
@@ -40,7 +40,10 @@ class FakeClient:
         self, url: str, *, headers: dict[str, str], json: dict[str, Any]
     ) -> httpx.Response:
         self.calls.append({"url": url, "headers": headers, "json": json})
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
     def close(self) -> None:
         self.closed = True
@@ -56,14 +59,17 @@ class FakeAsyncClient:
         self, url: str, *, headers: dict[str, str], json: dict[str, Any]
     ) -> httpx.Response:
         self.calls.append({"url": url, "headers": headers, "json": json})
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
     async def aclose(self) -> None:
         self.closed = True
 
 
 def _router_with_sync(
-    settings, responses: list[httpx.Response]
+    settings, responses: list[httpx.Response | Exception]
 ) -> tuple[ModelRouter, FakeClient]:
     router = ModelRouter(settings)
     client = FakeClient(responses)
@@ -177,3 +183,30 @@ def test_nested_usage_details_and_provider_are_accounted(settings) -> None:
     assert usage["cachedTokens"] == 7
     assert usage["reasoningTokens"] == 3
     assert usage["providers"] == {"provider-x": 1}
+
+
+def test_transport_error_triggers_secondary_fallback(settings) -> None:
+    router, client = _router_with_sync(
+        settings,
+        [
+            httpx.ConnectError("network flap"),
+            _success("secondary-after-transport"),
+        ],
+    )
+    assert router.complete("prompt") == "secondary-after-transport"
+    assert [call["json"]["model"] for call in client.calls] == [
+        settings.openrouter_primary_model,
+        settings.openrouter_secondary_model,
+    ]
+    assert router.usage_summary()["fallbacks"] == 1
+
+
+def test_both_models_failure_reports_last_model_status(settings) -> None:
+    router, client = _router_with_sync(
+        settings, [_response(503, "primary down"), _response(504, "fallback down")]
+    )
+    with pytest.raises(ModelError) as exc_info:
+        router.complete("prompt")
+    assert exc_info.value.status_code == 504
+    assert len(client.calls) == 2
+    assert router.usage_summary()["fallbacks"] == 1

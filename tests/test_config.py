@@ -154,3 +154,23 @@ def test_live_write_gate_diagnostics_exposes_values_without_guesswork() -> None:
     assert details["liveWriteValue"] is False
     assert details["liveWritePermitted"] is False
     assert "liveWriteEnvValueIsTrue" in details["failedChecks"]
+
+
+def test_unresolved_required_secret_reference_fails_closed() -> None:
+    env = _complete_env(OPENROUTER_API_KEY="{{ secret.OPENROUTER_API_KEY }}")
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ConfigurationError) as exc_info:
+            Settings()
+    message = str(exc_info.value)
+    assert "OPENROUTER_API_KEY" in message
+    assert "unresolved secret reference" in message
+
+
+def test_github_token_placeholder_is_not_treated_as_usable() -> None:
+    env = _complete_env(
+        RMS_GITHUB_TOKEN="{{ secret.GITHUB_TOKEN_WEBSITE_AUDITS }}",
+        GITHUB_TOKEN="{{ secret.GITHUB_TOKEN }}",
+    )
+    with patch.dict(os.environ, env, clear=True):
+        cfg = Settings()
+    assert cfg.github_token_value is None
