@@ -11,6 +11,7 @@ safe value and keep metadata showing that live mode was not explicitly enabled.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +29,22 @@ class ConfigurationError(Exception):
 _TRUE_VALUES = frozenset({"true", "1", "yes", "y", "on"})
 _FALSE_VALUES = frozenset({"false", "0", "no", "n", "off"})
 
+
+
+def _is_unresolved_secret_reference(value: object) -> bool:
+    """Return True when a runtime value is still a Koyeb secret placeholder."""
+    if not isinstance(value, str):
+        return False
+    return re.fullmatch(
+        r"\{\{\s*secret\.[^}]+\}\}", value.strip(), flags=re.IGNORECASE
+    ) is not None
+
+
+def _configured_value(value: object) -> str:
+    """Return a stripped config value, hiding unresolved secret placeholders."""
+    if _is_unresolved_secret_reference(value):
+        return ""
+    return str(value or "").strip()
 
 def _env_get_case_insensitive(name: str) -> str | None:
     """Return an environment value using case-insensitive lookup."""
@@ -285,7 +302,9 @@ class Settings(BaseSettings):
                 }
             )
         for name, value in required.items():
-            if not str(value).strip():
+            if _is_unresolved_secret_reference(value):
+                missing.append(f"{name} (unresolved secret reference)")
+            elif not _configured_value(value):
                 missing.append(name)
         if missing:
             raise ConfigurationError(
@@ -387,8 +406,8 @@ class Settings(BaseSettings):
         without breaking existing deployments.
         """
         for candidate in (self.rms_github_token, self.github_token):
-            if candidate and candidate.strip():
-                return candidate.strip()
+            if _configured_value(candidate):
+                return _configured_value(candidate)
         return None
 
     def validation_commands_for(self, pipeline: PipelineId) -> list[str]:

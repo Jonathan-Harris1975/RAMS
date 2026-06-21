@@ -202,8 +202,8 @@ def _r2_configured(cfg: Settings | None) -> bool:
     return all(
         [
             cfg.r2_endpoint.startswith(("http://", "https://")),
-            bool(cfg.r2_access_key_id.strip()),
-            bool(cfg.r2_secret_access_key.strip()),
+            bool(_usable_secret(cfg.r2_access_key_id)),
+            bool(_usable_secret(cfg.r2_secret_access_key)),
             bool(cfg.r2_bucket_audits.strip()),
         ]
     )
@@ -326,7 +326,7 @@ def _model_router_ready(cfg: Settings | None) -> bool:
     return all(
         [
             cfg.openrouter_api_base.startswith(("http://", "https://")),
-            bool(cfg.openrouter_api_key.strip()),
+            bool(_usable_secret(cfg.openrouter_api_key)),
             bool(cfg.openrouter_primary_model.strip()),
             bool(cfg.openrouter_secondary_model.strip()),
             bool(cfg.openrouter_triage_model.strip()),
@@ -767,6 +767,44 @@ async def operational_excellence(
                 "error": _r2_verify_error,
             },
             "repositoryBootstrap": _bootstrap_details(cfg),
+            "deploymentContract": {
+                "target": "paid Koyeb production instance",
+                "healthCheckPath": "/health",
+                "webConcurrency": configured_worker_count(),
+                "uvicornWorkers": os.environ.get("UVICORN_WORKERS", "1"),
+                "singleWorkerMode": cfg.rms_single_worker_mode if cfg else None,
+                "maxConcurrentPipelines": cfg.rms_max_concurrent_pipelines if cfg else None,
+                "maxIssuesPerRun": cfg.rms_max_issues_per_run if cfg else None,
+                "warmupExternalWork": False,
+            },
+            "liveWriteControls": {
+                "dryRunDefault": cfg.rms_dry_run if cfg else None,
+                "liveWriteEnabled": cfg.rms_live_write_enabled if cfg else None,
+                "liveWritePermitted": cfg.live_write_permitted if cfg else False,
+                "pushEnabled": cfg.rms_push_enabled if cfg else None,
+                "createPr": cfg.rms_create_pr if cfg else None,
+                "validateAfterEachTask": cfg.rms_validate_after_each_task if cfg else None,
+                "revertOnValidationFailure": cfg.rms_revert_on_validation_failure if cfg else None,
+                "meaning": (
+                    "Production mode can run governed workflows and publish validated "
+                    "patch/report artefacts. Pushing and PR creation remain disabled "
+                    "until RMS_PUSH_ENABLED or RMS_CREATE_PR are deliberately enabled."
+                ),
+            },
+            "modelProviderPolicy": {
+                "promptLogging": cfg.rms_openrouter_log_prompts if cfg else None,
+                "dataCollection": cfg.rms_openrouter_data_collection if cfg else None,
+                "fallbacksEnabled": cfg.rms_openrouter_allow_fallbacks if cfg else None,
+                "maxRetries": cfg.rms_openrouter_max_retries if cfg else None,
+            },
+            "protectedEndpoints": [
+                "/readiness",
+                "/readyz",
+                "/ops/warmup",
+                "/ops/excellence",
+                "/reports/*",
+                "/rebuild/{pipeline_id}/run",
+            ],
             "admission": _active_status(),
         },
     )

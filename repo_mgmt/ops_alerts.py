@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,11 +14,19 @@ from repo_mgmt.config import Settings
 logger = logging.getLogger(__name__)
 
 
+def _configured_runtime_secret(value: str) -> str:
+    """Return a stripped runtime secret, treating unresolved placeholders as absent."""
+    text = value.strip()
+    if re.fullmatch(r"\{\{\s*secret\.[^}]+\}\}", text, flags=re.IGNORECASE):
+        return ""
+    return text
+
+
 def send_operational_event(settings: Settings, event: dict[str, Any]) -> bool:
     """Deliver one event without raising or logging credentials."""
-    url = settings.ops_alert_webhook_url.strip()
-    token = settings.ops_alert_webhook_token.strip()
-    if not url or not token:
+    url = _configured_runtime_secret(settings.ops_alert_webhook_url)
+    token = _configured_runtime_secret(settings.ops_alert_webhook_token)
+    if not url or not token or url.startswith("https://hive-api.example"):
         return False
     payload = {
         "source": "rams_runtime",
