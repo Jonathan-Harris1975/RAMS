@@ -136,6 +136,18 @@ class Settings(BaseSettings):
     rms_aims_repo_path: str = ""
     rms_seo_repo_path: str = ""  # legacy alias; no longer used for SEO routing
 
+    # ── Optimisation Subsystem (deterministic self-adjusting QA for AIMS) ──
+    # Thresholds, tiers, and category ceilings are NEVER hard-coded here;
+    # they live in the externally configured policy file loaded by
+    # repo_mgmt.optimisation.policy.load_policy(). This flag is a global,
+    # fail-closed kill switch: even if a category is enabled in the policy
+    # file, the optimisation engine's auto_configure/patch_candidate
+    # routing does nothing unless this is explicitly true.
+    rms_optimisation_enabled: bool = False
+    rms_optimisation_policy_path: str = ""
+    rms_optimisation_state_dir: str = "data/optimisation_history"
+    rms_optimisation_rollback_dir: str = "data/optimisation_rollback"
+
     # ── Optional Koyeb/runtime repo bootstrap ──────────────────────────────
     rms_repo_bootstrap_enabled: bool = False
     rms_repo_base_dir: str = "/tmp/rams-repos"
@@ -234,6 +246,7 @@ class Settings(BaseSettings):
         "rms_revert_on_validation_failure",
         "rms_single_worker_mode",
         "rms_repo_bootstrap_enabled",
+        "rms_optimisation_enabled",
         "rms_allow_unauthenticated_dev",
         "rms_openrouter_allow_fallbacks",
         "rms_openrouter_log_usage",
