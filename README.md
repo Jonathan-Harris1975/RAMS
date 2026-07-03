@@ -87,3 +87,4 @@ python scripts/emicro_benchmark.py --label candidate
 - [`SECURITY.md`](SECURITY.md) defines authentication, secret and repository-mutation boundaries.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) defines operator recovery and dry-run-first procedures.
 - [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md) defines HIVE Ops alerting and deployment-watch expectations.
+- [`docs/OPTIMISATION_ENGINE.md`](docs/OPTIMISATION_ENGINE.md) defines the deterministic, confidence-scored, reversible Optimisation Subsystem for AIMS.
