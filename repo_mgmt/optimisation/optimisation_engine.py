@@ -29,7 +29,7 @@ from typing import Any, Callable
 from repo_mgmt.optimisation.confidence_engine import ConfidenceEngine
 from repo_mgmt.optimisation.experiment_manager import ExperimentManager, ExperimentRecord
 from repo_mgmt.optimisation.history import OptimisationHistoryStore
-from repo_mgmt.optimisation.models import AuditEvidence, OptimisationAction, new_id
+from repo_mgmt.optimisation.models import AuditEvidence, OptimisationAction
 from repo_mgmt.optimisation.policy import OptimisationPolicy
 from repo_mgmt.optimisation.trend_analysis import TrendAnalyser, TrendSignal
 
