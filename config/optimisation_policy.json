@@ -1,0 +1,56 @@
+{
+  "$schema": "https://rams.internal/schemas/optimisation-policy-v1.json",
+  "version": 1,
+  "description": "Externalised thresholds for the RAMS Optimisation Engine. Edit this file (or point RMS_OPTIMISATION_POLICY_PATH at an override) to change behaviour. No optimisation threshold may be hard-coded in Python.",
+
+  "confidence_tiers": [
+    { "name": "observe",        "min": 0,  "max": 70  },
+    { "name": "recommend",      "min": 70, "max": 90  },
+    { "name": "auto_configure", "min": 90, "max": 98  },
+    { "name": "patch_candidate","min": 98, "max": 100 }
+  ],
+
+  "confidence_weights": {
+    "evidence_strength": 0.4,
+    "sample_size": 0.25,
+    "recurrence": 0.25,
+    "severity": 0.1
+  },
+
+  "trend_analysis": {
+    "min_audit_cycles": 3,
+    "min_distinct_evidence_samples": 3,
+    "evidence_window_days": 30,
+    "single_anomaly_max_confidence": 40
+  },
+
+  "categories": {
+    "scheduler":          { "enabled": true, "max_tier_without_review": "recommend" },
+    "validators":         { "enabled": true, "max_tier_without_review": "recommend" },
+    "prompts":            { "enabled": true, "max_tier_without_review": "auto_configure" },
+    "rss":                { "enabled": true, "max_tier_without_review": "auto_configure" },
+    "podcasts":           { "enabled": true, "max_tier_without_review": "auto_configure" },
+    "platform_weighting": { "enabled": true, "max_tier_without_review": "auto_configure" },
+    "configuration":      { "enabled": true, "max_tier_without_review": "recommend" }
+  },
+
+  "rollback": {
+    "verify_timeout_seconds": 300,
+    "auto_rollback_on_verification_failure": true,
+    "keep_snapshots": 50
+  },
+
+  "patch_generator": {
+    "require_tests": true,
+    "require_lint": true,
+    "require_regression": true,
+    "require_acceptance_criteria": true,
+    "require_rollback_package": true,
+    "max_files": 8,
+    "max_changes": 12
+  },
+
+  "history": {
+    "retention_days": 365
+  }
+}
