@@ -24,6 +24,11 @@
     "single_anomaly_max_confidence": 40
   },
 
+  "oscillation": {
+    "min_reoptimisation_interval_hours": 24,
+    "reversal_lookback": 4
+  },
+
   "categories": {
     "scheduler":          { "enabled": true, "max_tier_without_review": "recommend" },
     "validators":         { "enabled": true, "max_tier_without_review": "recommend" },
