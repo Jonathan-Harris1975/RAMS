@@ -155,6 +155,37 @@ class R2Client:
                 f"R2 put_object failed for bucket={bucket!r} key={key!r}: {exc}"
             ) from exc
 
+    def list_objects(self, bucket: str, prefix: str, *, max_keys: int = 1000) -> list[str]:
+        """
+        List object keys under *prefix* in *bucket*.
+
+        Bounded to a single ``ListObjectsV2`` call (no pagination) so this
+        stays cheap on the eMicro instance. Callers expecting more than
+        *max_keys* results should narrow the prefix (e.g. to a single day)
+        rather than paginating.
+
+        Args:
+            bucket: R2 bucket name.
+            prefix: Key prefix to list under.
+            max_keys: Maximum number of keys to return (<=1000 per call).
+
+        Returns:
+            Object keys matching the prefix, in the order R2 returns them.
+
+        Raises:
+            R2Error: If the boto3 call fails for any reason.
+        """
+        try:
+            response = self._client.list_objects_v2(
+                Bucket=bucket, Prefix=prefix, MaxKeys=max_keys
+            )
+        except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
+            raise R2Error(
+                f"R2 list_objects failed for bucket={bucket!r} prefix={prefix!r}: {exc}"
+            ) from exc
+        contents = response.get("Contents", []) or []
+        return [str(item["Key"]) for item in contents if "Key" in item]
+
     def object_exists(self, bucket: str, key: str) -> bool:
         """
         Return True if an object exists at *bucket* / *key*, False otherwise.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -496,6 +497,7 @@ async def _run_async(
             max_total_bytes=cfg.rms_max_audit_total_bytes,
         )
         snapshots = 1 if audit else 0
+        await asyncio.to_thread(_run_optimisation_cycle, pipeline_id, cfg, r2)
         issues = await asyncio.to_thread(
             issue_normaliser.normalise, audit, pipeline_id, _date(), cfg, router
         )
@@ -603,3 +605,149 @@ def run(
             run_id=run_id,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Optimisation subsystem wiring
+#
+# The optimisation subsystem's internals (trend analysis, confidence
+# scoring, experiments, rollback) previously had no call site: nothing ever
+# read AIMS's QA events into them. This section is that call site. It is:
+#
+#   * Off by default -- gated entirely behind `cfg.rms_optimisation_enabled`
+#     (the existing kill switch), so a fresh deploy behaves exactly as
+#     before until that flag is explicitly turned on.
+#   * Fail-soft -- any error while building the engine stack or running one
+#     cycle is logged and swallowed; it can never turn a normal audit run
+#     into a failed one.
+#   * Scoped to the `on-brand` pipeline -- that is the RAMS pipeline mapped
+#     to the AIMS repo (see `Settings.repo_path_for`), and AIMS is the only
+#     current producer of `qa-events/{day}/*.json`.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _OptimisationStack:
+    """The wired-together optimisation engine plus the history store it uses.
+
+    Kept as a pair (rather than reaching into `engine`'s private attributes)
+    so this module can record its own bookkeeping entries -- e.g. the
+    `manual_review` note for a deferred `auto_configure` action -- through
+    the same public-ish surface the engine itself writes through.
+    """
+
+    engine: Any  # repo_mgmt.optimisation.optimisation_engine.OptimisationEngine
+    history: Any  # repo_mgmt.optimisation.history.OptimisationHistoryStore
+
+
+def _build_optimisation_stack(cfg: Settings) -> "_OptimisationStack | None":
+    """Build the optimisation engine stack from `cfg`, or None if disabled/unavailable.
+
+    Never raises: a missing/invalid policy file, or any other construction
+    failure, is logged and treated the same as the feature being disabled,
+    so a broken policy file can never take down a normal pipeline run.
+    """
+    if not cfg.rms_optimisation_enabled:
+        return None
+    try:
+        from repo_mgmt.optimisation.confidence_engine import ConfidenceEngine
+        from repo_mgmt.optimisation.experiment_manager import ExperimentManager
+        from repo_mgmt.optimisation.history import OptimisationHistoryStore
+        from repo_mgmt.optimisation.optimisation_engine import OptimisationEngine
+        from repo_mgmt.optimisation.policy import load_policy
+        from repo_mgmt.optimisation.rollback_manager import RollbackManager
+        from repo_mgmt.optimisation.trend_analysis import TrendAnalyser
+
+        policy = load_policy(cfg.rms_optimisation_policy_path or None)
+        history = OptimisationHistoryStore(cfg.rms_optimisation_state_dir)
+        rollback = RollbackManager(
+            cfg.rms_optimisation_rollback_dir, keep_snapshots=policy.rollback.keep_snapshots
+        )
+        experiments = ExperimentManager(
+            history,
+            rollback,
+            cooldown_hours=policy.oscillation.min_reoptimisation_interval_hours,
+            reversal_lookback=policy.oscillation.reversal_lookback,
+        )
+        engine = OptimisationEngine(
+            policy=policy,
+            history=history,
+            trend_analyser=TrendAnalyser(policy, history),
+            confidence_engine=ConfidenceEngine(policy),
+            experiment_manager=experiments,
+        )
+        return _OptimisationStack(engine=engine, history=history)
+    except Exception:
+        logger.warning("optimisation subsystem unavailable; skipping this cycle", exc_info=True)
+        return None
+
+
+def _route_optimisation_action(stack: "_OptimisationStack", action: Any) -> None:
+    """Route one optimisation action, deferring `auto_configure` to manual review.
+
+    `auto_configure` routing requires a real `apply_fn`/`verify_fn` pair for
+    the specific configuration surface being changed (e.g. a scheduler
+    interval, a prompt template). No such per-target apply/verify functions
+    exist yet against AIMS's live configuration from this repo -- AIMS is a
+    separate deployed service, and RAMS has no existing write path into its
+    running config. Auto-applying here would mean inventing an untested
+    write path into another service exactly where the Experiment Manager
+    and Rollback Manager exist to bound risk, not add it. Until concrete
+    apply/verify wiring exists for a given category, `auto_configure`-tier
+    actions are recorded for manual review instead of being silently
+    downgraded or applied with a no-op apply_fn.
+    """
+    if action.tier == "auto_configure":
+        stack.history.append(
+            action.pipeline,
+            {
+                "type": "manual_review",
+                "signature": action.signature,
+                "action_id": action.action_id,
+                "detail": (
+                    "auto_configure tier reached but no apply_fn/verify_fn is wired for "
+                    f"category {action.category!r} yet; recorded for manual review instead "
+                    "of auto-applying"
+                ),
+            },
+        )
+        return
+    stack.engine.route(action)
+
+
+def _run_optimisation_cycle(pipeline_id: PipelineId, cfg: Settings, r2: Any) -> None:
+    """Ingest AIMS QA evidence and route any newly-eligible optimisation actions.
+
+    This is the call site described in the deployment readiness review: it
+    connects AIMS's `qaEvents.js` output (`qa-events/{day}/*.json` in the
+    audits bucket) to the previously-unreachable optimisation subsystem.
+    Entirely additive and fail-soft -- see the module docstring above.
+    """
+    if pipeline_id != "on-brand":
+        return
+    stack = _build_optimisation_stack(cfg)
+    if stack is None:
+        return
+    try:
+        from repo_mgmt.optimisation.qa_event_adapter import (
+            QaEventWatermark,
+            ingest_new_qa_events,
+        )
+
+        watermark = QaEventWatermark(
+            Path(cfg.rms_optimisation_state_dir) / "qa_event_watermarks"
+        )
+        summary = ingest_new_qa_events(
+            r2=r2,
+            bucket=cfg.r2_bucket_audits,
+            pipeline=pipeline_id,
+            engine=stack.engine,
+            watermark=watermark,
+        )
+        for signature in summary.new_signatures:
+            action = stack.engine.evaluate(pipeline_id, signature)
+            if action is None:
+                continue
+            _route_optimisation_action(stack, action)
+    except Exception:
+        logger.warning("optimisation cycle failed for pipeline %s", pipeline_id, exc_info=True)
