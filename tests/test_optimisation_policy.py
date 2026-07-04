@@ -137,3 +137,29 @@ def test_effective_tier_disabled_category_forces_observe(tmp_path) -> None:
     policy = load_policy(path)
     assert policy.effective_tier("rss", "patch_candidate") == "observe"
     assert policy.is_category_enabled("rss") is False
+
+
+def test_oscillation_defaults_when_omitted_from_policy_file(tmp_path) -> None:
+    # VALID_POLICY predates the oscillation guard and has no "oscillation"
+    # key; older policy files on disk must keep loading unchanged.
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(VALID_POLICY))
+    policy = load_policy(path)
+    assert policy.oscillation.min_reoptimisation_interval_hours == 24.0
+    assert policy.oscillation.reversal_lookback == 4
+
+
+def test_oscillation_can_be_overridden(tmp_path) -> None:
+    doc = json.loads(json.dumps(VALID_POLICY))
+    doc["oscillation"] = {"min_reoptimisation_interval_hours": 6, "reversal_lookback": 2}
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(doc))
+    policy = load_policy(path)
+    assert policy.oscillation.min_reoptimisation_interval_hours == 6
+    assert policy.oscillation.reversal_lookback == 2
+
+
+def test_bundled_default_policy_defines_oscillation_explicitly() -> None:
+    policy = load_policy()
+    assert policy.oscillation.min_reoptimisation_interval_hours == 24.0
+    assert policy.oscillation.reversal_lookback == 4

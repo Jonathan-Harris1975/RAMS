@@ -184,3 +184,63 @@ class TestPipelineRun:
         assert "report publish failed" in (report.error or "")
         assert report.publish_status.fallback_path is not None
         assert "fallback-on-brand" in report.publish_status.fallback_path
+
+
+class TestOptimisationCycleWiring:
+    """Covers the RAMS optimisation subsystem call site added to `_run_async`."""
+
+    def test_disabled_by_default_never_touches_r2_listing(
+        self, settings, mock_r2, mock_router, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        assert settings.rms_optimisation_enabled is False
+        mock_r2.get_object.return_value = b"{}"
+        with patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router):
+            report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=True)
+        assert report.error is None
+        mock_r2.list_objects.assert_not_called()
+
+    def test_only_runs_for_on_brand_pipeline(
+        self, settings, mock_r2, mock_router, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        settings.rms_optimisation_enabled = True
+        mock_r2.get_object.return_value = b"{}"
+        mock_r2.list_objects.return_value = []
+        with patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router):
+            report = pipeline_mod.run("mobile-ux", settings, mock_r2, dry_run=True)
+        assert report.error is None
+        mock_r2.list_objects.assert_not_called()
+
+    def test_enabled_ingests_qa_events_without_breaking_the_run(
+        self, settings, mock_r2, mock_router, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        settings.rms_optimisation_enabled = True
+        mock_r2.get_object.return_value = b"{}"
+        mock_r2.list_objects.return_value = ["qa-events/2026-01-01/a.json"]
+        mock_r2.get_object_limited.return_value = json.dumps(
+            {
+                "id": "qa-1",
+                "ts": "2026-01-01T00:00:00.000Z",
+                "source": "scheduler.dedupe",
+                "type": "duplicate_blocked",
+                "severity": "low",
+                "message": "duplicate blocked",
+            }
+        ).encode()
+        with patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router):
+            report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=True)
+        assert report.error is None
+        assert mock_r2.list_objects.called
+
+    def test_qa_event_read_failure_never_fails_the_pipeline_run(
+        self, settings, mock_r2, mock_router, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        settings.rms_optimisation_enabled = True
+        mock_r2.get_object.return_value = b"{}"
+        mock_r2.list_objects.side_effect = RuntimeError("bucket unavailable")
+        with patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router):
+            report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=True)
+        assert report.error is None
