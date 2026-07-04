@@ -41,7 +41,7 @@ class RoutingResult:
     """What the Optimisation Engine did with one action, for the caller."""
 
     action: OptimisationAction
-    routed_to: str  # "observed" | "recommended" | "applied" | "patch_pending" | "not_eligible"
+    routed_to: str  # "observed" | "recommended" | "applied" | "rolled_back" | "patch_pending" | "not_eligible"
     experiment: ExperimentRecord | None = None
     detail: str = ""
 
@@ -85,7 +85,9 @@ class OptimisationEngine:
 
         if not self._policy.is_category_enabled(trend_signal.category):  # type: ignore[arg-type]
             logger.info(
-                "category %s disabled by policy; recording observe-only action for %s",
+                "category %s is disabled by policy; confidence_engine.score() will still run "
+                "below, but policy.effective_tier() will cap the resulting action for %s at "
+                "'observe' regardless of its raw confidence score",
                 trend_signal.category,
                 signature,
             )
@@ -155,8 +157,13 @@ class OptimisationEngine:
             experiment = self._experiments.run(
                 action=action, before=before, after=after, apply_fn=apply_fn, verify_fn=verify_fn
             )
-            routed = "applied" if experiment.outcome == "verified" else "rolled_back"
-            return RoutingResult(action=action, routed_to=routed, experiment=experiment)
+            if experiment.outcome == "verified":
+                routed = "applied"
+            elif experiment.outcome == "rejected":
+                routed = "not_eligible"
+            else:
+                routed = "rolled_back"
+            return RoutingResult(action=action, routed_to=routed, experiment=experiment, detail=experiment.detail)
 
         if action.tier == "patch_candidate":
             self._history.append(

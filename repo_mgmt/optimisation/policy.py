@@ -82,6 +82,26 @@ class TrendAnalysisPolicy(BaseModel):
     single_anomaly_max_confidence: float = Field(ge=0.0, le=100.0)
 
 
+class OscillationPolicy(BaseModel):
+    """Guardrails preventing repeated auto-configure flip-flopping on one signal.
+
+    These are separate from ``TrendAnalysisPolicy``: trend analysis governs
+    whether a *first* auto-configure action is justified at all (recurrence
+    across audit cycles); this governs whether *another* one is allowed to
+    run so soon after the last one for the same signature.
+
+    Optional with defaults so existing policy files that predate this guard
+    continue to load unchanged; the defaults (24h cooldown, look at the last
+    4 finished experiments for flip-flopping) are conservative starting
+    points, not tuned production values.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_reoptimisation_interval_hours: float = Field(ge=0.0, default=24.0)
+    reversal_lookback: int = Field(ge=0, default=4)
+
+
 class CategoryPolicy(BaseModel):
     """Per-category enable flag and the highest tier allowed without review."""
 
@@ -132,6 +152,7 @@ class OptimisationPolicy(BaseModel):
     confidence_tiers: list[ConfidenceTierBand]
     confidence_weights: ConfidenceWeights
     trend_analysis: TrendAnalysisPolicy
+    oscillation: OscillationPolicy = Field(default_factory=OscillationPolicy)
     categories: dict[OptimisationCategory, CategoryPolicy]
     rollback: RollbackPolicy
     patch_generator: PatchGeneratorPolicy
