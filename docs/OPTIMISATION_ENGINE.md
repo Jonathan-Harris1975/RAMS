@@ -1,5 +1,5 @@
 > **Document status:** Production reference
-> **Last reviewed:** 2 July 2026
+> **Last reviewed:** 3 July 2026
 > **Operational authority:** README, SECURITY policy, release gate, operations guide, and this document.
 
 # RAMS Optimisation Subsystem
@@ -12,8 +12,12 @@ component that follows exists specifically to bound what optimisation is
 allowed to do on its own.
 
 ```
-Audit findings (R2)
+AIMS qa-events/{day}/*.json (R2, "audits" bucket)
         │
+        ▼
+┌───────────────────┐
+│ QA Event Adapter   │  repo_mgmt.optimisation.qa_event_adapter
+└───────┬────────────┘  (watermarked, fail-soft; the "on-brand" pipeline only)
         ▼
 ┌───────────────────┐
 │  AuditEvidence     │  repo_mgmt.optimisation.models
@@ -35,6 +39,7 @@ Audit findings (R2)
         ├─ observe          → logged only
         ├─ recommend        → surfaced for a human decision
         ├─ auto_configure   → Experiment Manager + Rollback Manager
+        │                     (cooldown + oscillation guard first)
         └─ patch_candidate  → Patch Generator → existing gate/validation
         ▼
 ┌───────────────────┐
@@ -50,6 +55,47 @@ The engine converts findings into actions across seven categories:
 `platform_weighting`, and `configuration`. Every category is independently
 enabled/disabled and independently ceilinged in the policy file — see
 [Configuration Manager](#configuration-manager) below.
+
+## QA Event Adapter: where evidence comes from
+
+`repo_mgmt.optimisation.qa_event_adapter` is the call site that connects
+AIMS to the optimisation subsystem. AIMS's `services/shared/utils/qaEvents.js`
+writes structured QA events to `qa-events/{day}/{id}.json` in the `audits`
+R2 bucket (scheduler dedupe decisions, validator defects, podcast artwork
+retries, and similar). `ingest_new_qa_events()` lists, reads, and maps those
+events to `AuditEvidence`, then calls `OptimisationEngine.ingest_findings()`.
+
+This runs automatically, once per pipeline run, from `repo_mgmt.pipeline`
+for the `on-brand` pipeline only (the RAMS pipeline mapped to the AIMS
+repo — AIMS is the only current producer of this bucket prefix). It is:
+
+- **Gated by the same kill switch as everything else** — `RMS_OPTIMISATION_ENABLED`.
+  When that flag is `false` (the default), this adapter never runs and
+  never lists the bucket.
+- **Watermarked** — `QaEventWatermark` persists the newest event timestamp
+  already ingested per pipeline, so re-running once per pipeline run never
+  double-counts an event as two separate audit cycles (which would inflate
+  Trend Analysis's `distinct_cycles` count for free).
+- **Fail-soft** — a missing bucket, an unreadable object, or a malformed
+  event is logged and skipped. A bad AIMS deploy can never fail a RAMS
+  pipeline run.
+
+QA event `source` strings (e.g. `scheduler.dedupe`, `validator.anti-hype.rss`,
+`podcast.artwork`) are mapped to optimisation categories by prefix; an
+unrecognised source falls back to `configuration` rather than being
+dropped.
+
+**`auto_configure`-tier actions ingested this way are currently recorded
+for manual review, not auto-applied.** Applying an `auto_configure` action
+for real requires a concrete `apply_fn`/`verify_fn` pair for the specific
+configuration surface being changed — and RAMS has no existing write path
+into AIMS's live, deployed configuration from this repo. Inventing one
+implicitly, without a tested apply/verify pair per target, would undermine
+exactly what the Experiment Manager and Rollback Manager exist to bound.
+Until per-category apply/verify wiring exists, `observe`, `recommend`, and
+`patch_candidate` tiers route normally; `auto_configure` is deferred to a
+`manual_review` history entry instead. See
+`repo_mgmt.pipeline._route_optimisation_action`.
 
 ## Confidence scoring
 
@@ -112,11 +158,34 @@ toward the threshold forever.
 - **audit_ids** — every audit run that justified the change
 - **confidence** — the score that authorised it
 - **duration** — how long the apply-and-verify cycle took
-- **outcome** — `verified` or `rolled_back`
+- **outcome** — `verified`, `rolled_back`, or `rejected` (blocked by the cooldown/oscillation guard before applying — see below)
 
 Records are written to the Optimisation History at both the `pending` and
 final stages, so the full lifecycle is reconstructable from the audit log
 alone even if the process restarts mid-experiment.
+
+### Cooldown and oscillation guard
+
+Before applying anything, `ExperimentManager.run()` checks two
+policy-configured guards, both keyed on the evidence signature
+(`pipeline:category:signal`) so they only ever compare a signal against its
+own history:
+
+- **`oscillation.min_reoptimisation_interval_hours`** — refuse to run
+  another `auto_configure` experiment for a signature until at least this
+  long has passed since the last *finished* (`verified` or `rolled_back`)
+  experiment for that signature. Default: 24 hours.
+- **`oscillation.reversal_lookback`** — once the cooldown passes, look at
+  the last N finished experiments for the signature; if their `after`
+  states have been flipping back and forth between the same one or two
+  values, refuse to run and record it for manual review instead of
+  applying again. Default: 4.
+
+A blocked run never calls `apply_fn`/`verify_fn` and never takes a rollback
+snapshot — it writes a single experiment record with outcome `rejected`
+and a human-readable `detail` explaining which guard fired, so the block
+itself is visible in the Optimisation History. Both guards are disabled by
+setting the corresponding policy value to `0`.
 
 ## Rollback
 
@@ -214,12 +283,14 @@ fail-closed pattern as `RMS_REPO_BOOTSTRAP_ENABLED` elsewhere in RAMS.
 | Path | Responsibility |
 |---|---|
 | `repo_mgmt/optimisation/models.py` | Shared strict schemas (`AuditEvidence`, `OptimisationAction`). |
+| `repo_mgmt/optimisation/qa_event_adapter.py` | QA Event Adapter — reads AIMS `qa-events/{day}/*.json` into `AuditEvidence`; watermarked, fail-soft. |
 | `repo_mgmt/optimisation/policy.py` | Configuration Manager — loads and validates `config/optimisation_policy.json`. |
 | `repo_mgmt/optimisation/confidence_engine.py` | Confidence Engine. |
 | `repo_mgmt/optimisation/trend_analysis.py` | Trend Analysis / single-anomaly guard. |
 | `repo_mgmt/optimisation/history.py` | Optimisation History (append-only JSONL). |
 | `repo_mgmt/optimisation/rollback_manager.py` | Rollback Manager. |
-| `repo_mgmt/optimisation/experiment_manager.py` | Experiment Manager. |
+| `repo_mgmt/optimisation/experiment_manager.py` | Experiment Manager, including the cooldown/oscillation guard. |
 | `repo_mgmt/optimisation/patch_generator.py` | Patch Generator. |
 | `repo_mgmt/optimisation/optimisation_engine.py` | Orchestrator tying the above together. |
+| `repo_mgmt/pipeline.py` | Call site: builds the engine stack and runs one ingest+route cycle per `on-brand` pipeline run (`_run_optimisation_cycle`). |
 | `config/optimisation_policy.json` | Externalised thresholds (default policy). |
