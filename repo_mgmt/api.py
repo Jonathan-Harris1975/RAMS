@@ -34,6 +34,7 @@ from repo_mgmt.config import (
     load_settings,
 )
 from repo_mgmt.git_manager import GitManager
+from repo_mgmt import lifecycle
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.ops_alerts import send_operational_event
 from repo_mgmt.pipeline import RmsPipeline
@@ -487,20 +488,26 @@ def _pipeline_states() -> dict[str, str]:
 
 
 def _health_payload() -> dict[str, object]:
-    """Build the exact /health contract from the RMS specification."""
-    return {"status": "ok", "pipelines": _pipeline_states()}
+    """Build the exact /health contract from the RMS specification, plus lifecycle state."""
+    busy = any(_running.values())
+    state = lifecycle.compute_state(busy=busy, dependencies_ready=True)
+    return {"status": "ok", "pipelines": _pipeline_states(), "lifecycle": state}
 
 
 def _readiness_payload() -> dict[str, object]:
     """Build dependency readiness detail for deployment probes and operators."""
     deps = _dependency_details()
     ready_values = [value for value in deps.values() if isinstance(value, bool)]
-    status = "ready" if ready_values and all(ready_values) else "degraded"
+    dependencies_ready = bool(ready_values) and all(ready_values)
+    status = "ready" if dependencies_ready else "degraded"
+    busy = any(_running.values())
+    state = lifecycle.compute_state(busy=busy, dependencies_ready=dependencies_ready)
     return {
         "status": status,
         "pipelines": _pipeline_states(),
         "dependencies": deps,
         "admission": _active_status(),
+        "lifecycle": state,
     }
 
 
@@ -520,11 +527,13 @@ def _active_status() -> dict[str, object]:
     return {
         "acceptingRuns": not _shutting_down
         and _active_pipeline is None
-        and not any(_running.values()),
+        and not any(_running.values())
+        and not lifecycle.is_in_maintenance(),
         "activePipeline": _active_pipeline
         or next((p for p, running in _running.items() if running), None),
         "activeRunId": _active_run_id,
         "shuttingDown": _shutting_down,
+        "lifecycle": lifecycle.snapshot(),
         "maxConcurrentPipelines": (
             _cfg.rms_max_concurrent_pipelines if _cfg is not None else 1
         ),
@@ -822,6 +831,38 @@ async def readiness(
     payload = _readiness_payload()
     status_code = 200 if payload.get("status") == "ready" else 503
     return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/admin/lifecycle")
+async def get_lifecycle(
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Return the current self-observed lifecycle snapshot."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    return JSONResponse(status_code=200, content=lifecycle.snapshot())
+
+
+class MaintenanceRequest(BaseModel):
+    on: bool
+    reason: str | None = None
+
+
+@app.post("/admin/lifecycle/maintenance")
+async def set_maintenance(
+    request_body: MaintenanceRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Force RAMS into or out of Maintenance state (operator/MAST controlled)."""
+    auth_error = _auth_error_response(authorization)
+    if auth_error is not None:
+        return auth_error
+    if request_body.on:
+        snapshot = lifecycle.enter_maintenance(reason=request_body.reason or "operator-requested")
+    else:
+        snapshot = lifecycle.exit_maintenance(reason=request_body.reason or "operator-cleared")
+    return JSONResponse(status_code=200, content=snapshot)
 
 
 def _auth_error_response(authorization: str | None) -> JSONResponse | None:
@@ -1334,6 +1375,15 @@ async def trigger_run(
             status_code=503, content={"error": "configuration unavailable"}
         )
     idem_key = (x_idempotency_key or x_trigger_run_key or "").strip()[:256]
+    if lifecycle.is_in_maintenance():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "service-in-maintenance",
+                "lifecycle": lifecycle.snapshot(),
+                "hint": "RAMS is intentionally in Maintenance and is not accepting new runs.",
+            },
+        )
     with _admission_lock:
         if idem_key and idem_key in _idempotency:
             saved_pipeline, saved_run_id, saved_dry_run = _idempotency[idem_key]
