@@ -148,14 +148,17 @@ def test_health_reports_exact_contract(
         response = client.get("/health")
     data = response.json()
     assert response.status_code == 200
-    assert data == {
-        "status": "ok",
-        "pipelines": {
-            "seo-aeo-geo": "idle",
-            "mobile-ux": "idle",
-            "on-brand": "idle",
-        },
+    assert data["status"] == "ok"
+    assert data["pipelines"] == {
+        "seo-aeo-geo": "idle",
+        "mobile-ux": "idle",
+        "on-brand": "idle",
     }
+    # /health now also reports the service lifecycle state (Online/Starting/Busy/
+    # Standby/Offline/Maintenance model); Standby itself is tracked by MAST, since a
+    # paused instance cannot self-report, so RAMS only ever observes the other states.
+    assert data["lifecycle"]["state"] in {"starting", "online", "busy", "maintenance"}
+    assert "since" in data["lifecycle"]
 
 
 def test_readiness_reports_dependency_readiness(
