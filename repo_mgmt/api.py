@@ -1010,8 +1010,9 @@ def _read_json_report(
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return None, f"report is not valid JSON: {exc.msg}"
-    except OSError as exc:
-        return None, f"report could not be read: {exc}"
+    except OSError:
+        logger.exception("Failed to read dry-run report: %s", path)
+        return None, "report could not be read"
     if isinstance(payload, (dict, list)):
         return payload, None
     return None, "report JSON root must be an object or array"
