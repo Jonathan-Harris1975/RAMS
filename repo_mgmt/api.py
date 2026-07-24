@@ -174,11 +174,11 @@ def _get_cfg() -> Settings | None:
         try:
             _cfg = load_settings()
         except ConfigurationError as exc:
-            _cfg_error = str(exc)
+            _cfg_error = "Configuration is invalid or incomplete"
             logger.warning("api: config not fully loaded: %s", exc)
         except Exception as exc:
-            _cfg_error = f"Failed to load configuration: {exc}"
-            logger.warning("api: config not fully loaded: %s", exc)
+            _cfg_error = "Failed to load configuration"
+            logger.warning("api: config not fully loaded", exc_info=True)
     return _cfg
 
 
@@ -191,8 +191,8 @@ def _get_r2() -> R2Client | None:
             try:
                 _r2 = R2Client(cfg)
             except Exception as exc:
-                _r2_error = str(exc)
-                logger.warning("api: R2Client not initialised: %s", exc)
+                _r2_error = "R2 client initialization failed"
+                logger.warning("api: R2Client not initialised", exc_info=True)
     return _r2
 
 
@@ -235,10 +235,10 @@ def _verify_r2(*, force: bool = False) -> bool:
         try:
             _r2_verified = bool(r2.verify_bucket(cfg.r2_bucket_audits))
             _r2_verify_error = None if _r2_verified else "R2 bucket verification returned false"
-        except Exception as exc:
+        except Exception:
             _r2_verified = False
-            _r2_verify_error = str(exc)[:240]
-            logger.warning("api: R2 verification failed: %s", exc.__class__.__name__)
+            _r2_verify_error = "R2 verification failed"
+            logger.warning("api: R2 verification failed", exc_info=True)
     checked_at = datetime.now(tz=timezone.utc).isoformat()
     if _r2_verified:
         _r2_last_success_at = checked_at
@@ -281,8 +281,8 @@ def _version_output(command: str) -> tuple[bool, str]:
             check=False,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, str(exc)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "Command execution failed"
     output = result.stdout.strip()
     return result.returncode == 0, output
 
