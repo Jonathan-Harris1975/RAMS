@@ -237,7 +237,7 @@ def _verify_r2(*, force: bool = False) -> bool:
             _r2_verify_error = None if _r2_verified else "R2 bucket verification returned false"
         except Exception as exc:
             _r2_verified = False
-            _r2_verify_error = str(exc)[:240]
+            _r2_verify_error = "R2 verification failed"
             logger.warning("api: R2 verification failed: %s", exc.__class__.__name__)
     checked_at = datetime.now(tz=timezone.utc).isoformat()
     if _r2_verified:
