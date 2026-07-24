@@ -1011,7 +1011,8 @@ def _read_json_report(
     except json.JSONDecodeError as exc:
         return None, f"report is not valid JSON: {exc.msg}"
     except OSError as exc:
-        return None, f"report could not be read: {exc}"
+        logger.warning("Failed to read dry-run report file '%s'", path, exc_info=exc)
+        return None, "report could not be read"
     if isinstance(payload, (dict, list)):
         return payload, None
     return None, "report JSON root must be an object or array"
