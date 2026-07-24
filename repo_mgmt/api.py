@@ -1451,9 +1451,7 @@ async def trigger_run(
                 _active_pipeline = None
                 _active_run_id = None
         logger.exception("api: admission failed")
-        return JSONResponse(
-            status_code=503, content={"error": f"admission failed: {exc}"}
-        )
+        return JSONResponse(status_code=503, content={"error": "admission failed"})
 
     with _admission_lock:
         _remember_idempotency(idem_key, (typed_pipeline_id, run_id, dry_run), cfg)
