@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -26,7 +27,14 @@ def send_operational_event(settings: Settings, event: dict[str, Any]) -> bool:
     """Deliver one event without raising or logging credentials."""
     url = _configured_runtime_secret(settings.ops_alert_webhook_url)
     token = _configured_runtime_secret(settings.ops_alert_webhook_token)
-    if not url or not token or url.startswith("https://hive-api.example"):
+    parsed_url = urlparse(url) if url else None
+    if (
+        not url
+        or not token
+        or parsed_url is None
+        or parsed_url.scheme.lower() != "https"
+        or (parsed_url.hostname or "").lower() != "hive-api.example"
+    ):
         return False
     payload = {
         "source": "rams_runtime",
