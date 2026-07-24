@@ -174,10 +174,10 @@ def _get_cfg() -> Settings | None:
         try:
             _cfg = load_settings()
         except ConfigurationError as exc:
-            _cfg_error = str(exc)
+            _cfg_error = "Configuration is invalid or incomplete"
             logger.warning("api: config not fully loaded: %s", exc)
         except Exception as exc:
-            _cfg_error = f"Failed to load configuration: {exc}"
+            _cfg_error = "Configuration loading failed"
             logger.warning("api: config not fully loaded: %s", exc)
     return _cfg
 
@@ -191,7 +191,7 @@ def _get_r2() -> R2Client | None:
             try:
                 _r2 = R2Client(cfg)
             except Exception as exc:
-                _r2_error = str(exc)
+                _r2_error = "R2 client initialization failed"
                 logger.warning("api: R2Client not initialised: %s", exc)
     return _r2
 
@@ -237,7 +237,7 @@ def _verify_r2(*, force: bool = False) -> bool:
             _r2_verify_error = None if _r2_verified else "R2 bucket verification returned false"
         except Exception as exc:
             _r2_verified = False
-            _r2_verify_error = str(exc)[:240]
+            _r2_verify_error = "R2 verification failed"
             logger.warning("api: R2 verification failed: %s", exc.__class__.__name__)
     checked_at = datetime.now(tz=timezone.utc).isoformat()
     if _r2_verified:
@@ -282,7 +282,8 @@ def _version_output(command: str) -> tuple[bool, str]:
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, str(exc)
+        logger.warning("api: version check failed for %s: %s", binary, exc.__class__.__name__)
+        return False, f"{binary} version check failed"
     output = result.stdout.strip()
     return result.returncode == 0, output
 
