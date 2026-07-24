@@ -173,12 +173,12 @@ def _get_cfg() -> Settings | None:
     if _cfg is None and _cfg_error is None:
         try:
             _cfg = load_settings()
-        except ConfigurationError as exc:
-            _cfg_error = str(exc)
-            logger.warning("api: config not fully loaded: %s", exc)
-        except Exception as exc:
-            _cfg_error = f"Failed to load configuration: {exc}"
-            logger.warning("api: config not fully loaded: %s", exc)
+        except ConfigurationError:
+            _cfg_error = "Configuration failed to load"
+            logger.exception("api: config not fully loaded")
+        except Exception:
+            _cfg_error = "Failed to load configuration"
+            logger.exception("api: config not fully loaded")
     return _cfg
 
 
@@ -190,9 +190,9 @@ def _get_r2() -> R2Client | None:
         if cfg is not None:
             try:
                 _r2 = R2Client(cfg)
-            except Exception as exc:
-                _r2_error = str(exc)
-                logger.warning("api: R2Client not initialised: %s", exc)
+            except Exception:
+                _r2_error = "R2 client initialisation failed"
+                logger.exception("api: R2Client not initialised")
     return _r2
 
 
@@ -235,10 +235,10 @@ def _verify_r2(*, force: bool = False) -> bool:
         try:
             _r2_verified = bool(r2.verify_bucket(cfg.r2_bucket_audits))
             _r2_verify_error = None if _r2_verified else "R2 bucket verification returned false"
-        except Exception as exc:
+        except Exception:
             _r2_verified = False
-            _r2_verify_error = str(exc)[:240]
-            logger.warning("api: R2 verification failed: %s", exc.__class__.__name__)
+            _r2_verify_error = "R2 verification failed"
+            logger.exception("api: R2 verification failed")
     checked_at = datetime.now(tz=timezone.utc).isoformat()
     if _r2_verified:
         _r2_last_success_at = checked_at
@@ -281,8 +281,9 @@ def _version_output(command: str) -> tuple[bool, str]:
             check=False,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, str(exc)
+    except (OSError, subprocess.TimeoutExpired):
+        logger.exception("api: dependency version check failed for %s", binary)
+        return False, f"{binary} version check failed"
     output = result.stdout.strip()
     return result.returncode == 0, output
 
