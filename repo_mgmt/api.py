@@ -190,9 +190,9 @@ def _get_r2() -> R2Client | None:
         if cfg is not None:
             try:
                 _r2 = R2Client(cfg)
-            except Exception as exc:
-                _r2_error = str(exc)
-                logger.warning("api: R2Client not initialised: %s", exc)
+            except Exception:
+                _r2_error = "R2 client unavailable"
+                logger.exception("api: R2Client not initialised")
     return _r2
 
 
@@ -1055,13 +1055,16 @@ def _read_r2_json_report(
         message = str(exc)
         if "NoSuchKey" in message or "404" in message or "Not Found" in message:
             return None, f"live report not found at {key}", 404
-        return None, message, 502
+        logger.exception("api: failed to read live report from R2", exc_info=exc)
+        return None, "failed to read live report from storage", 502
     try:
         payload = json.loads(raw.decode("utf-8"))
-    except UnicodeDecodeError as exc:
-        return None, f"live report is not UTF-8 JSON: {exc}", 500
-    except json.JSONDecodeError as exc:
-        return None, f"live report is not valid JSON: {exc.msg}", 500
+    except UnicodeDecodeError:
+        logger.exception("api: live report is not UTF-8 JSON")
+        return None, "live report is not UTF-8 JSON", 500
+    except json.JSONDecodeError:
+        logger.exception("api: live report is not valid JSON")
+        return None, "live report is not valid JSON", 500
     if isinstance(payload, (dict, list)):
         return payload, None, 200
     return None, "live report JSON root must be an object or array", 500
