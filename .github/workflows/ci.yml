@@ -130,10 +130,15 @@ jobs:
           health = json.loads(Path('/tmp/health.json').read_text())
           readiness = json.loads(Path('/tmp/readiness.json').read_text())
           warmup = json.loads(Path('/tmp/warmup.json').read_text())
-          assert health == {
-              'status': 'ok',
-              'pipelines': {'seo-aeo-geo': 'idle', 'mobile-ux': 'idle', 'on-brand': 'idle'},
+          assert health['status'] == 'ok'
+          assert health['pipelines'] == {
+              'website': 'idle',
+              'seo-aeo-geo': 'idle',
+              'mobile-ux': 'idle',
+              'on-brand': 'idle',
           }
+          assert health['lifecycle']['state'] in {'starting', 'online', 'busy', 'maintenance'}
+          assert health['lifecycle']['maintenance']['on'] is False
           deps = readiness['dependencies']
           assert deps['r2_configured'] is True
           assert deps['r2_verified'] is False
