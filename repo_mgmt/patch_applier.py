@@ -29,6 +29,16 @@ class PatchApplyError(Exception):
 
 
 PROTECTED_PATHS: dict[str, frozenset[str]] = {
+    "website": frozenset(
+        [
+            "blog/posts/",
+            "blog/posts.json",
+            "transcripts/",
+            "data/podcast-episodes.json",
+            "assets/js/podcast-transcripts.min.js",
+            "functions/transcripts/",
+        ]
+    ),
     "mobile-ux": frozenset(
         [
             "blog/posts/",

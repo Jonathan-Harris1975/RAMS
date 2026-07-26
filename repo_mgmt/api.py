@@ -179,7 +179,7 @@ def _get_cfg() -> Settings | None:
         except ConfigurationError as exc:
             _cfg_error = "Configuration is invalid or incomplete"
             logger.warning("api: config not fully loaded: %s", exc)
-        except Exception as exc:
+        except Exception:
             _cfg_error = "Failed to load configuration"
             logger.warning("api: config not fully loaded", exc_info=True)
     return _cfg
@@ -193,7 +193,7 @@ def _get_r2() -> R2Client | None:
         if cfg is not None:
             try:
                 _r2 = R2Client(cfg)
-            except Exception as exc:
+            except Exception:
                 _r2_error = "R2 client initialization failed"
                 logger.warning("api: R2Client not initialised", exc_info=True)
     return _r2
@@ -1510,7 +1510,7 @@ async def trigger_run(
             status_code=exc.status_code,
             content={"error": exc.error, **exc.details},
         )
-    except Exception as exc:
+    except Exception:
         with _admission_lock:
             _running[typed_pipeline_id] = False
             if _active_run_id == run_id:

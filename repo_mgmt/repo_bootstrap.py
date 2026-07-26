@@ -310,7 +310,7 @@ def targets_from_settings(cfg: Settings) -> list[BootstrapTarget]:
             label="website",
             url=cfg.rms_website_repo_url,
             branch=cfg.rms_website_repo_branch,
-            path=cfg.repo_path_for("seo-aeo-geo"),
+            path=cfg.repo_path_for("website"),
         ),
         BootstrapTarget(
             label="aims",
@@ -325,13 +325,13 @@ def targets_for_pipeline(
     cfg: Settings, pipeline_id: PipelineId
 ) -> list[BootstrapTarget]:
     """Return only the bootstrap target required by *pipeline_id*."""
-    if pipeline_id in {"seo-aeo-geo", "mobile-ux"}:
+    if pipeline_id in {"website", "seo-aeo-geo", "mobile-ux"}:
         return [
             BootstrapTarget(
                 label="website",
                 url=cfg.rms_website_repo_url,
                 branch=cfg.rms_website_repo_branch,
-                path=cfg.repo_path_for("seo-aeo-geo"),
+                path=cfg.repo_path_for(pipeline_id),
             )
         ]
     if pipeline_id == "on-brand":

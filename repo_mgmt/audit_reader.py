@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import PurePosixPath
+import re
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
@@ -28,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 # Mapping from pipeline ID to R2 audit key.
 _AUDIT_KEY_MAP: dict[str, tuple[str, ...]] = {
+    # Unified website audits are normally read by exact key supplied by AIMS.
+    # This legacy pointer is only a fail-soft fallback for manual/CLI calls.
+    "website": ("audits/website/latest.json",),
     # Council reports are preferred master reports when present.
     # Raw source audits remain fallback inputs so staged deployments stay backward compatible.
     "seo-aeo-geo": (
@@ -58,6 +62,7 @@ _SUPPLEMENTAL_AUDIT_KEY_MAP: dict[str, tuple[str, ...]] = {
 # Keep dereferencing bounded and JSON-only. Screenshot-heavy manifests can name
 # hundreds of artefacts; RAMS only needs structured evidence documents.
 _PIPELINE_ARTEFACT_PRIORITIES: dict[str, tuple[str, ...]] = {
+    "website": ("website-audit.json",),
     "mobile-ux": (
         "repository-issue-appendix.json",
         "responsive-fix-appendix.json",
@@ -112,7 +117,7 @@ def read_latest(
     Read and enrich the latest audit JSON for *pipeline_id* from R2.
 
     Args:
-        pipeline_id: One of ``seo-aeo-geo``, ``mobile-ux``, or ``on-brand``.
+        pipeline_id: One of ``website``, ``seo-aeo-geo``, ``mobile-ux``, or ``on-brand``.
         r2: Initialised R2Client instance.
         bucket: R2 bucket name to read from, usually ``cfg.r2_bucket_audits``.
 
@@ -207,6 +212,107 @@ def read_latest(
                 data["artefactErrors"] = artefact_errors
         logger.info("audit_reader: loaded %d-key snapshot from %r", len(data), key)
     return data
+
+
+def validate_website_report_key(key: str) -> str:
+    """Validate the exact final website-audit JSON key supplied by AIMS."""
+    cleaned = _clean_key(str(key or ""))
+    parts = PurePosixPath(cleaned).parts
+    if (
+        len(parts) != 5
+        or parts[0] != "audits"
+        or parts[1] != "website"
+        or not re.fullmatch(r"\d{4}-\d{2}", parts[2])
+        or not re.fullmatch(r"[A-Za-z0-9._-]+", parts[3])
+        or parts[4] != "website-audit.json"
+    ):
+        raise ValueError(
+            "website audit key must match audits/website/YYYY-MM/<session>/website-audit.json"
+        )
+    return cleaned
+
+
+def read_report_key(
+    pipeline_id: "PipelineId",
+    r2: "R2Client",
+    bucket: str,
+    key: str,
+    *,
+    max_object_bytes: int = _DEFAULT_MAX_OBJECT_BYTES,
+) -> dict[str, object]:
+    """Read one exact machine-readable audit report instead of a latest pointer.
+
+    The unified website pipeline intentionally retains only PDF, HTML and JSON,
+    so AIMS passes the exact JSON key to RAMS at dispatch time. This keeps the
+    audit bucket free of a permanent ``latest.json`` signpost.
+    """
+    if pipeline_id != "website":
+        raise ValueError("exact report-key reads are currently supported only for website")
+    final_key = validate_website_report_key(key)
+    budget = _ReadBudget(remaining_bytes=max_object_bytes, remaining_artefacts=0)
+    data = _read_json_object(
+        r2,
+        bucket,
+        final_key,
+        fail_soft=False,
+        budget=budget,
+        max_object_bytes=max_object_bytes,
+    )
+    if not isinstance(data, dict):
+        return {}
+    if data.get("auditType") != "website":
+        logger.warning("audit_reader: exact website report %r has wrong auditType", final_key)
+        return {}
+    if data.get("schemaVersion") != "website-audit-report/v1":
+        logger.warning(
+            "audit_reader: exact website report %r has unsupported schemaVersion=%r",
+            final_key,
+            data.get("schemaVersion"),
+        )
+        return {}
+    if data.get("remediationContractVersion") != "rams-website/v1":
+        logger.warning(
+            "audit_reader: exact website report %r has unsupported remediationContractVersion=%r",
+            final_key,
+            data.get("remediationContractVersion"),
+        )
+        return {}
+    session_id = PurePosixPath(final_key).parts[3]
+    if data.get("sessionId") != session_id:
+        logger.warning(
+            "audit_reader: exact website report %r has sessionId=%r (expected %r)",
+            final_key,
+            data.get("sessionId"),
+            session_id,
+        )
+        return {}
+    report_set = data.get("reportSet")
+    expected_prefix = str(PurePosixPath(final_key).parent)
+    expected_keys = {
+        "pdf": f"{expected_prefix}/website-audit.pdf",
+        "html": f"{expected_prefix}/website-audit.html",
+        "json": final_key,
+    }
+    if not isinstance(report_set, dict) or any(
+        not isinstance(report_set.get(label), dict)
+        or report_set[label].get("key") != expected_key
+        for label, expected_key in expected_keys.items()
+    ):
+        logger.warning(
+            "audit_reader: exact website report %r does not declare the required PDF/HTML/JSON sibling report set",
+            final_key,
+        )
+        return {}
+    if data.get("retentionPolicy") != "final-pdf-html-json-only":
+        logger.warning(
+            "audit_reader: exact website report %r has unsupported retentionPolicy=%r",
+            final_key,
+            data.get("retentionPolicy"),
+        )
+        return {}
+    result = dict(data)
+    result["sourceAuditKey"] = final_key
+    return result
 
 
 def _empty_supplemental_bundle() -> dict[str, Any]:

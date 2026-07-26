@@ -31,7 +31,7 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-_PIPELINES: tuple[PipelineId, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
+_PIPELINES: tuple[PipelineId, ...] = ("website", "seo-aeo-geo", "mobile-ux", "on-brand")
 
 
 def _validate_pipeline(value: str) -> str:
@@ -60,6 +60,11 @@ def dry_run(
     pipeline_id: str = typer.Argument(
         ..., callback=_validate_pipeline, help="Pipeline to run in dry-run mode"
     ),
+    audit_json_key: Optional[str] = typer.Option(
+        None,
+        "--audit-json-key",
+        help="Exact AIMS website-audit.json R2 key (required for website)",
+    ),
 ) -> None:
     """Run a pipeline in dry-run mode (no writes, no commits, no pushes)."""
     typer.echo(f"[rms] dry-run: {pipeline_id}")
@@ -69,7 +74,12 @@ def dry_run(
         typer.secho(f"Configuration error: {exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    report = asyncio.run(pipeline.run(dry_run=True))
+    if pipeline_id == "website" and not audit_json_key:
+        typer.secho("website requires --audit-json-key", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+    report = asyncio.run(
+        pipeline.run(dry_run=True, audit_json_key=audit_json_key)
+    )
     _print_report(report)
 
 
@@ -82,6 +92,11 @@ def run_pipeline(
         None,
         "--dry-run/--no-dry-run",
         help="Override RMS_DRY_RUN env var",
+    ),
+    audit_json_key: Optional[str] = typer.Option(
+        None,
+        "--audit-json-key",
+        help="Exact AIMS website-audit.json R2 key (required for website)",
     ),
 ) -> None:
     """Run a pipeline, respecting RMS_DRY_RUN (or the --dry-run flag)."""
@@ -96,7 +111,12 @@ def run_pipeline(
     effective_dry_run = (
         force_dry_run if force_dry_run is not None else pipeline.cfg.rms_dry_run
     )
-    report = asyncio.run(pipeline.run(dry_run=effective_dry_run))
+    if pipeline_id == "website" and not audit_json_key:
+        typer.secho("website requires --audit-json-key", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+    report = asyncio.run(
+        pipeline.run(dry_run=effective_dry_run, audit_json_key=audit_json_key)
+    )
     _print_report(report)
 
 
