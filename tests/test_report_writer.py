@@ -95,3 +95,28 @@ def test_report_quality_metadata_is_serialised(tmp_path, monkeypatch, settings, 
     assert data["reportQuality"]["lane"] == "Lane 1 autonomous reporting"
     assert data["reportQuality"]["manualInterventionRequired"] is True
     assert "future-output brand guardrails" in data["reportQuality"]["primaryGoal"]
+
+
+def test_pull_request_metadata_is_serialised(tmp_path, monkeypatch, settings, mock_r2):
+    from repo_mgmt.report_publisher import PullRequestInfo
+
+    monkeypatch.chdir(tmp_path)
+    report = _report(True)
+    report.pull_request = PullRequestInfo(
+        number=42,
+        url="https://github.com/example/site/pull/42",
+        title="RAMS website remediation",
+        base="main",
+        head="rms-qa/website/run-1",
+        created=True,
+    )
+    dest = publish(report, settings, mock_r2)
+    data = json.loads(Path(dest).read_text())
+    assert data["pullRequest"] == {
+        "number": 42,
+        "url": "https://github.com/example/site/pull/42",
+        "title": "RAMS website remediation",
+        "base": "main",
+        "head": "rms-qa/website/run-1",
+        "created": True,
+    }

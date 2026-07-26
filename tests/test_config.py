@@ -174,3 +174,52 @@ def test_github_token_placeholder_is_not_treated_as_usable() -> None:
     with patch.dict(os.environ, env, clear=True):
         cfg = Settings()
     assert cfg.github_token_value is None
+
+
+def test_auto_pr_requires_push_enabled() -> None:
+    env = _complete_env(
+        RMS_CREATE_PR="true",
+        RMS_PUSH_ENABLED="false",
+        RMS_GITHUB_TOKEN="token",
+        RMS_WEBSITE_REPO_URL="https://github.com/example/site.git",
+        RMS_AIMS_REPO_URL="https://github.com/example/aims.git",
+    )
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ConfigurationError, match="RMS_PUSH_ENABLED=true"):
+            Settings()
+
+
+def test_push_and_auto_pr_require_github_write_configuration() -> None:
+    env = _complete_env(RMS_PUSH_ENABLED="true", RMS_CREATE_PR="true")
+    with patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ConfigurationError) as exc_info:
+            Settings()
+    message = str(exc_info.value)
+    assert "RMS_GITHUB_TOKEN/GITHUB_TOKEN" in message
+    assert "RMS_WEBSITE_REPO_URL" in message
+    assert "RMS_AIMS_REPO_URL" in message
+
+
+def test_push_and_auto_pr_production_configuration_loads() -> None:
+    env = _complete_env(
+        RMS_DRY_RUN="false",
+        RMS_LIVE_WRITE_ENABLED="true",
+        RMS_PUSH_ENABLED="true",
+        RMS_CREATE_PR="true",
+        RMS_GITHUB_TOKEN="token",
+        RMS_WEBSITE_REPO_URL="https://github.com/example/site.git",
+        RMS_AIMS_REPO_URL="https://github.com/example/aims.git",
+    )
+    with patch.dict(os.environ, env, clear=True):
+        cfg = Settings()
+    assert cfg.live_write_permitted is True
+    assert cfg.rms_push_enabled is True
+    assert cfg.rms_create_pr is True
+    assert cfg.repo_url_for("website").endswith("site.git")
+    assert cfg.repo_branch_for("website") == "main"
+
+
+def test_website_issue_limit_defaults_to_all_eligible() -> None:
+    with patch.dict(os.environ, _complete_env(), clear=True):
+        cfg = Settings()
+    assert cfg.rms_website_max_issues_per_run == 0

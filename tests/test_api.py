@@ -83,9 +83,13 @@ class FakePipeline:
 
     def __init__(self) -> None:
         self.calls: list[tuple[bool, str]] = []
+        self.audit_json_keys: list[str | None] = []
 
-    async def run(self, dry_run: bool, run_id: str) -> RunReport:
+    async def run(
+        self, dry_run: bool, run_id: str, audit_json_key: str | None = None
+    ) -> RunReport:
         self.calls.append((dry_run, run_id))
+        self.audit_json_keys.append(audit_json_key)
         return RunReport(
             runId=run_id,
             pipeline="on-brand",
@@ -150,6 +154,7 @@ def test_health_reports_exact_contract(
     assert response.status_code == 200
     assert data["status"] == "ok"
     assert data["pipelines"] == {
+        "website": "idle",
         "seo-aeo-geo": "idle",
         "mobile-ux": "idle",
         "on-brand": "idle",
@@ -180,6 +185,7 @@ def test_readiness_reports_dependency_readiness(
     assert deps["model_router_ready"] is True
     assert deps["website_repo_ready"] is True
     assert deps["aims_repo_ready"] is True
+    assert deps["pipeline_repo_paths"]["website"].endswith("website")
     assert deps["pipeline_repo_paths"]["seo-aeo-geo"].endswith("website")
     assert deps["pipeline_repo_paths"]["on-brand"].endswith("aims")
     assert deps["validation_runtime_ready"] is True
@@ -262,6 +268,58 @@ def test_valid_run_request_calls_real_background_pipeline_path(
     assert len(fake_pipeline.calls) == 1
     assert fake_pipeline.calls[0][0] is True
     assert fake_pipeline.calls[0][1] == data["runId"]
+
+
+def test_website_run_requires_exact_final_json_key(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        missing = client.post("/rebuild/website/run")
+        invalid = client.post(
+            "/rebuild/website/run", json={"audit_json_key": "audits/website/latest.json"}
+        )
+    assert missing.status_code == 422
+    assert invalid.status_code == 422
+    assert fake_pipeline.calls == []
+
+
+def test_website_run_passes_exact_final_json_key_to_pipeline(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    key = "audits/website/2026-07/site-audit-123/website-audit.json"
+    with TestClient(api_mod.app) as client:
+        response = client.post(
+            "/rebuild/website/run",
+            json={"audit_json_key": key, "audit_session_id": "site-audit-123"},
+        )
+    assert response.status_code == 202, response.json()
+    assert response.json()["auditJsonKey"] == key
+    assert len(fake_pipeline.calls) == 1
+    assert fake_pipeline.audit_json_keys == [key]
+
+
+def test_website_run_rejects_session_key_mismatch(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs)
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    with TestClient(api_mod.app) as client:
+        response = client.post(
+            "/rebuild/website/run",
+            json={
+                "audit_json_key": "audits/website/2026-07/right-session/website-audit.json",
+                "audit_session_id": "wrong-session",
+            },
+        )
+    assert response.status_code == 422
+    assert fake_pipeline.calls == []
 
 
 def test_already_running_conflict_schedules_no_background(
@@ -483,7 +541,7 @@ def test_ops_excellence_exposes_production_control_evidence(
     assert controls["liveWritePermitted"] is True
     assert controls["pushEnabled"] is False
     assert controls["createPr"] is False
-    assert "Pushing and PR creation remain disabled" in controls["meaning"]
+    assert "automatically creates or reuses one GitHub pull request" in controls["meaning"]
     assert payload["modelProviderPolicy"] == {
         "promptLogging": False,
         "dataCollection": "deny",

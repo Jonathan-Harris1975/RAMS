@@ -244,3 +244,68 @@ class TestOptimisationCycleWiring:
         with patch("repo_mgmt.pipeline.ModelRouter", return_value=mock_router):
             report = pipeline_mod.run("on-brand", settings, mock_r2, dry_run=True)
         assert report.error is None
+
+
+def test_automatic_pr_is_created_for_pushed_commits(settings, monkeypatch) -> None:
+    settings.rms_create_pr = True
+    settings.rms_push_enabled = True
+    settings.rms_github_token = "token"
+    settings.rms_website_repo_url = "https://github.com/example/site.git"
+    settings.rms_website_repo_branch = "main"
+    tasks = [
+        {
+            "taskId": "website-1",
+            "title": "Fix canonical",
+            "severity": "high",
+            "commit_sha": "abc123",
+            "pushed": True,
+        }
+    ]
+    fake = type(
+        "PR",
+        (),
+        {
+            "number": 31,
+            "url": "https://github.com/example/site/pull/31",
+            "title": "RAMS website remediation",
+            "base": "main",
+            "head": "rms-qa/website/run-1",
+            "created": True,
+        },
+    )()
+    monkeypatch.setattr(pipeline_mod.github_pr, "create_or_get_pull_request", lambda **kwargs: fake)
+
+    result = pipeline_mod._create_automatic_pr(  # noqa: SLF001
+        pipeline_id="website",
+        run_id="run-1",
+        branch="rms-qa/website/run-1",
+        audit_json_key="audits/website/2026-07/run-1/website-audit.json",
+        tasks=tasks,
+        cfg=settings,
+    )
+
+    assert result is not None and result.number == 31
+    assert tasks[0]["pullRequestUrl"].endswith("/pull/31")
+
+
+def test_automatic_pr_is_not_created_without_a_pushed_commit(settings, monkeypatch) -> None:
+    settings.rms_create_pr = True
+    settings.rms_push_enabled = True
+    called = False
+
+    def fail_if_called(**kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("GitHub should not be called")
+
+    monkeypatch.setattr(pipeline_mod.github_pr, "create_or_get_pull_request", fail_if_called)
+    result = pipeline_mod._create_automatic_pr(  # noqa: SLF001
+        pipeline_id="website",
+        run_id="run-1",
+        branch="rms-qa/website/run-1",
+        audit_json_key="audits/website/2026-07/run-1/website-audit.json",
+        tasks=[{"commit_sha": "abc", "pushed": False}],
+        cfg=settings,
+    )
+    assert result is None
+    assert called is False

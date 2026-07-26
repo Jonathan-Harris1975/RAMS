@@ -64,3 +64,9 @@ def test_unknown_severity_defaults_to_low() -> None:
     result = rank(issues, max_code_fix=5)
     # score = 1 * 2.0 = 2.0 — should not crash
     assert len(result.code_fix) == 1
+
+
+def test_zero_code_fix_cap_keeps_all_items() -> None:
+    issues = [_issue(f"t{i}", "medium", 1.0) for i in range(12)]
+    result = rank(issues, max_code_fix=0)
+    assert len(result.code_fix) == 12

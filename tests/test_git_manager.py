@@ -133,3 +133,30 @@ def test_git_manager_passes_configured_output_bound(
     gm = GitManager(tmp_path, max_output_bytes=12_345)
     assert gm.is_git_repo() is True
     assert captured["max_output_bytes"] == 12_345
+
+
+def test_push_uses_ephemeral_github_auth_header_without_putting_token_in_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Private-repo pushes authenticate without persisting credentials in origin."""
+    from repo_mgmt import git_manager
+    from repo_mgmt.process_runner import BoundedProcessResult
+
+    captured: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> BoundedProcessResult:
+        env = dict(kwargs.get("env") or {})
+        captured.append((list(command), env))
+        if command[-3:] == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return BoundedProcessResult(0, "rms-qa/website/run-1", False, False)
+        return BoundedProcessResult(0, "", False, False)
+
+    monkeypatch.setattr(git_manager, "run_bounded", fake_run)
+    gm = GitManager(tmp_path, push_enabled=True, github_token="secret-token")
+    assert gm.push_branch("rms-qa/website/run-1") is True
+
+    push_command, push_env = captured[-1]
+    assert push_command[-4:] == ["push", "--set-upstream", "origin", "rms-qa/website/run-1"]
+    assert "secret-token" not in " ".join(push_command)
+    assert push_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
+    assert push_env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
