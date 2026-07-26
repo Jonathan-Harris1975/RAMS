@@ -174,7 +174,10 @@ def list_qa_event_keys(
             logger.warning(
                 "qa_event_adapter: could not list %r in bucket %r: %s", prefix, bucket, exc
             )
-    return [key for key in keys if key.endswith(".json")]
+    # R2 listings for adjacent day windows should be disjoint, but test doubles,
+    # eventual-consistency edges, or malformed providers can repeat keys. Preserve
+    # order while de-duplicating so one QA event can never count as two cycles.
+    return list(dict.fromkeys(key for key in keys if key.endswith(".json")))
 
 
 def read_qa_events(
