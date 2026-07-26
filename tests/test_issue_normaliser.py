@@ -336,3 +336,114 @@ class TestNormalise:
         assert len(issues) == 1
         assert issues[0]["sourceIssueId"] == "OB-001"
 
+
+
+def test_unified_website_master_ledger_can_create_confirmed_code_fix(
+    settings, tmp_path
+) -> None:
+    repo = tmp_path / "website"
+    css = repo / "assets" / "css" / "site.css"
+    css.parent.mkdir(parents=True)
+    css.write_text("body{}", encoding="utf-8")
+    settings.rms_website_repo_path = str(repo)
+    audit = {
+        "council": {
+            "masterIssueLedger": [
+                {
+                    "findingId": "U-001",
+                    "title": "Mobile navigation CSS defect",
+                    "rootCause": "Shared mobile navigation styles overflow at the tested width.",
+                    "severity": "High",
+                    "confidence": "Confirmed",
+                    "classification": "code_fix",
+                    "fixClass": "css_fix",
+                    "affectedPaths": ["assets/css/site.css"],
+                    "evidence": ["Rendered Stage 3 evidence confirmed the shared CSS defect."],
+                    "exactRemediation": "Adjust the shared mobile navigation rule without changing desktop layout.",
+                    "sourceFindingIds": ["MUX-001"],
+                    "acceptanceCriterion": "The rendered mobile check passes at every required viewport.",
+                    "verificationMethod": "Run the mobile UX hard-gate regression.",
+                }
+            ],
+            # Narrative duplicates must not create a second task when the governed ledger exists.
+            "topActions": [
+                {
+                    "actionId": "A-01",
+                    "exactChange": "Adjust the same mobile navigation rule.",
+                    "confidence": "Confirmed",
+                    "affected": ["assets/css/site.css"],
+                    "sourceFindingIds": ["MUX-001"],
+                }
+            ],
+        }
+    }
+    issues = normalise(audit, "website", "2026-07-26", settings)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["classification"] == "code_fix"
+    assert issue["allowedFixClass"] == "css_fix"
+    assert issue["affectedPaths"] == ["assets/css/site.css"]
+    assert issue["sourceIssueId"] == "U-001"
+
+
+def test_unified_website_does_not_auto_promote_narrative_affected_path(
+    settings, tmp_path
+) -> None:
+    repo = tmp_path / "website"
+    css = repo / "assets" / "css" / "site.css"
+    css.parent.mkdir(parents=True)
+    css.write_text("body{}", encoding="utf-8")
+    settings.rms_website_repo_path = str(repo)
+    audit = {
+        "council": {
+            "masterIssueLedger": [
+                {
+                    "findingId": "U-002",
+                    "title": "Possible CSS change",
+                    "severity": "High",
+                    "confidence": "Confirmed",
+                    "classification": "code_fix",
+                    "fixClass": "css_fix",
+                    "affected": ["assets/css/site.css"],
+                    "affectedPaths": [],
+                    "evidence": ["The report names the component but not an exact governed file path."],
+                    "exactRemediation": "Adjust the rule after source ownership is verified.",
+                    "sourceFindingIds": ["MUX-002"],
+                }
+            ]
+        }
+    }
+    issues = normalise(audit, "website", "2026-07-26", settings)
+    assert len(issues) == 1
+    assert issues[0]["classification"] == "manual_review"
+    assert issues[0]["affectedPaths"] == []
+
+
+def test_unified_website_requires_explicit_code_fix_classification(
+    settings, tmp_path
+) -> None:
+    repo = tmp_path / "website"
+    page = repo / "index.html"
+    repo.mkdir(parents=True)
+    page.write_text("<html></html>", encoding="utf-8")
+    settings.rms_website_repo_path = str(repo)
+    audit = {
+        "council": {
+            "masterIssueLedger": [
+                {
+                    "findingId": "U-003",
+                    "title": "Canonical correction",
+                    "severity": "High",
+                    "confidence": "Confirmed",
+                    "fixClass": "canonical_fix",
+                    "affectedPaths": ["index.html"],
+                    "evidence": ["Confirmed canonical mismatch in index.html."],
+                    "exactRemediation": "Correct the canonical href in index.html.",
+                    "sourceFindingIds": ["SEO-003"],
+                }
+            ]
+        }
+    }
+    issues = normalise(audit, "website", "2026-07-26", settings)
+    assert len(issues) == 1
+    assert issues[0]["classification"] == "manual_review"

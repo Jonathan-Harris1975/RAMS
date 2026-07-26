@@ -197,3 +197,99 @@ def test_audit_reader_respects_artefact_count_budget(mock_r2: MagicMock) -> None
     result = audit_reader.read_latest("seo-aeo-geo", mock_r2, "audits", max_artefacts=1)
     assert len(result["artefacts"]) == 1
     assert result["artefactErrors"]
+
+
+class TestUnifiedWebsiteReportKey:
+    def test_validates_exact_final_json_key(self) -> None:
+        key = "audits/website/2026-07/site-audit-123/website-audit.json"
+        assert audit_reader.validate_website_report_key(key) == key
+
+    def test_rejects_latest_pointer_or_wrong_format(self) -> None:
+        for key in (
+            "audits/website/latest.json",
+            "audits/website/2026-07/site-audit-123/website-audit.html",
+            "audits/website/2026-7/site-audit-123/website-audit.json",
+            "audits/seo-aeo-geo/2026-07/site-audit-123/website-audit.json",
+        ):
+            try:
+                audit_reader.validate_website_report_key(key)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"expected invalid website report key: {key}")
+
+    def test_reads_exact_unified_json_report_and_preserves_source_key(
+        self, mock_r2: MagicMock
+    ) -> None:
+        key = "audits/website/2026-07/site-audit-123/website-audit.json"
+        payload = {
+            "schemaVersion": "website-audit-report/v1",
+            "remediationContractVersion": "rams-website/v1",
+            "auditType": "website",
+            "sessionId": "site-audit-123",
+            "retentionPolicy": "final-pdf-html-json-only",
+            "reportSet": {
+                "pdf": {"key": "audits/website/2026-07/site-audit-123/website-audit.pdf"},
+                "html": {"key": "audits/website/2026-07/site-audit-123/website-audit.html"},
+                "json": {"key": key},
+            },
+            "council": {"masterIssueLedger": []},
+        }
+        mock_r2.get_object.return_value = json.dumps(payload).encode()
+        result = audit_reader.read_report_key("website", mock_r2, "audits", key)
+        assert result["sessionId"] == "site-audit-123"
+        assert result["sourceAuditKey"] == key
+        mock_r2.get_object.assert_called_once_with(bucket="audits", key=key)
+
+    def test_rejects_wrong_unified_report_schema(self, mock_r2: MagicMock) -> None:
+        key = "audits/website/2026-07/site-audit-123/website-audit.json"
+        mock_r2.get_object.return_value = json.dumps(
+            {"schemaVersion": "other/v1", "auditType": "website"}
+        ).encode()
+        assert audit_reader.read_report_key("website", mock_r2, "audits", key) == {}
+
+
+def test_exact_website_report_rejects_wrong_remediation_contract(mock_r2: MagicMock) -> None:
+    key = "audits/website/2026-07/site-audit-123/website-audit.json"
+    mock_r2.get_object.return_value = json.dumps(
+        {
+            "schemaVersion": "website-audit-report/v1",
+            "remediationContractVersion": "other/v1",
+            "auditType": "website",
+        }
+    ).encode()
+    assert audit_reader.read_report_key("website", mock_r2, "audits", key) == {}
+
+
+def test_exact_website_report_rejects_mismatched_report_set(mock_r2: MagicMock) -> None:
+    key = "audits/website/2026-07/site-audit-123/website-audit.json"
+    mock_r2.get_object.return_value = json.dumps(
+        {
+            "schemaVersion": "website-audit-report/v1",
+            "remediationContractVersion": "rams-website/v1",
+            "auditType": "website",
+            "sessionId": "site-audit-123",
+            "retentionPolicy": "final-pdf-html-json-only",
+            "reportSet": {
+                "pdf": {"key": "audits/website/2026-07/site-audit-123/website-audit.pdf"},
+                "html": {"key": "audits/website/2026-07/site-audit-123/website-audit.html"},
+                "json": {"key": "audits/website/2026-07/other-session/website-audit.json"},
+            },
+        }
+    ).encode()
+    assert audit_reader.read_report_key("website", mock_r2, "audits", key) == {}
+
+
+def test_exact_website_report_rejects_session_mismatch(mock_r2: MagicMock) -> None:
+    key = "audits/website/2026-07/site-audit-123/website-audit.json"
+    mock_r2.get_object.return_value = json.dumps(
+        {
+            "schemaVersion": "website-audit-report/v1",
+            "remediationContractVersion": "rams-website/v1",
+            "auditType": "website",
+            "sessionId": "wrong-session",
+            "retentionPolicy": "final-pdf-html-json-only",
+            "reportSet": {},
+        }
+    ).encode()
+    assert audit_reader.read_report_key("website", mock_r2, "audits", key) == {}

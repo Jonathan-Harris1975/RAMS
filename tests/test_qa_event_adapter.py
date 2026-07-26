@@ -6,7 +6,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-import pytest
 
 from repo_mgmt.optimisation.qa_event_adapter import (
     IngestSummary,
@@ -89,7 +88,7 @@ class TestListQaEventKeys:
         r2.list_objects.return_value = ["qa-events/2026-01-01/a.json"]
         keys = list_qa_event_keys(r2, "audits", days_back=2)
         assert r2.list_objects.call_count == 2
-        assert keys == ["qa-events/2026-01-01/a.json", "qa-events/2026-01-01/a.json"]
+        assert keys == ["qa-events/2026-01-01/a.json"]
 
     def test_filters_out_non_json_keys(self) -> None:
         r2 = MagicMock()
