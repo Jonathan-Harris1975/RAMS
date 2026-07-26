@@ -67,14 +67,22 @@ def _request_with_retry(
     url: str,
     *,
     max_retries: int,
-    **kwargs: object,
+    headers: dict[str, str] | None = None,
+    params: dict[str, str | int] | None = None,
+    json: dict[str, object] | None = None,
 ) -> httpx.Response:
     """Issue a GitHub request with bounded retry for transient failures only."""
     attempts = max_retries + 1
     last_error: Exception | None = None
     for attempt in range(attempts):
         try:
-            response = client.request(method, url, **kwargs)
+            response = client.request(
+                method,
+                url,
+                headers=headers,
+                params=params,
+                json=json,
+            )
             if response.status_code not in {429, 500, 502, 503, 504}:
                 return response
             if attempt == attempts - 1:
