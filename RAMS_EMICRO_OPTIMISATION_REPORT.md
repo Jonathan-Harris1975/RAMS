@@ -1,3 +1,5 @@
+> **Superseded operational note (26 July 2026):** production now uses `RMS_PUSH_ENABLED=true` and `RMS_CREATE_PR=true` for validated `rms-qa/*` branches, with automatic non-draft PR creation. Historical recommendations below describe the earlier guarded rollout state.
+
 > **Document status:** Historical implementation record  
 > **Last reviewed:** 21 June 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
@@ -223,7 +225,7 @@ Remaining MAST limitation:
 7. Keep the initial deployment in dry-run mode.
 8. Call `/ops/warmup`, then `/readiness`.
 9. Run one manually triggered dry-run pipeline and inspect its R2/local report and AI usage.
-10. For the paid production instance, live-write permission is governed by `RMS_DRY_RUN=false` and `RMS_LIVE_WRITE_ENABLED=true`; branch pushing and pull request creation remain separate controls and are intentionally disabled unless an operator enables them after clean evidence.
+10. Historical rollout state kept branch push and pull-request creation disabled after live-write admission. **Superseded 26 July 2026:** validated `rms-qa/*` commits are now pushed automatically and RAMS creates/reuses one non-draft PR per run.
 
 ## Rollback
 

@@ -1,5 +1,5 @@
 > **Document status:** Production release gate  
-> **Last reviewed:** 21 June 2026  
+> **Last reviewed:** 26 July 2026  
 > **Operational authority:** README, SECURITY policy and operations guide.
 
 # RAMS production release gate
@@ -53,6 +53,7 @@ WEB_CONCURRENCY=1
 UVICORN_WORKERS=1
 RMS_MAX_CONCURRENT_PIPELINES=1
 RMS_MAX_ISSUES_PER_RUN=1
+RMS_WEBSITE_MAX_ISSUES_PER_RUN=0
 RMS_SINGLE_WORKER_MODE=true
 RMS_OPENROUTER_LOG_PROMPTS=false
 RMS_OPENROUTER_DATA_COLLECTION=deny
@@ -77,11 +78,11 @@ Paid production live-write permission:
 ```env
 RMS_DRY_RUN=false
 RMS_LIVE_WRITE_ENABLED=true
-RMS_PUSH_ENABLED=false
-RMS_CREATE_PR=false
+RMS_PUSH_ENABLED=true
+RMS_CREATE_PR=true
 ```
 
-`RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false` are intentional. They mean RAMS can run governed production workflows and produce validated patch/report artefacts, but it does not publish Git branches or create pull requests until those controls are deliberately enabled.
+A production candidate is not release-ready unless validated live commits can authenticate to GitHub, push only to `rms-qa/*`, and create/reuse the matching non-draft pull request. PR merge remains a separate human/repository-policy action.
 
 ## Manual Koyeb verification
 
@@ -107,4 +108,4 @@ curl -fsS -X POST \
   "$BASE_URL/rebuild/seo-aeo-geo/run"
 ```
 
-Do not run a live-write request until dry-run evidence, release-gate evidence and target-repository validation evidence are all clean.
+Do not run a live-write request until dry-run evidence, release-gate evidence and target-repository validation evidence are all clean. Once admitted, production is expected to push the validated QA branch and create the PR automatically.

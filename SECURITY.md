@@ -1,7 +1,7 @@
 # RAMS security policy
 
 **Status:** Production-controlled  
-**Last reviewed:** 21 June 2026
+**Last reviewed:** 26 July 2026
 
 RAMS can inspect and alter repositories, so access is deliberately narrow. `/health` and `/livez` are public and lightweight. `/readiness`, `/readyz`, `/ops/warmup`, `/ops/excellence`, report reads and rebuild endpoints require `RMS_API_KEY` unless a local-only developer has explicitly set `RMS_ALLOW_UNAUTHENTICATED_DEV=true`.
 
@@ -32,14 +32,14 @@ Live writes require all of the following:
 - Validation after each task.
 - Task-scoped rollback on validation failure.
 
-Current production keeps these controls deliberately governed:
+Current production enables governed publication:
 
 ```env
-RMS_PUSH_ENABLED=false
-RMS_CREATE_PR=false
+RMS_PUSH_ENABLED=true
+RMS_CREATE_PR=true
 ```
 
-That preserves production execution and report generation without automatic branch push or pull request creation.
+Publication does not weaken branch safety: RAMS may push only its configured `rms-qa/*` branch and the pull request targets the configured protected base branch. `main`/`master` writes remain blocked. `RMS_CREATE_PR=true` requires `RMS_PUSH_ENABLED=true`, exact GitHub repository URLs, and a usable GitHub token. The token must be fine-grained to approved repositories with **Contents: Read and write** and **Pull requests: Read and write**. RAMS creates a non-draft PR but never auto-merges it.
 
 ## Operational hardening
 
