@@ -31,6 +31,18 @@ class CommitInfo:
 
 
 @dataclass
+class PullRequestInfo:
+    """Public metadata for the automatic GitHub pull request created by RAMS."""
+
+    number: int
+    url: str
+    title: str
+    base: str
+    head: str
+    created: bool
+
+
+@dataclass
 class ValidationSummary:
     """Validation section of a RunReport."""
 
@@ -79,11 +91,28 @@ class RunReport:
     skills_baseline: dict[str, Any] | None = None
     ai_usage: dict[str, Any] | None = None
     release_evidence: dict[str, Any] | None = None
+    pull_request: PullRequestInfo | None = None
 
 
 def _report_quality(report: "RunReport") -> dict[str, Any]:
     """Return operator-facing quality gates for Lane 1 audit reports."""
     pipeline_gates: dict[str, dict[str, Any]] = {
+        "website": {
+            "primaryGoal": "Remediate the unified Digital Growth, SEO/AEO/GEO and rendered Mobile UX council report without inventing source targets.",
+            "requiredEvidence": [
+                "website-audit.json",
+                "sourceFindingIds",
+                "exact existing repository paths for autonomous code fixes",
+                "confirmed council confidence",
+                "acceptance and verification criteria",
+            ],
+            "blockedIfMissing": [
+                "final unified website audit JSON",
+                "source traceability",
+                "exact repository file evidence",
+                "mobile hard-gate evidence where a mobile finding is involved",
+            ],
+        },
         "seo-aeo-geo": {
             "primaryGoal": "Verify search, answer-engine, and generative-engine discovery surfaces before patching.",
             "requiredEvidence": [
@@ -322,6 +351,15 @@ def _convert(obj: Any) -> Any:
     """Convert report dataclasses and nested values to JSON-ready objects."""
     if isinstance(obj, CommitInfo):
         return {"sha": obj.sha, "message": obj.message, "files": obj.files}
+    if isinstance(obj, PullRequestInfo):
+        return {
+            "number": obj.number,
+            "url": obj.url,
+            "title": obj.title,
+            "base": obj.base,
+            "head": obj.head,
+            "created": obj.created,
+        }
     if isinstance(obj, ValidationSummary):
         validation_data: dict[str, Any] = {
             "commands": obj.commands,
@@ -360,6 +398,8 @@ def _convert(obj: Any) -> Any:
             "publishStatus": _convert(obj.publish_status),
             "reportQuality": _report_quality(obj),
         }
+        if obj.pull_request is not None:
+            data["pullRequest"] = _convert(obj.pull_request)
         if obj.skills_baseline is not None:
             data["skillsBaseline"] = _convert(obj.skills_baseline)
         if obj.ai_usage is not None:

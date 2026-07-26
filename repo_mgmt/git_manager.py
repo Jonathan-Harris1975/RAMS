@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,7 @@ class GitManager:
         target_repo: Path,
         branch_prefix: str = "rms-qa/",
         push_enabled: bool = False,
+        github_token: str | None = None,
         timeout_seconds: int = _DEFAULT_GIT_TIMEOUT_SECONDS,
         max_output_bytes: int = _DEFAULT_GIT_OUTPUT_MAX_BYTES,
     ) -> None:
@@ -54,12 +56,20 @@ class GitManager:
         self.target_repo = Path(target_repo)
         self.branch_prefix = branch_prefix
         self.push_enabled = push_enabled
+        self.github_token = str(github_token or "").strip() or None
         self.timeout_seconds = timeout_seconds
         self.max_output_bytes = max_output_bytes
 
     def _git(self, *args: str) -> str:
         """Run Git with a bounded output tail and prompts disabled."""
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        if self.github_token:
+            encoded = base64.b64encode(
+                f"x-access-token:{self.github_token}".encode("utf-8")
+            ).decode("ascii")
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "http.https://github.com/.extraheader"
+            env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {encoded}"
         result = run_bounded(
             ["git", *args],
             cwd=self.target_repo,
@@ -166,10 +176,10 @@ class GitManager:
         self._git_no_output("commit", "-m", message)
         return self._git("rev-parse", "--short", "HEAD")
 
-    def push_branch(self, branch_name: str) -> None:
-        """Push the current QA branch only when push is explicitly enabled."""
+    def push_branch(self, branch_name: str) -> bool:
+        """Push the current QA branch when enabled and report whether it was published."""
         if not self.push_enabled:
-            return
+            return False
         self.assert_write_allowed()
         if branch_name in _PROTECTED_BRANCHES or not branch_name.startswith(
             self.branch_prefix
@@ -177,7 +187,8 @@ class GitManager:
             raise BranchSafetyError(
                 f"Refusing to push non-QA/protected branch {branch_name!r}"
             )
-        self._git_no_output("push", "origin", branch_name)
+        self._git_no_output("push", "--set-upstream", "origin", branch_name)
+        return True
 
     def capture_task_state(self, paths: list[str]) -> TaskRepoSnapshot:
         """Capture branch, HEAD, and original bytes for task-touched paths."""

@@ -26,6 +26,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
 from repo_mgmt import pipeline as pipeline_mod  # noqa: F401
+from repo_mgmt import audit_reader
 from repo_mgmt.config import (
     ConfigurationError,
     PipelineId,
@@ -107,8 +108,8 @@ async def production_response_headers(
         response.headers.setdefault("X-Request-ID", request_id)
     return response
 
-PipelineIdLiteral = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
-_PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("seo-aeo-geo", "mobile-ux", "on-brand")
+PipelineIdLiteral = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand"]
+_PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("website", "seo-aeo-geo", "mobile-ux", "on-brand")
 
 _pipelines: dict[PipelineId, RmsPipeline] = {}
 _running: dict[PipelineId, bool] = {pipeline_id: False for pipeline_id in _PIPELINE_IDS}
@@ -136,9 +137,11 @@ _bootstrap_results: list[BootstrapResult] = []
 
 
 class RunRequest(BaseModel):
-    """Optional body for POST /rebuild/{pipeline_id}/run."""
+    """Request body for POST /rebuild/{pipeline_id}/run."""
 
     dry_run: bool | None = None
+    audit_json_key: str | None = None
+    audit_session_id: str | None = None
 
 
 class AdmissionError(Exception):
@@ -374,7 +377,7 @@ def _ensure_repos_bootstrapped(
     """
     global _bootstrap_attempted, _bootstrap_results
     label = "all"
-    if pipeline_id in {"seo-aeo-geo", "mobile-ux"}:
+    if pipeline_id in {"website", "seo-aeo-geo", "mobile-ux"}:
         label = "website"
     elif pipeline_id == "on-brand":
         label = "aims"
@@ -446,10 +449,19 @@ def _dependency_details() -> dict[str, object]:
         website_ready = repo_materialized["website"] or repo_ready_on_demand["website"]
         aims_ready = repo_materialized["aims"] or repo_ready_on_demand["aims"]
         pipeline_repo_paths = {
+            "website": str(cfg.repo_path_for("website")),
             "seo-aeo-geo": str(website_path),
             "mobile-ux": str(cfg.repo_path_for("mobile-ux")),
             "on-brand": str(aims_path),
         }
+    github_write_ready = True
+    if cfg is not None and (cfg.rms_push_enabled or cfg.rms_create_pr):
+        github_write_ready = bool(
+            _usable_secret(cfg.github_token_value)
+            and _usable_secret(cfg.rms_website_repo_url)
+            and _usable_secret(cfg.rms_aims_repo_url)
+            and cfg.rms_github_api_base.startswith("https://")
+        )
     deps: dict[str, object] = {
         "config_loaded": cfg is not None,
         "r2_configured": _r2_configured(cfg),
@@ -464,6 +476,7 @@ def _dependency_details() -> dict[str, object]:
         },
         "validation_runtime_ready": bool(validation_runtime["ready"]),
         "model_router_ready": _model_router_ready(cfg),
+        "github_write_ready": github_write_ready,
         "single_worker_mode": configured_worker_count() == 1,
         "runtime": validation_runtime,
     }
@@ -647,6 +660,7 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
         target_repo,
         cfg.rms_qa_branch_prefix,
         cfg.rms_push_enabled,
+        cfg.github_token_value,
         cfg.rms_git_timeout_seconds,
         cfg.rms_git_output_max_bytes,
     )
@@ -671,7 +685,12 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
     return False
 
 
-async def _run_pipeline_bg(pipeline_id: PipelineId, dry_run: bool, run_id: str) -> None:
+async def _run_pipeline_bg(
+    pipeline_id: PipelineId,
+    dry_run: bool,
+    run_id: str,
+    audit_json_key: str | None = None,
+) -> None:
     """Await a pipeline run and clear global eMicro admission state safely."""
     global _active_pipeline, _active_run_id
     _running[pipeline_id] = True
@@ -680,7 +699,12 @@ async def _run_pipeline_bg(pipeline_id: PipelineId, dry_run: bool, run_id: str) 
         if pipeline is None:
             logger.error("api: cannot run %r - dependencies not ready", pipeline_id)
             return
-        report = await pipeline.run(dry_run=dry_run, run_id=run_id)
+        if pipeline_id == "website":
+            report = await pipeline.run(
+                dry_run=dry_run, run_id=run_id, audit_json_key=audit_json_key
+            )
+        else:
+            report = await pipeline.run(dry_run=dry_run, run_id=run_id)
         logger.info(
             "api: pipeline %s finished runId=%s summary=%s error=%s",
             pipeline_id,
@@ -784,6 +808,8 @@ async def operational_excellence(
                 "singleWorkerMode": cfg.rms_single_worker_mode if cfg else None,
                 "maxConcurrentPipelines": cfg.rms_max_concurrent_pipelines if cfg else None,
                 "maxIssuesPerRun": cfg.rms_max_issues_per_run if cfg else None,
+                "websiteMaxIssuesPerRun": cfg.rms_website_max_issues_per_run if cfg else None,
+                "websiteMaxIssuesMeaning": "0 = all eligible confirmed website code fixes" if cfg else None,
                 "warmupExternalWork": False,
             },
             "liveWriteControls": {
@@ -795,9 +821,9 @@ async def operational_excellence(
                 "validateAfterEachTask": cfg.rms_validate_after_each_task if cfg else None,
                 "revertOnValidationFailure": cfg.rms_revert_on_validation_failure if cfg else None,
                 "meaning": (
-                    "Production mode can run governed workflows and publish validated "
-                    "patch/report artefacts. Pushing and PR creation remain disabled "
-                    "until RMS_PUSH_ENABLED or RMS_CREATE_PR are deliberately enabled."
+                    "Production mode applies validated changes only on RAMS QA branches. "
+                    "When pushEnabled/createPr are true, each validated commit is pushed "
+                    "and RAMS automatically creates or reuses one GitHub pull request per run."
                 ),
             },
             "modelProviderPolicy": {
@@ -1378,6 +1404,41 @@ async def trigger_run(
         return JSONResponse(
             status_code=503, content={"error": "configuration unavailable"}
         )
+
+    audit_json_key: str | None = None
+    if typed_pipeline_id == "website":
+        try:
+            audit_json_key = audit_reader.validate_website_report_key(
+                body.audit_json_key or ""
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": str(exc),
+                    "pipeline": typed_pipeline_id,
+                    "requiredField": "audit_json_key",
+                },
+            )
+        if body.audit_session_id:
+            session_from_key = audit_json_key.split("/")[-2]
+            if body.audit_session_id.strip() != session_from_key:
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "audit_session_id does not match audit_json_key",
+                        "pipeline": typed_pipeline_id,
+                    },
+                )
+    elif body.audit_json_key or body.audit_session_id:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "audit_json_key/audit_session_id are only valid for the website pipeline",
+                "pipeline": typed_pipeline_id,
+            },
+        )
+
     idem_key = (x_idempotency_key or x_trigger_run_key or "").strip()[:256]
     if lifecycle.is_in_maintenance():
         return JSONResponse(
@@ -1406,6 +1467,7 @@ async def trigger_run(
                     "pipeline": saved_pipeline,
                     "dryRun": saved_dry_run,
                     "idempotentReplay": True,
+                    **({"auditJsonKey": audit_json_key} if audit_json_key else {}),
                 },
                 headers={"X-Run-Id": saved_run_id},
             )
@@ -1459,11 +1521,18 @@ async def trigger_run(
 
     with _admission_lock:
         _remember_idempotency(idem_key, (typed_pipeline_id, run_id, dry_run), cfg)
-    background_tasks.add_task(_run_pipeline_bg, typed_pipeline_id, dry_run, run_id)
+    background_tasks.add_task(
+        _run_pipeline_bg, typed_pipeline_id, dry_run, run_id, audit_json_key
+    )
 
     return JSONResponse(
         status_code=202,
-        content={"runId": run_id, "pipeline": typed_pipeline_id, "dryRun": dry_run},
+        content={
+            "runId": run_id,
+            "pipeline": typed_pipeline_id,
+            "dryRun": dry_run,
+            **({"auditJsonKey": audit_json_key} if audit_json_key else {}),
+        },
         headers={"X-Run-Id": run_id},
     )
 

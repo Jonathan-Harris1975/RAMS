@@ -19,7 +19,7 @@ from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-PipelineId = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
+PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand"]
 
 
 class ConfigurationError(Exception):
@@ -129,8 +129,9 @@ class Settings(BaseSettings):
 
     # ── Target repo paths ──────────────────────────────────────────────────
     # Current architecture:
-    #   seo-aeo-geo -> website repo
-    #   mobile-ux   -> website repo
+    #   website     -> website repo (unified Digital Growth + SEO/AEO/GEO + Mobile UX report)
+    #   seo-aeo-geo -> website repo (legacy compatibility)
+    #   mobile-ux   -> website repo (legacy compatibility)
     #   on-brand    -> AIMS / AI-management-suite repo
     rms_website_repo_path: str = ""
     rms_aims_repo_path: str = ""
@@ -157,6 +158,9 @@ class Settings(BaseSettings):
     rms_aims_repo_branch: str = "main"
     github_token: str | None = None
     rms_github_token: str | None = None
+    rms_github_api_base: str = "https://api.github.com"
+    rms_github_api_timeout_seconds: float = Field(default=20.0, ge=3.0, le=60.0)
+    rms_github_api_max_retries: int = Field(default=2, ge=0, le=4)
 
     # ── Per-target validation commands (split on " && ") ──────────────────
     rms_aims_validation_commands: str = "npm test && npm run build"
@@ -177,6 +181,9 @@ class Settings(BaseSettings):
     rms_dry_run: bool = True  # SAFE DEFAULT — never omit
     rms_live_write_enabled: bool = False
     rms_max_issues_per_run: int = Field(default=1, ge=1, le=5)
+    # Unified website pipeline: 0 means process every eligible confirmed code_fix
+    # in the final council ledger. Other lanes retain the bounded global cap.
+    rms_website_max_issues_per_run: int = Field(default=0, ge=0, le=100)
     rms_max_concurrent_pipelines: int = Field(default=1, ge=1, le=1)
 
     # eMicro resource ceilings. These bound RAM, disk, subprocess output and
@@ -319,6 +326,20 @@ class Settings(BaseSettings):
                 missing.append(f"{name} (unresolved secret reference)")
             elif not _configured_value(value):
                 missing.append(name)
+        if self.rms_create_pr and not self.rms_push_enabled:
+            missing.append("RMS_PUSH_ENABLED=true (required when RMS_CREATE_PR=true)")
+        if self.rms_push_enabled or self.rms_create_pr:
+            if not _configured_value(self.github_token_value):
+                missing.append("RMS_GITHUB_TOKEN/GITHUB_TOKEN (GitHub write token)")
+            for name, value in (
+                ("RMS_WEBSITE_REPO_URL", self.rms_website_repo_url),
+                ("RMS_AIMS_REPO_URL", self.rms_aims_repo_url),
+            ):
+                if _is_unresolved_secret_reference(value):
+                    if f"{name} (unresolved secret reference)" not in missing:
+                        missing.append(f"{name} (unresolved secret reference)")
+                elif not _configured_value(value) and name not in missing:
+                    missing.append(name)
         if missing:
             raise ConfigurationError(
                 f"Missing required configuration fields: {', '.join(missing)}"
@@ -423,9 +444,26 @@ class Settings(BaseSettings):
                 return _configured_value(candidate)
         return None
 
+
+    def repo_url_for(self, pipeline: PipelineId) -> str:
+        """Return the configured GitHub repository URL for a pipeline."""
+        if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
+            return self.rms_website_repo_url
+        if pipeline == "on-brand":
+            return self.rms_aims_repo_url
+        raise ConfigurationError(f"Unknown pipeline: {pipeline}")
+
+    def repo_branch_for(self, pipeline: PipelineId) -> str:
+        """Return the configured protected base branch for a pipeline."""
+        if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
+            return self.rms_website_repo_branch
+        if pipeline == "on-brand":
+            return self.rms_aims_repo_branch
+        raise ConfigurationError(f"Unknown pipeline: {pipeline}")
+
     def validation_commands_for(self, pipeline: PipelineId) -> list[str]:
         """Return the ordered validation commands for the given pipeline."""
-        if pipeline in {"seo-aeo-geo", "mobile-ux"}:
+        if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
             raw = self.rms_website_validation_commands
         elif pipeline == "on-brand":
             raw = self.rms_aims_validation_commands or self.rms_seo_validation_commands
@@ -435,7 +473,7 @@ class Settings(BaseSettings):
 
     def repo_path_for(self, pipeline: PipelineId) -> Path:
         """Return the absolute repo path for the given pipeline."""
-        if pipeline in {"seo-aeo-geo", "mobile-ux"}:
+        if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
             return Path(self.rms_website_repo_path)
         if pipeline == "on-brand":
             return Path(self.aims_repo_path_value)

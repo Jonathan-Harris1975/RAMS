@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-PipelineId = Literal["seo-aeo-geo", "mobile-ux", "on-brand"]
+PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand"]
 Severity = Literal["critical", "high", "medium", "low"]
 Classification = Literal["code_fix", "future_guidance", "manual_review", "skipped"]
 PatchOperation = Literal["replace", "insert_after", "delete"]
@@ -159,6 +159,26 @@ class CommitInfoModel(BaseModel):
         return [normalise_repo_relative_path(path) for path in value]
 
 
+class PullRequestInfoModel(BaseModel):
+    """Strict public metadata for an automatically created GitHub pull request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    number: int = Field(ge=1)
+    url: str
+    title: str
+    base: str
+    head: str
+    created: bool
+
+    @field_validator("url")
+    @classmethod
+    def _url_is_https(cls, value: str) -> str:
+        if not value.startswith("https://"):
+            raise ValueError("pull request url must be https")
+        return value
+
+
 class RunReportModel(BaseModel):
     """Strict RunReport schema used before report serialisation."""
 
@@ -173,3 +193,4 @@ class RunReportModel(BaseModel):
     tasks: list[dict[str, Any]] = Field(default_factory=list)
     validation: ValidationSummaryModel
     commits: list[CommitInfoModel] = Field(default_factory=list)
+    pullRequest: PullRequestInfoModel | None = None

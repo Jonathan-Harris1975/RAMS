@@ -12,6 +12,7 @@ from typing import Any
 
 from repo_mgmt import (
     audit_reader,
+    github_pr,
     issue_normaliser,
     task_ranker,
     update_executor,
@@ -23,6 +24,7 @@ from repo_mgmt.lane1_skills import build_lane1_skills_baseline
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.report_publisher import (
     CommitInfo,
+    PullRequestInfo,
     RunReport,
     ValidationSummary,
     make_run_id,
@@ -32,7 +34,7 @@ from repo_mgmt.report_publisher import (
 
 logger = logging.getLogger(__name__)
 
-_PIPELINE_IDS = ("seo-aeo-geo", "mobile-ux", "on-brand")
+_PIPELINE_IDS = ("website", "seo-aeo-geo", "mobile-ux", "on-brand")
 _pipeline_locks = {pipeline: threading.Lock() for pipeline in _PIPELINE_IDS}
 _global_pipeline_lock = threading.Lock()
 
@@ -75,6 +77,7 @@ def _summary(tasks: list[dict[str, Any]], snapshots: int) -> dict[str, int]:
             1 for task in tasks if bool(task.get("validationFailed"))
         ),
         "commitCreated": commit_created,
+        "commitsPushed": sum(1 for task in tasks if bool(task.get("pushed"))),
         "manualReview": manual_review,
         "skipped": sum(
             1
@@ -211,6 +214,7 @@ def _make_report(
     error: str | None,
     baseline_validation: ValidationSummary | None = None,
     ai_usage: dict[str, Any] | None = None,
+    pull_request: PullRequestInfo | None = None,
 ) -> RunReport:
     """Construct a RunReport from current pipeline state."""
     return RunReport(
@@ -227,6 +231,7 @@ def _make_report(
         error=error,
         skills_baseline=build_lane1_skills_baseline(pipeline_id=pipeline_id),
         ai_usage=ai_usage,
+        pull_request=pull_request,
     )
 
 
@@ -271,6 +276,7 @@ def _preflight_live_repo(target_repo: Path, cfg: Settings) -> None:
         target_repo,
         cfg.rms_qa_branch_prefix,
         cfg.rms_push_enabled,
+        cfg.github_token_value,
         cfg.rms_git_timeout_seconds,
         cfg.rms_git_output_max_bytes,
     )
@@ -336,8 +342,14 @@ class RmsPipeline:
         self,
         dry_run: bool | None = None,
         run_id: str | None = None,
+        audit_json_key: str | None = None,
     ) -> RunReport:
-        """Run this pipeline and return its report."""
+        """Run this pipeline and return its report.
+
+        The unified ``website`` pipeline consumes the exact final JSON report
+        key supplied by AIMS. Legacy pipelines continue to use their latest
+        pointers for backwards compatibility.
+        """
         return await _run_async(
             self.pipeline_id,
             self.cfg,
@@ -345,6 +357,7 @@ class RmsPipeline:
             self.router,
             self.cfg.rms_dry_run if dry_run is None else dry_run,
             run_id=run_id,
+            audit_json_key=audit_json_key,
         )
 
     @property
@@ -373,6 +386,26 @@ class RmsPipeline:
     def approved_fix_classes(self) -> frozenset[str]:
         """Fix classes this pipeline is permitted to apply."""
         approved: dict[str, frozenset[str]] = {
+            "website": frozenset(
+                {
+                    "html_fix",
+                    "css_fix",
+                    "meta_fix",
+                    "schema_fix",
+                    "structured_data_fix",
+                    "canonical_fix",
+                    "redirect_fix",
+                    "crawler_fix",
+                    "sitemap_fix",
+                    "robots_fix",
+                    "llms_fix",
+                    "accessibility_fix",
+                    "template_fix",
+                    "partial_fix",
+                    "internal_link_fix",
+                    "viewport_fix",
+                }
+            ),
             "seo-aeo-geo": frozenset(
                 {
                     "html_fix",
@@ -437,6 +470,92 @@ def _router_usage(router: Any) -> dict[str, Any] | None:
     return result if isinstance(result, dict) else None
 
 
+def _append_error(current: str | None, addition: str) -> str:
+    """Append one bounded operational error without losing earlier context."""
+    return f"{current}; {addition}" if current else addition
+
+
+def _pull_request_body(
+    *,
+    pipeline_id: PipelineId,
+    run_id: str,
+    audit_json_key: str | None,
+    tasks: list[dict[str, Any]],
+) -> str:
+    """Build a concise, non-secret body for an automatically created RAMS PR."""
+    committed = [task for task in tasks if task.get("commit_sha") and task.get("pushed")]
+    lines = [
+        "## RAMS automated remediation",
+        "",
+        f"- Pipeline: `{pipeline_id}`",
+        f"- Run: `{run_id}`",
+        f"- Validated commits: **{len(committed)}**",
+    ]
+    if audit_json_key:
+        lines.append(f"- Audit source: `{audit_json_key}`")
+    lines.extend(["", "### Included fixes"])
+    for task in committed[:25]:
+        task_id = str(task.get("taskId") or "unknown")
+        title = str(task.get("title") or task.get("requiredOutcome") or "validated fix")
+        severity = str(task.get("severity") or "unknown")
+        lines.append(f"- `{task_id}` [{severity}] {title}")
+    if len(committed) > 25:
+        lines.append(f"- …plus {len(committed) - 25} additional validated commits")
+    lines.extend(
+        [
+            "",
+            "Every included change passed RAMS repository safety checks, the Phase 4C autonomous engineering gate and configured post-patch validation before publication.",
+            "",
+            "This pull request was created automatically by RAMS. It is not automatically merged.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _create_automatic_pr(
+    *,
+    pipeline_id: PipelineId,
+    run_id: str,
+    branch: str,
+    audit_json_key: str | None,
+    tasks: list[dict[str, Any]],
+    cfg: Settings,
+) -> PullRequestInfo | None:
+    """Create or resolve the single automatic PR for pushed commits in this run."""
+    if not cfg.rms_create_pr:
+        return None
+    pushed_commits = [task for task in tasks if task.get("commit_sha") and task.get("pushed")]
+    if not pushed_commits:
+        return None
+    result = github_pr.create_or_get_pull_request(
+        token=cfg.github_token_value,
+        repo_url=cfg.repo_url_for(pipeline_id),
+        base_branch=cfg.repo_branch_for(pipeline_id),
+        head_branch=branch,
+        title=f"RAMS {pipeline_id} remediation · {run_id}",
+        body=_pull_request_body(
+            pipeline_id=pipeline_id,
+            run_id=run_id,
+            audit_json_key=audit_json_key,
+            tasks=tasks,
+        ),
+        api_base=cfg.rms_github_api_base,
+        timeout_seconds=cfg.rms_github_api_timeout_seconds,
+        max_retries=cfg.rms_github_api_max_retries,
+    )
+    for task in pushed_commits:
+        task["pullRequestNumber"] = result.number
+        task["pullRequestUrl"] = result.url
+    return PullRequestInfo(
+        number=result.number,
+        url=result.url,
+        title=result.title,
+        base=result.base,
+        head=result.head,
+        created=result.created,
+    )
+
+
 async def _run_async(
     pipeline_id: PipelineId,
     cfg: Settings,
@@ -445,6 +564,7 @@ async def _run_async(
     dry_run: bool,
     *,
     run_id: str | None = None,
+    audit_json_key: str | None = None,
 ) -> RunReport:
     """Execute a pipeline with a single source-of-truth run ID."""
     actual_run_id = run_id or make_run_id()
@@ -453,6 +573,7 @@ async def _run_async(
     tasks: list[dict[str, Any]] = []
     error: str | None = None
     baseline_validation: ValidationSummary | None = None
+    pull_request: PullRequestInfo | None = None
     snapshots = 0
     lock = _pipeline_locks[pipeline_id]
 
@@ -487,21 +608,44 @@ async def _run_async(
 
     _start_router_run(router, actual_run_id)
     try:
-        audit = await asyncio.to_thread(
-            audit_reader.read_latest,
-            pipeline_id,
-            r2,
-            cfg.r2_bucket_audits,
-            max_artefacts=cfg.rms_max_audit_artefacts,
-            max_object_bytes=cfg.rms_max_audit_object_bytes,
-            max_total_bytes=cfg.rms_max_audit_total_bytes,
-        )
+        if pipeline_id == "website":
+            if not audit_json_key:
+                raise RuntimeError(
+                    "website pipeline requires the exact AIMS website-audit.json R2 key"
+                )
+            audit = await asyncio.to_thread(
+                audit_reader.read_report_key,
+                pipeline_id,
+                r2,
+                cfg.r2_bucket_audits,
+                audit_json_key,
+                max_object_bytes=cfg.rms_max_audit_object_bytes,
+            )
+            if not audit:
+                raise RuntimeError(
+                    "website audit JSON could not be read or failed schema validation"
+                )
+        else:
+            audit = await asyncio.to_thread(
+                audit_reader.read_latest,
+                pipeline_id,
+                r2,
+                cfg.r2_bucket_audits,
+                max_artefacts=cfg.rms_max_audit_artefacts,
+                max_object_bytes=cfg.rms_max_audit_object_bytes,
+                max_total_bytes=cfg.rms_max_audit_total_bytes,
+            )
         snapshots = 1 if audit else 0
         await asyncio.to_thread(_run_optimisation_cycle, pipeline_id, cfg, r2)
         issues = await asyncio.to_thread(
             issue_normaliser.normalise, audit, pipeline_id, _date(), cfg, router
         )
-        queues = task_ranker.rank(issues, cfg.rms_max_issues_per_run)
+        code_fix_limit = (
+            cfg.rms_website_max_issues_per_run
+            if pipeline_id == "website"
+            else cfg.rms_max_issues_per_run
+        )
+        queues = task_ranker.rank(issues, code_fix_limit)
         selected = [*queues.code_fix, *queues.manual_review, *queues.future_guidance]
 
         git_mgr = None
@@ -524,6 +668,7 @@ async def _run_async(
                     target_repo,
                     cfg.rms_qa_branch_prefix,
                     cfg.rms_push_enabled,
+                    cfg.github_token_value,
                     cfg.rms_git_timeout_seconds,
                     cfg.rms_git_output_max_bytes,
                 )
@@ -551,6 +696,25 @@ async def _run_async(
             else:
                 tasks.append(dict(issue))
 
+        if not dry_run and cfg.rms_create_pr:
+            try:
+                pull_request = await asyncio.to_thread(
+                    _create_automatic_pr,
+                    pipeline_id=pipeline_id,
+                    run_id=actual_run_id,
+                    branch=branch,
+                    audit_json_key=audit_json_key,
+                    tasks=tasks,
+                    cfg=cfg,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "pipeline: automatic pull-request creation failed pipeline=%s runId=%s",
+                    pipeline_id,
+                    actual_run_id,
+                )
+                error = _append_error(error, f"automatic pull request failed: {exc}")
+
         report = _make_report(
             run_id=actual_run_id,
             pipeline_id=pipeline_id,
@@ -563,6 +727,7 @@ async def _run_async(
             error=error,
             baseline_validation=baseline_validation,
             ai_usage=_router_usage(router),
+            pull_request=pull_request,
         )
         await asyncio.to_thread(_publish_report, report, cfg, r2)
         return report
@@ -579,6 +744,7 @@ async def _run_async(
             error=str(exc),
             baseline_validation=baseline_validation,
             ai_usage=_router_usage(router),
+            pull_request=pull_request,
         )
         await asyncio.to_thread(_publish_report, report, cfg, r2)
         return report
@@ -593,6 +759,7 @@ def run(
     r2: Any,
     dry_run: bool | None = None,
     run_id: str | None = None,
+    audit_json_key: str | None = None,
 ) -> RunReport:
     """Synchronously run a pipeline for CLI/tests outside an async context."""
     return asyncio.run(
@@ -603,6 +770,7 @@ def run(
             ModelRouter(cfg),
             cfg.rms_dry_run if dry_run is None else dry_run,
             run_id=run_id,
+            audit_json_key=audit_json_key,
         )
     )
 

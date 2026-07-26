@@ -41,7 +41,29 @@ _MOBILE_UX_PROTECTED: frozenset[str] = frozenset(
     ]
 )
 
+_WEBSITE_PROTECTED: frozenset[str] = _MOBILE_UX_PROTECTED
+
 _APPROVED_FIX_CLASSES: dict[str, frozenset[str]] = {
+    "website": frozenset(
+        [
+            "html_fix",
+            "css_fix",
+            "meta_fix",
+            "schema_fix",
+            "structured_data_fix",
+            "canonical_fix",
+            "redirect_fix",
+            "crawler_fix",
+            "sitemap_fix",
+            "robots_fix",
+            "llms_fix",
+            "accessibility_fix",
+            "template_fix",
+            "partial_fix",
+            "internal_link_fix",
+            "viewport_fix",
+        ]
+    ),
     "seo-aeo-geo": frozenset(
         [
             "meta_fix",
@@ -148,6 +170,13 @@ def normalise(
             )
         affected_paths, path_errors = _safe_affected_paths(raw_affected_paths)
         metadata_errors.extend(path_errors)
+        if pipeline_id == "website" and affected_paths:
+            missing_repo_paths = _missing_repo_paths(cfg, affected_paths)
+            if missing_repo_paths:
+                metadata_errors.append(
+                    "website finding names repo path(s) not present in the checked-out website repository: "
+                    + ", ".join(missing_repo_paths)
+                )
         fix_class = _fix_class(finding)
         severity, severity_error = _safe_severity(finding.get("severity", "low"))
         if severity_error:
@@ -208,6 +237,30 @@ def normalise(
             reason = (
                 "finding targets R2-hosted podcast episode pages; website repo patching refused"
             )
+            results.append(
+                _build_validated(
+                    task_id=task_id,
+                    pipeline_id=pipeline_id,
+                    finding=finding,
+                    classification="manual_review",
+                    status="manual_review",
+                    affected_paths=affected_paths,
+                    fix_class=fix_class,
+                    severity=severity,
+                    confidence=confidence,
+                    evidence=evidence + [reason],
+                    source_audit=source_audit,
+                    required_outcome=required_outcome,
+                    allowed_fix_class="",
+                    validation_commands=validation_commands,
+                )
+            )
+            continue
+
+        if pipeline_id == "website" and any(
+            is_protected(path, _WEBSITE_PROTECTED) for path in affected_paths
+        ):
+            reason = "website finding targets AIMS/R2-owned generated content; static website repo patching refused"
             results.append(
                 _build_validated(
                     task_id=task_id,
@@ -299,7 +352,17 @@ def normalise(
                 continue
 
         explicit = str(finding.get("classification", "")).strip()
-        if pipeline_id == "seo-aeo-geo":
+        if pipeline_id == "website":
+            classification, status, allowed_fix_class, evidence = _classify_website_finding(
+                explicit=explicit,
+                fix_class=fix_class,
+                approved=approved,
+                affected_paths=affected_paths,
+                evidence=evidence,
+                required_outcome=required_outcome,
+                source_finding_ids=_safe_string_list(finding.get("sourceFindingIds", [])),
+            )
+        elif pipeline_id == "seo-aeo-geo":
             classification, status, allowed_fix_class, evidence = _classify_seo_finding(
                 explicit=explicit,
                 fix_class=fix_class,
@@ -350,6 +413,42 @@ def normalise(
 
     return results
 
+
+
+def _classify_website_finding(
+    *,
+    explicit: str,
+    fix_class: str,
+    approved: frozenset[str],
+    affected_paths: list[str],
+    evidence: list[str],
+    required_outcome: str,
+    source_finding_ids: list[str],
+) -> tuple[str, str, str, list[str]]:
+    """Gate unified website findings before RAMS can plan a repository patch."""
+    if explicit in _VALID_CLASSIFICATIONS - {"code_fix"}:
+        return explicit, explicit, "", evidence
+    if explicit != "code_fix":
+        return (
+            "manual_review",
+            "manual_review",
+            "",
+            evidence + ["Unified website auto-patching requires a confirmed final-report code_fix classification."],
+        )
+    missing: list[str] = []
+    if fix_class not in approved:
+        missing.append(f"allowedFixClass {fix_class or '<missing>'!r} is not approved for website")
+    if not affected_paths:
+        missing.append("affectedPaths must name exact existing website-repository files")
+    if not source_finding_ids:
+        missing.append("sourceFindingIds must preserve traceability to source audit evidence")
+    if not evidence:
+        missing.append("evidence must be specific and deterministic")
+    if not required_outcome.strip():
+        missing.append("requiredOutcome must describe the exact repository-level change")
+    if missing:
+        return "manual_review", "manual_review", "", evidence + missing
+    return "code_fix", "pending", fix_class, evidence
 
 def _classify_seo_finding(
     *,
@@ -457,6 +556,8 @@ def _extract_findings(
     cfg: "Settings",
 ) -> list[dict[str, Any]]:
     """Return normaliser-ready finding dictionaries from latest or artefacts."""
+    if pipeline_id == "website":
+        return _extract_website_findings(audit, cfg)
     direct = audit.get("findings")
     if isinstance(direct, list) and direct:
         return [item for item in direct if isinstance(item, dict)]
@@ -490,6 +591,156 @@ def _extract_findings(
         return mapped
     return _aggregate_manifest_findings(audit, pipeline_id, max_items)
 
+
+
+def _extract_website_findings(audit: dict[str, Any], cfg: "Settings") -> list[dict[str, Any]]:
+    """Extract one de-duplicated RAMS work queue from the final unified report."""
+    council = audit.get("council")
+    if not isinstance(council, dict):
+        return []
+    max_items = _normaliser_item_limit(cfg, "website")
+    candidates: list[dict[str, Any]] = []
+    # The final council's masterIssueLedger is the governed machine-readable
+    # remediation contract. Prefer it exclusively when present so the same
+    # root cause is not re-created from executive/top-action prose. Older or
+    # incomplete report versions fall back to the narrative collections, but
+    # those rows remain fail-closed unless they satisfy the explicit code-fix
+    # contract below.
+    master_ledger = council.get("masterIssueLedger")
+    if isinstance(master_ledger, list) and any(isinstance(item, dict) for item in master_ledger):
+        candidates.extend(item for item in master_ledger if isinstance(item, dict))
+    else:
+        for key in ("unifiedFindings", "topActions"):
+            rows = council.get(key)
+            if isinstance(rows, list):
+                candidates.extend(item for item in rows if isinstance(item, dict))
+    mapped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        finding = _map_website_candidate(candidate)
+        if not finding:
+            continue
+        signature = _finding_signature(finding)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        mapped.append(finding)
+        if len(mapped) >= max_items:
+            break
+    return mapped
+
+
+def _map_website_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    """Map a council issue/action into a fail-closed RAMS website finding."""
+    issue_id = _first_text(candidate, "findingId", "issueId", "actionId", "id") or "website"
+    title = _first_text(candidate, "title", "rootCause", "exactChange", "action")
+    remediation = _first_text(
+        candidate,
+        "exactRemediation",
+        "exactChange",
+        "action",
+        "requiredOutcome",
+        "acceptanceCriterion",
+    )
+    description = _first_text(candidate, "rootCause", "description", "impact", "expectedGain")
+    if not (title or remediation or description):
+        return None
+    broad_affected = _website_exact_repo_paths(candidate)
+    explicit_affected = _website_exact_repo_paths({"affectedPaths": candidate.get("affectedPaths", [])})
+    source_ids = _safe_string_list(candidate.get("sourceFindingIds", []))
+    confidence_text = _first_text(candidate, "confidence")
+    confirmed = confidence_text.lower() == "confirmed"
+    text_blob = " ".join(part for part in (title, description, remediation) if part)
+    explicit_fix_class = _first_text(candidate, "fixClass", "allowedFixClass", "fix_class")
+    fix_class = explicit_fix_class or _derive_website_fix_class(text_blob, explicit_affected or broad_affected)
+    explicit_classification = _first_text(candidate, "classification").strip().lower()
+    # Only the dedicated affectedPaths field can authorise autonomous website
+    # patching. A human-readable `affected` field may contain routes, URLs or
+    # mixed scope and must never be silently promoted into a repo patch target.
+    affected = explicit_affected if explicit_classification == "code_fix" else broad_affected
+    evidence = _evidence_from_fields(
+        candidate,
+        [
+            "evidence",
+            "confidence",
+            "severity",
+            "acceptanceCriterion",
+            "verificationMethod",
+            "objectives",
+            "sourceFindingIds",
+        ],
+    )
+    if source_ids:
+        evidence.append("sourceFindingIds: " + ", ".join(source_ids[:20]))
+    if explicit_classification == "code_fix" and confirmed and explicit_affected and source_ids and remediation:
+        classification = "code_fix"
+    elif explicit_classification in _VALID_CLASSIFICATIONS - {"code_fix"}:
+        classification = explicit_classification
+    else:
+        classification = "manual_review"
+    return {
+        "title": title or f"Unified website finding {issue_id}",
+        "description": description or remediation or title,
+        "severity": _map_severity(candidate.get("severity"), pipeline="website"),
+        "confidence": _confidence_from_candidate(candidate),
+        "classification": classification,
+        "fixClass": fix_class,
+        "allowedFixClass": fix_class if classification == "code_fix" else "",
+        "affectedPaths": affected,
+        "evidence": evidence,
+        "requiredOutcome": remediation or description or title,
+        "sourceAudit": "website:final-report",
+        "sourceIssueId": issue_id,
+        "sourceFindingIds": source_ids,
+        "acceptanceCriterion": _first_text(candidate, "acceptanceCriterion"),
+        "verificationMethod": _first_text(candidate, "verificationMethod"),
+    }
+
+
+def _website_exact_repo_paths(candidate: dict[str, Any]) -> list[str]:
+    """Return only explicit repo-looking file paths, never URLs or route guesses."""
+    raw: list[Any] = []
+    for key in ("affectedPaths", "affected", "files", "filePaths"):
+        value = candidate.get(key)
+        if isinstance(value, list):
+            raw.extend(value)
+        elif isinstance(value, str):
+            raw.append(value)
+    paths: list[str] = []
+    for value in raw:
+        text = str(value).strip().replace("\\", "/")
+        if not text or text.startswith(("http://", "https://", "/")):
+            continue
+        leaf = text.rsplit("/", 1)[-1]
+        repo_like = "." in leaf or text.startswith(("assets/", "scripts/", "functions/", "data/", ".github/"))
+        if not repo_like:
+            continue
+        try:
+            path = normalise_repo_relative_path(text)
+        except ValueError:
+            continue
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _missing_repo_paths(cfg: "Settings", paths: list[str]) -> list[str]:
+    """Return named website source files that do not exist in the checked-out repo."""
+    try:
+        root = cfg.repo_path_for("website").resolve()
+    except Exception:
+        return list(paths)
+    missing: list[str] = []
+    for rel in paths:
+        try:
+            resolved = (root / rel).resolve()
+            resolved.relative_to(root)
+        except (ValueError, OSError):
+            missing.append(rel)
+            continue
+        if not resolved.exists() or not resolved.is_file():
+            missing.append(rel)
+    return missing
 
 def _aggregate_manifest_findings(
     audit: dict[str, Any],
@@ -624,12 +875,17 @@ def _slug(value: str) -> str:
     return slug or "unknown"
 
 
-def _normaliser_item_limit(cfg: "Settings") -> int:
-    """Return a bounded extraction cap to prevent enormous dry-run reports."""
+def _normaliser_item_limit(cfg: "Settings", pipeline_id: str | None = None) -> int:
+    """Return a bounded extraction cap, with full-ledger support for website runs."""
+    setting_name = (
+        "rms_website_max_issues_per_run" if pipeline_id == "website" else "rms_max_issues_per_run"
+    )
     try:
-        requested = int(getattr(cfg, "rms_max_issues_per_run", 5))
+        requested = int(getattr(cfg, setting_name, 5))
     except (TypeError, ValueError):
         requested = 5
+    if pipeline_id == "website" and requested == 0:
+        return _MAX_EXTRACTED_FINDINGS
     return max(1, min(_MAX_EXTRACTED_FINDINGS, requested * 10))
 
 
@@ -721,6 +977,8 @@ def _map_candidate(
     candidate: dict[str, Any], pipeline_id: str, artefact_name: str
 ) -> dict[str, Any] | None:
     """Map one live audit candidate to a raw finding dictionary."""
+    if pipeline_id == "website":
+        return _map_website_candidate(candidate)
     if pipeline_id == "mobile-ux":
         return _map_mobile_candidate(candidate, artefact_name)
     if pipeline_id == "seo-aeo-geo":
@@ -1188,6 +1446,38 @@ def _mobile_fix_class(check: str, remediation: str, candidate: dict[str, Any]) -
         return "meta_fix"
     return "html_fix"
 
+
+
+def _derive_website_fix_class(text: str, affected_paths: list[str]) -> str:
+    """Derive a bounded fix class for the unified website remediation lane."""
+    lowered = f"{text} {' '.join(affected_paths)}".lower()
+    if "schema" in lowered or "json-ld" in lowered or "structured data" in lowered:
+        return "schema_fix"
+    if "canonical" in lowered:
+        return "canonical_fix"
+    if "sitemap" in lowered:
+        return "sitemap_fix"
+    if "robots" in lowered:
+        return "robots_fix"
+    if "llms" in lowered or "llm-index" in lowered:
+        return "llms_fix"
+    if "redirect" in lowered:
+        return "redirect_fix"
+    if "viewport" in lowered:
+        return "viewport_fix"
+    if any(word in lowered for word in ("accessibility", "wcag", "aria", "keyboard", "focus", "touch target")):
+        return "accessibility_fix"
+    if any(word in lowered for word in ("internal link", "anchor text", "orphan")):
+        return "internal_link_fix"
+    if any(path.endswith(".css") for path in affected_paths):
+        return "css_fix"
+    if any("partials/" in path for path in affected_paths):
+        return "partial_fix"
+    if "meta" in lowered or "description" in lowered or "title tag" in lowered:
+        return "meta_fix"
+    if affected_paths:
+        return "html_fix"
+    return "future_guidance"
 
 def _derive_seo_fix_class(text: str, affected_paths: list[str]) -> str:
     """Derive an SEO/AEO/GEO fix class from finding text and affected path."""

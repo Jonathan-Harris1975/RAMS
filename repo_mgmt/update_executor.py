@@ -41,7 +41,7 @@ def _change_files(patch_doc: dict[str, Any]) -> list[str]:
 _PARTIAL_PATHS = frozenset(
     {"assets/partials/header.html", "assets/partials/footer.html"}
 )
-_WEBSITE_PIPELINES = frozenset({"seo-aeo-geo", "mobile-ux"})
+_WEBSITE_PIPELINES = frozenset({"website", "seo-aeo-geo", "mobile-ux"})
 
 
 def _touches_governed_partial(files: list[str]) -> bool:
@@ -280,7 +280,7 @@ async def run_task(
         message = f"rms({pipeline_id}): {task_id} - {task.get('title', 'fix')}"
         sha = git_mgr.commit(message)
         branch = git_mgr.current_branch()
-        git_mgr.push_branch(branch)
+        pushed = git_mgr.push_branch(branch)
         task.update(
             status="committed",
             commit_sha=sha,
@@ -289,6 +289,7 @@ async def run_task(
             reverted=False,
             patchApplied=True,
             commitCreated=True,
+            pushed=pushed,
         )
         return task
     except (PathTraversalError, ProtectedPathError) as exc:

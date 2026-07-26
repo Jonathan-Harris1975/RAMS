@@ -2,7 +2,7 @@
 Task ranker for the Repo Management Suite.
 
 Scores and sorts NormalisedIssue dicts into three queues:
-  code_fix        — ranked by severity_weight * confidence, capped at RMS_MAX_ISSUES_PER_RUN
+  code_fix        — ranked by severity_weight * confidence; max_code_fix=0 means no cap
   manual_review   — items that require human judgement
   future_guidance — editorial / low-confidence findings deferred for later
 
@@ -61,7 +61,7 @@ def rank(issues: list[dict[str, Any]], max_code_fix: int = 5) -> RankedQueues:
     Args:
         issues: List of NormalisedIssue dicts from issue_normaliser.
         max_code_fix: Maximum number of items allowed in the code_fix queue.
-                      Excess items are dropped (logged at DEBUG level).
+                      Set to 0 to keep every eligible code_fix item.
 
     Returns:
         RankedQueues with each queue sorted descending by score.
@@ -85,8 +85,8 @@ def rank(issues: list[dict[str, Any]], max_code_fix: int = 5) -> RankedQueues:
     manual_review.sort(key=key, reverse=True)
     future_guidance.sort(key=key, reverse=True)
 
-    # Cap code_fix
-    if len(code_fix) > max_code_fix:
+    # Cap code_fix only when a positive ceiling is configured.
+    if max_code_fix > 0 and len(code_fix) > max_code_fix:
         dropped = len(code_fix) - max_code_fix
         logger.debug(
             "task_ranker: capping code_fix queue at %d — dropping %d lower-priority items",
