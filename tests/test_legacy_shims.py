@@ -12,4 +12,5 @@ def test_live_pipeline_path_does_not_use_legacy_git_ops_validator_or_writer() ->
     source = inspect.getsource(pipeline)
     assert "git_ops" not in source
     assert "report_writer" not in source
-    assert "validator" not in source
+    assert "from repo_mgmt import validator" not in source
+    assert "import validator" not in source

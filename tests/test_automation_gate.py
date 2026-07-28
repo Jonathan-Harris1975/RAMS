@@ -25,6 +25,7 @@ def test_phase4c_gate_allows_bounded_validated_patch():
         patch_doc=_patch(),
         modified_files=["assets/css/site.css"],
         validation=SimpleNamespace(passed=True),
+        council={"decision": "approve_micro_surgery"},
     )
 
     assert decision.ok is True

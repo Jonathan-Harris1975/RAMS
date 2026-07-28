@@ -158,6 +158,7 @@ def test_health_reports_exact_contract(
         "seo-aeo-geo": "idle",
         "mobile-ux": "idle",
         "on-brand": "idle",
+        "content": "idle",
     }
     # /health now also reports the service lifecycle state (Online/Starting/Busy/
     # Standby/Offline/Maintenance model); Standby itself is tracked by MAST, since a

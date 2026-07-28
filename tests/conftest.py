@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -73,6 +73,9 @@ def mock_router() -> MagicMock:
         }
     )
     router.triage.return_value = '{"editorial": false}'
+    router.complete_with_model_async = AsyncMock(return_value=json.dumps({
+        "decision": "approve", "confidence": 95, "defects": [], "reason": "Bounded test micro-surgery."
+    }))
     return router
 
 

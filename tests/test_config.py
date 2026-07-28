@@ -219,7 +219,7 @@ def test_push_and_auto_pr_production_configuration_loads() -> None:
     assert cfg.repo_branch_for("website") == "main"
 
 
-def test_website_issue_limit_defaults_to_all_eligible() -> None:
+def test_website_issue_limit_defaults_to_bounded_micro_surgery() -> None:
     with patch.dict(os.environ, _complete_env(), clear=True):
         cfg = Settings()
-    assert cfg.rms_website_max_issues_per_run == 0
+    assert cfg.rms_website_max_issues_per_run == 5
