@@ -33,9 +33,11 @@ def _payload(issue: dict[str, Any], patch: dict[str, Any], role: str) -> str:
 def _parse(raw: str) -> dict[str, Any]:
     text=str(raw or "").strip().removeprefix("```json").removesuffix("```").strip()
     data=json.loads(text)
-    if not isinstance(data,dict): raise ValueError("council response must be object")
+    if not isinstance(data, dict):
+        raise ValueError("council response must be object")
     decision=str(data.get("decision","")).lower()
-    if decision not in {"approve","reject","manual_review"}: raise ValueError("invalid council decision")
+    if decision not in {"approve", "reject", "manual_review"}:
+        raise ValueError("invalid council decision")
     return {"decision":decision,"confidence":max(0,min(100,int(data.get("confidence",0)))),"defects":[str(x) for x in data.get("defects",[])][:12],"reason":str(data.get("reason",""))[:1500]}
 
 async def _review(router: Any, model: str, role: str, issue: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
