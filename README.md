@@ -54,8 +54,8 @@ RAMS still never writes to `main` or `master`. Each eligible fix must pass repos
 WEB_CONCURRENCY=1
 UVICORN_WORKERS=1
 RMS_MAX_CONCURRENT_PIPELINES=1
-RMS_MAX_ISSUES_PER_RUN=1
-RMS_WEBSITE_MAX_ISSUES_PER_RUN=0  # all eligible Confirmed website code fixes
+RMS_MAX_ISSUES_PER_RUN=3
+RMS_WEBSITE_MAX_ISSUES_PER_RUN=5  # all eligible Confirmed website code fixes
 RMS_SINGLE_WORKER_MODE=true
 RMS_OPENROUTER_LOG_PROMPTS=false
 RMS_OPENROUTER_DATA_COLLECTION=deny
@@ -96,4 +96,4 @@ python scripts/emicro_benchmark.py --label candidate
 AIMS owns the website audit sequence and retains exactly three final audit representations: `website-audit.pdf`, `website-audit.html`, and `website-audit.json`. After AIMS verifies temporary evidence cleanup, it calls `POST /rebuild/website/run` with the exact JSON R2 key. RAMS validates the key shape and report schema before creating any remediation task; it does not discover the website audit through a `latest.json` pointer.
 
 Only council findings with **Confirmed** confidence, source-finding traceability, an exact existing website-repository file path, a bounded approved fix class, and executable remediation can become autonomous `code_fix` work. URLs, routes, missing paths and AIMS/R2-owned dynamic content fail closed to manual review.
-The machine contract is `website-audit-report/v1` + `rams-website/v1`; RAMS treats the final council `masterIssueLedger` as the primary remediation queue and only falls back to narrative council rows when that ledger is absent. For the unified `website` lane, `RMS_WEBSITE_MAX_ISSUES_PER_RUN=0` means every eligible Confirmed `code_fix` in that governed ledger is processed in the single AIMS-triggered run rather than silently dropping lower-ranked fixes.
+The machine contract is `website-audit-report/v1` + `rams-website/v1`; RAMS treats the final council `masterIssueLedger` as the primary remediation queue and only falls back to narrative council rows when that ledger is absent. For the unified `website` lane, `RMS_WEBSITE_MAX_ISSUES_PER_RUN=5` means every eligible Confirmed `code_fix` in that governed ledger is processed in the single AIMS-triggered run rather than silently dropping lower-ranked fixes.
