@@ -136,6 +136,7 @@ jobs:
               'seo-aeo-geo': 'idle',
               'mobile-ux': 'idle',
               'on-brand': 'idle',
+              'content': 'idle',
           }
           assert health['lifecycle']['state'] in {'starting', 'online', 'busy', 'maintenance'}
           assert health['lifecycle']['maintenance']['on'] is False
