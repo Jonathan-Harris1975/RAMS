@@ -30,7 +30,7 @@ The production publication contract is:
 ```env
 RMS_PUSH_ENABLED=true
 RMS_CREATE_PR=true
-RMS_WEBSITE_MAX_ISSUES_PER_RUN=0
+RMS_WEBSITE_MAX_ISSUES_PER_RUN=5
 ```
 
 For the unified website lane, `0` means process every eligible Confirmed council `code_fix` in the final report. Each successful task is committed and pushed only on the run's `rms-qa/*` branch. After all eligible tasks have been attempted, RAMS automatically creates or reuses one non-draft GitHub pull request targeting the configured base branch. Failed or manual-review tasks are reported but are not smuggled into the PR. RAMS does not auto-merge.
