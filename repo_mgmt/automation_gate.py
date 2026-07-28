@@ -12,7 +12,11 @@ from pathlib import PurePosixPath
 from typing import Any
 
 PROTECTED_PREFIXES = (
-    ".github/workflows/",
+    ".github/",
+    "config/",
+    "infra/",
+    "infrastructure/",
+    "migrations/",
     "blog/posts/",
     "transcripts/",
     "podcast/episodes/",
@@ -27,9 +31,9 @@ PROTECTED_EXACT = {
     "docker-compose.yml",
 }
 ALLOWED_OPERATIONS = {"replace", "insert_after"}
-MAX_FILES = 8
-MAX_CHANGES = 12
-MAX_REPLACE_CHARS = 18_000
+MAX_FILES = 3
+MAX_CHANGES = 6
+MAX_REPLACE_CHARS = 8_000
 
 
 @dataclass
@@ -78,6 +82,7 @@ def evaluate_phase4c_auto_pr_gate(
     modified_files: list[str],
     validation: Any | None,
     baseline_validation: Any | None = None,
+    council: dict[str, Any] | None = None,
 ) -> AutomationGateDecision:
     """Decide whether a RAMS task may be committed without manual review."""
     defects: list[str] = []
@@ -126,6 +131,11 @@ def evaluate_phase4c_auto_pr_gate(
     elif not validation_passed:
         defects.append("Post-patch validation failed.")
 
+    if council is None:
+        defects.append("Engineering council did not run.")
+    elif council.get("decision") != "approve_micro_surgery":
+        defects.append("Engineering council did not approve autonomous micro-surgery.")
+
     baseline_passed = True if baseline_validation is None else bool(getattr(baseline_validation, "passed", False))
     if baseline_validation is not None and not baseline_passed:
         defects.append("Clean-repo baseline validation failed before patching.")
@@ -139,6 +149,7 @@ def evaluate_phase4c_auto_pr_gate(
         "baselineValidationPassed": baseline_passed,
         "maxFiles": MAX_FILES,
         "maxChanges": MAX_CHANGES,
+        "engineeringCouncilDecision": (council or {}).get("decision"),
     }
     ok = not defects
     return AutomationGateDecision(

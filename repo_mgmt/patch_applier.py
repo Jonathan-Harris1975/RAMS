@@ -62,6 +62,18 @@ PROTECTED_PATHS: dict[str, frozenset[str]] = {
         ]
     ),
     "seo-aeo-geo": frozenset(),
+    "content": frozenset(
+        [
+            ".github/",
+            "config/production.defaults.env",
+            "audits/utils/rams",
+            "services/ops/",
+            "services/shared/utils/requestSchemas.js",
+            "package.json",
+            "package-lock.json",
+            "Dockerfile",
+        ]
+    ),
 }
 
 

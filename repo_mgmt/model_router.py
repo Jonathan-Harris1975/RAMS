@@ -232,6 +232,22 @@ class ModelRouter:
             self._cfg.rms_triage_temperature,
         )
 
+    async def complete_with_model_async(
+        self,
+        model: str,
+        prompt: str,
+        system: str = "",
+        max_tokens: int = 2048,
+        json_mode: bool = False,
+        temperature: float = 0.0,
+    ) -> str:
+        """Call one explicitly selected council model with the normal bounded transport."""
+        if not str(model or "").strip():
+            raise ModelError("Explicit council model is empty")
+        return await self._complete_model_async(
+            str(model).strip(), prompt, system, min(max_tokens, 4096), json_mode, temperature
+        )
+
     async def triage_async(self, prompt: str, max_tokens: int = 256) -> str:
         tokens = min(max_tokens, self._cfg.rms_triage_max_tokens)
         return await self._complete_model_async(

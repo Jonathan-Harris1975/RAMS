@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from repo_mgmt import patch_applier, patch_planner, validation_runner
 from repo_mgmt.automation_gate import evaluate_phase4c_auto_pr_gate
+from repo_mgmt.engineering_council import run_engineering_council
 from repo_mgmt.git_manager import TaskRepoSnapshot
 from repo_mgmt.patch_protocol import (
     PathTraversalError,
@@ -257,11 +258,21 @@ async def run_task(
                 return task
 
         modified = list(task.get("modified_files", modified))
+        council = await run_engineering_council(task, patch_doc, cfg, model_router)
+        task["engineeringCouncil"] = council
+        if council.get("decision") != "approve_micro_surgery":
+            logger.warning("update_executor [%s]: engineering council refused autonomous patch", task_id)
+            _restore_after_failure(git_mgr, snapshot, task)
+            task["status"] = "manual_review"
+            task["error"] = "Engineering council refused autonomous patch"
+            return task
+
         phase4c_gate = evaluate_phase4c_auto_pr_gate(
             task=task,
             patch_doc=patch_doc,
             modified_files=modified,
             validation=post_patch_validation,
+            council=council,
         )
         task["phase4cGate"] = phase4c_gate.to_report()
         if not phase4c_gate.ok:

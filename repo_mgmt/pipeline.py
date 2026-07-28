@@ -34,7 +34,7 @@ from repo_mgmt.report_publisher import (
 
 logger = logging.getLogger(__name__)
 
-_PIPELINE_IDS = ("website", "seo-aeo-geo", "mobile-ux", "on-brand")
+_PIPELINE_IDS = ("website", "seo-aeo-geo", "mobile-ux", "on-brand", "content")
 _pipeline_locks = {pipeline: threading.Lock() for pipeline in _PIPELINE_IDS}
 _global_pipeline_lock = threading.Lock()
 
@@ -434,6 +434,7 @@ class RmsPipeline:
                     "redirect_fix",
                 }
             ),
+            "content": frozenset({"content_prompt_fix", "validator_fix", "council_fix", "retry_fix", "metadata_fix", "scheduler_fix", "link_fix"}),
             "on-brand": frozenset(
                 {
                     "route_fix",
@@ -608,10 +609,10 @@ async def _run_async(
 
     _start_router_run(router, actual_run_id)
     try:
-        if pipeline_id == "website":
+        if pipeline_id in {"website", "content"}:
             if not audit_json_key:
                 raise RuntimeError(
-                    "website pipeline requires the exact AIMS website-audit.json R2 key"
+                    f"{pipeline_id} pipeline requires an exact AIMS final audit JSON R2 key"
                 )
             audit = await asyncio.to_thread(
                 audit_reader.read_report_key,
@@ -623,7 +624,7 @@ async def _run_async(
             )
             if not audit:
                 raise RuntimeError(
-                    "website audit JSON could not be read or failed schema validation"
+                    f"{pipeline_id} audit JSON could not be read or failed schema validation"
                 )
         else:
             audit = await asyncio.to_thread(

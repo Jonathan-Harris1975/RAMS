@@ -232,6 +232,17 @@ def validate_website_report_key(key: str) -> str:
     return cleaned
 
 
+def validate_content_report_key(key: str) -> str:
+    """Validate the exact final content-master JSON key supplied by AIMS."""
+    cleaned = _clean_key(str(key or ""))
+    parts = PurePosixPath(cleaned).parts
+    if (len(parts) != 5 or parts[0] != "audits" or parts[1] != "content-master"
+        or not re.fullmatch(r"\d{4}-\d{2}", parts[2])
+        or not re.fullmatch(r"[A-Za-z0-9._-]+", parts[3])
+        or parts[4] != "content-audit.json"):
+        raise ValueError("content audit key must match audits/content-master/YYYY-MM/<session>/content-audit.json")
+    return cleaned
+
 def read_report_key(
     pipeline_id: "PipelineId",
     r2: "R2Client",
@@ -246,9 +257,9 @@ def read_report_key(
     so AIMS passes the exact JSON key to RAMS at dispatch time. This keeps the
     audit bucket free of a permanent ``latest.json`` signpost.
     """
-    if pipeline_id != "website":
-        raise ValueError("exact report-key reads are currently supported only for website")
-    final_key = validate_website_report_key(key)
+    if pipeline_id not in {"website", "content"}:
+        raise ValueError("exact report-key reads are supported only for website/content")
+    final_key = validate_website_report_key(key) if pipeline_id == "website" else validate_content_report_key(key)
     budget = _ReadBudget(remaining_bytes=max_object_bytes, remaining_artefacts=0)
     data = _read_json_object(
         r2,
@@ -260,22 +271,13 @@ def read_report_key(
     )
     if not isinstance(data, dict):
         return {}
-    if data.get("auditType") != "website":
-        logger.warning("audit_reader: exact website report %r has wrong auditType", final_key)
-        return {}
-    if data.get("schemaVersion") != "website-audit-report/v1":
-        logger.warning(
-            "audit_reader: exact website report %r has unsupported schemaVersion=%r",
-            final_key,
-            data.get("schemaVersion"),
-        )
-        return {}
-    if data.get("remediationContractVersion") != "rams-website/v1":
-        logger.warning(
-            "audit_reader: exact website report %r has unsupported remediationContractVersion=%r",
-            final_key,
-            data.get("remediationContractVersion"),
-        )
+    expected = {
+        "website": ("website", "website-audit-report/v1", "rams-website/v1", "website-audit"),
+        "content": ("content-master", "content-audit-report/v1", "rams-content/v1", "content-audit"),
+    }[pipeline_id]
+    expected_type, expected_schema, expected_contract, report_leaf = expected
+    if data.get("auditType") != expected_type or data.get("schemaVersion") != expected_schema or data.get("remediationContractVersion") != expected_contract:
+        logger.warning("audit_reader: exact %s report %r failed schema/contract validation", pipeline_id, final_key)
         return {}
     session_id = PurePosixPath(final_key).parts[3]
     if data.get("sessionId") != session_id:
@@ -289,8 +291,8 @@ def read_report_key(
     report_set = data.get("reportSet")
     expected_prefix = str(PurePosixPath(final_key).parent)
     expected_keys = {
-        "pdf": f"{expected_prefix}/website-audit.pdf",
-        "html": f"{expected_prefix}/website-audit.html",
+        "pdf": f"{expected_prefix}/{report_leaf}.pdf",
+        "html": f"{expected_prefix}/{report_leaf}.html",
         "json": final_key,
     }
     if not isinstance(report_set, dict) or any(

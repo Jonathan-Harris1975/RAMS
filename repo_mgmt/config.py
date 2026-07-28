@@ -19,7 +19,7 @@ from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand"]
+PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand", "content"]
 
 
 class ConfigurationError(Exception):
@@ -183,8 +183,19 @@ class Settings(BaseSettings):
     rms_max_issues_per_run: int = Field(default=1, ge=1, le=5)
     # Unified website pipeline: 0 means process every eligible confirmed code_fix
     # in the final council ledger. Other lanes retain the bounded global cap.
-    rms_website_max_issues_per_run: int = Field(default=0, ge=0, le=100)
+    rms_website_max_issues_per_run: int = Field(default=5, ge=1, le=5)
     rms_max_concurrent_pipelines: int = Field(default=1, ge=1, le=1)
+
+    # Autonomous engineering council / micro-surgery guardrails.
+    rms_engineering_council_enabled: bool = True
+    rms_engineering_council_architect_model: str = "anthropic/claude-opus-5"
+    rms_engineering_council_specialist_model: str = "anthropic/claude-sonnet-5"
+    rms_engineering_council_chair_model: str = "anthropic/claude-opus-5"
+    rms_autonomous_max_files: int = Field(default=3, ge=1, le=5)
+    rms_autonomous_max_changes: int = Field(default=6, ge=1, le=10)
+    rms_autonomous_max_replace_chars: int = Field(default=8000, ge=1000, le=18000)
+    rms_autonomous_allow_dependency_changes: bool = False
+    rms_autonomous_allow_config_changes: bool = False
 
     # eMicro resource ceilings. These bound RAM, disk, subprocess output and
     # evidence sent to model providers without weakening live-write gates.
@@ -449,7 +460,7 @@ class Settings(BaseSettings):
         """Return the configured GitHub repository URL for a pipeline."""
         if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
             return self.rms_website_repo_url
-        if pipeline == "on-brand":
+        if pipeline in {"on-brand", "content"}:
             return self.rms_aims_repo_url
         raise ConfigurationError(f"Unknown pipeline: {pipeline}")
 
@@ -457,7 +468,7 @@ class Settings(BaseSettings):
         """Return the configured protected base branch for a pipeline."""
         if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
             return self.rms_website_repo_branch
-        if pipeline == "on-brand":
+        if pipeline in {"on-brand", "content"}:
             return self.rms_aims_repo_branch
         raise ConfigurationError(f"Unknown pipeline: {pipeline}")
 
@@ -465,7 +476,7 @@ class Settings(BaseSettings):
         """Return the ordered validation commands for the given pipeline."""
         if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
             raw = self.rms_website_validation_commands
-        elif pipeline == "on-brand":
+        elif pipeline in {"on-brand", "content"}:
             raw = self.rms_aims_validation_commands or self.rms_seo_validation_commands
         else:
             raise ConfigurationError(f"Unknown pipeline: {pipeline}")
@@ -475,7 +486,7 @@ class Settings(BaseSettings):
         """Return the absolute repo path for the given pipeline."""
         if pipeline in {"website", "seo-aeo-geo", "mobile-ux"}:
             return Path(self.rms_website_repo_path)
-        if pipeline == "on-brand":
+        if pipeline in {"on-brand", "content"}:
             return Path(self.aims_repo_path_value)
         raise ConfigurationError(f"Unknown pipeline: {pipeline}")
 

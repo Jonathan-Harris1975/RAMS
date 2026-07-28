@@ -84,6 +84,7 @@ _APPROVED_FIX_CLASSES: dict[str, frozenset[str]] = {
             "redirect_fix",
         ]
     ),
+    "content": frozenset(["content_prompt_fix", "validator_fix", "council_fix", "retry_fix", "metadata_fix", "scheduler_fix", "link_fix"]),
     "on-brand": frozenset(
         [
             "route_fix",
@@ -558,6 +559,11 @@ def _extract_findings(
     """Return normaliser-ready finding dictionaries from latest or artefacts."""
     if pipeline_id == "website":
         return _extract_website_findings(audit, cfg)
+    if pipeline_id == "content":
+        ledger = audit.get("masterIssueLedger")
+        if not isinstance(ledger, list):
+            ledger = (audit.get("council") or {}).get("masterIssueLedger") if isinstance(audit.get("council"), dict) else []
+        return [_map_content_candidate(item) for item in ledger if isinstance(item, dict) and _map_content_candidate(item)]
     direct = audit.get("findings")
     if isinstance(direct, list) and direct:
         return [item for item in direct if isinstance(item, dict)]
@@ -985,8 +991,33 @@ def _map_candidate(
         return _map_seo_candidate(candidate, artefact_name)
     if pipeline_id == "on-brand":
         return _map_on_brand_candidate(candidate, artefact_name)
+    if pipeline_id == "content":
+        return _map_content_candidate(candidate)
     return None
 
+
+def _map_content_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    """Map the AIMS master content council ledger into a fail-closed code task."""
+    finding_id = _first_text(candidate, "findingId", "issueId", "id") or "content"
+    classification = str(candidate.get("classification") or "manual_review").strip().lower()
+    confidence = str(candidate.get("confidence") or "").strip().lower()
+    paths = [str(x).strip() for x in candidate.get("affectedPaths", []) if str(x).strip()] if isinstance(candidate.get("affectedPaths"), list) else []
+    fix_class = _first_text(candidate, "fixClass", "allowedFixClass")
+    allowed = {"content_prompt_fix","validator_fix","council_fix","retry_fix","metadata_fix","scheduler_fix","link_fix"}
+    safe_code = classification == "code_fix" and confidence == "confirmed" and bool(paths) and fix_class in allowed
+    return {
+        "taskId": finding_id,
+        "title": _first_text(candidate, "title") or f"Content council finding {finding_id}",
+        "description": _first_text(candidate, "exactRemediation", "description"),
+        "severity": _map_severity(candidate.get("severity"), pipeline="on-brand"),
+        "classification": "code_fix" if safe_code else "manual_review",
+        "affectedPaths": paths,
+        "allowedFixClass": fix_class if safe_code else "",
+        "evidence": [str(x) for x in candidate.get("evidence", [])][:20] if isinstance(candidate.get("evidence"), list) else [],
+        "requiredOutcome": _first_text(candidate, "exactRemediation", "requiredOutcome"),
+        "verificationMethod": _first_text(candidate, "verificationMethod", "acceptanceCriterion"),
+        "sourceAudit": "content-master:final-report",
+    }
 
 def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict[str, Any] | None:
     """Map a Mobile UX issue/row to a RAMS finding."""

@@ -145,6 +145,11 @@ def _report_quality(report: "RunReport") -> dict[str, Any]:
                 "accessibility evidence rows for rendered route/viewports",
             ],
         },
+        "content": {
+            "primaryGoal": "Apply only confirmed, exact-path micro-surgery from the AIMS master content council.",
+            "requiredEvidence": ["content-audit.json", "Confirmed classification", "exact affectedPaths", "acceptance criterion"],
+            "blockedIfMissing": ["engineering council approval", "exact repo paths", "post-patch validation"],
+        },
         "on-brand": {
             "primaryGoal": "Verify future-output brand guardrails across blog, RSS, and podcast copy.",
             "requiredEvidence": [

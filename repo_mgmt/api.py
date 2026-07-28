@@ -108,8 +108,8 @@ async def production_response_headers(
         response.headers.setdefault("X-Request-ID", request_id)
     return response
 
-PipelineIdLiteral = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand"]
-_PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("website", "seo-aeo-geo", "mobile-ux", "on-brand")
+PipelineIdLiteral = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand", "content"]
+_PIPELINE_IDS: tuple[PipelineIdLiteral, ...] = ("website", "seo-aeo-geo", "mobile-ux", "on-brand", "content")
 
 _pipelines: dict[PipelineId, RmsPipeline] = {}
 _running: dict[PipelineId, bool] = {pipeline_id: False for pipeline_id in _PIPELINE_IDS}
@@ -699,7 +699,7 @@ async def _run_pipeline_bg(
         if pipeline is None:
             logger.error("api: cannot run %r - dependencies not ready", pipeline_id)
             return
-        if pipeline_id == "website":
+        if pipeline_id in {"website", "content"}:
             report = await pipeline.run(
                 dry_run=dry_run, run_id=run_id, audit_json_key=audit_json_key
             )
@@ -1406,11 +1406,10 @@ async def trigger_run(
         )
 
     audit_json_key: str | None = None
-    if typed_pipeline_id == "website":
+    if typed_pipeline_id in {"website", "content"}:
         try:
-            audit_json_key = audit_reader.validate_website_report_key(
-                body.audit_json_key or ""
-            )
+            validator = audit_reader.validate_website_report_key if typed_pipeline_id == "website" else audit_reader.validate_content_report_key
+            audit_json_key = validator(body.audit_json_key or "")
         except ValueError as exc:
             return JSONResponse(
                 status_code=422,
@@ -1434,7 +1433,7 @@ async def trigger_run(
         return JSONResponse(
             status_code=422,
             content={
-                "error": "audit_json_key/audit_session_id are only valid for the website pipeline",
+                "error": "audit_json_key/audit_session_id are only valid for website/content pipelines",
                 "pipeline": typed_pipeline_id,
             },
         )
