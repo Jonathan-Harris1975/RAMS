@@ -248,6 +248,53 @@ class TestUnifiedWebsiteReportKey:
         ).encode()
         assert audit_reader.read_report_key("website", mock_r2, "audits", key) == {}
 
+    def test_reads_v2_report_while_preserving_v1_backwards_compatibility(
+        self, mock_r2: MagicMock
+    ) -> None:
+        key = "audits/website/2026-08/AUD-WEBSITE-website-1785761834951/website-audit.json"
+        prefix = "audits/website/2026-08/AUD-WEBSITE-website-1785761834951"
+        payload = {
+            "schemaVersion": "website-audit-report/v2",
+            "remediationContractVersion": "rams-website/v1",
+            "auditType": "website",
+            "reportStatus": "complete",
+            "sessionId": "AUD-WEBSITE-website-1785761834951",
+            "retentionPolicy": "final-pdf-html-json-only-after-rams-acceptance",
+            "reportSet": {
+                "pdf": {"key": f"{prefix}/website-audit.pdf"},
+                "html": {"key": f"{prefix}/website-audit.html"},
+                "json": {"key": key},
+            },
+            "operational": {"ramsDispatchPermitted": True},
+            "council": {"masterIssueLedger": []},
+        }
+        mock_r2.get_object.return_value = json.dumps(payload).encode()
+        result = audit_reader.read_report_key("website", mock_r2, "audits", key)
+        assert result["schemaVersion"] == "website-audit-report/v2"
+        assert result["sourceAuditKey"] == key
+
+    def test_rejects_incomplete_v2_report_even_when_the_path_is_valid(
+        self, mock_r2: MagicMock
+    ) -> None:
+        key = "audits/website/2026-08/AUD-WEBSITE-website-1785761834951/website-audit.json"
+        prefix = "audits/website/2026-08/AUD-WEBSITE-website-1785761834951"
+        payload = {
+            "schemaVersion": "website-audit-report/v2",
+            "remediationContractVersion": "rams-website/v1",
+            "auditType": "website",
+            "reportStatus": "incomplete",
+            "sessionId": "AUD-WEBSITE-website-1785761834951",
+            "retentionPolicy": "final-pdf-html-json-only-after-rams-acceptance",
+            "reportSet": {
+                "pdf": {"key": f"{prefix}/website-audit.pdf"},
+                "html": {"key": f"{prefix}/website-audit.html"},
+                "json": {"key": key},
+            },
+            "operational": {"ramsDispatchPermitted": False},
+        }
+        mock_r2.get_object.return_value = json.dumps(payload).encode()
+        assert audit_reader.read_report_key("website", mock_r2, "audits", key) == {}
+
 
 def test_exact_website_report_rejects_wrong_remediation_contract(mock_r2: MagicMock) -> None:
     key = "audits/website/2026-07/site-audit-123/website-audit.json"
