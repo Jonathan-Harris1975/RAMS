@@ -97,6 +97,13 @@ _MAX_ARTEFACTS_PER_RUN = 12
 _DEFAULT_MAX_OBJECT_BYTES = 2 * 1024 * 1024
 _DEFAULT_MAX_TOTAL_BYTES = 8 * 1024 * 1024
 
+_WEBSITE_REPORT_CONTRACTS: dict[str, frozenset[str]] = {
+    "website-audit-report/v1": frozenset({"final-pdf-html-json-only"}),
+    "website-audit-report/v2": frozenset(
+        {"final-pdf-html-json-only-after-rams-acceptance"}
+    ),
+}
+
 
 @dataclass
 class _ReadBudget:
@@ -272,12 +279,30 @@ def read_report_key(
     if not isinstance(data, dict):
         return {}
     expected = {
-        "website": ("website", "website-audit-report/v1", "rams-website/v1", "website-audit"),
-        "content": ("content-master", "content-audit-report/v1", "rams-content/v1", "content-audit"),
+        "website": ("website", "rams-website/v1", "website-audit"),
+        "content": ("content-master", "rams-content/v1", "content-audit"),
     }[pipeline_id]
-    expected_type, expected_schema, expected_contract, report_leaf = expected
-    if data.get("auditType") != expected_type or data.get("schemaVersion") != expected_schema or data.get("remediationContractVersion") != expected_contract:
-        logger.warning("audit_reader: exact %s report %r failed schema/contract validation", pipeline_id, final_key)
+    expected_type, expected_contract, report_leaf = expected
+    schema_version = str(data.get("schemaVersion") or "")
+    allowed_schemas = (
+        frozenset(_WEBSITE_REPORT_CONTRACTS)
+        if pipeline_id == "website"
+        else frozenset({"content-audit-report/v1"})
+    )
+    if (
+        data.get("auditType") != expected_type
+        or schema_version not in allowed_schemas
+        or data.get("remediationContractVersion") != expected_contract
+    ):
+        logger.warning(
+            "audit_reader: exact %s report %r failed schema/contract validation "
+            "auditType=%r schemaVersion=%r remediationContractVersion=%r",
+            pipeline_id,
+            final_key,
+            data.get("auditType"),
+            data.get("schemaVersion"),
+            data.get("remediationContractVersion"),
+        )
         return {}
     session_id = PurePosixPath(final_key).parts[3]
     if data.get("sessionId") != session_id:
@@ -305,13 +330,35 @@ def read_report_key(
             final_key,
         )
         return {}
-    if data.get("retentionPolicy") != "final-pdf-html-json-only":
+    allowed_retention_policies = (
+        _WEBSITE_REPORT_CONTRACTS[schema_version]
+        if pipeline_id == "website"
+        else frozenset({"final-pdf-html-json-only"})
+    )
+    if data.get("retentionPolicy") not in allowed_retention_policies:
         logger.warning(
-            "audit_reader: exact website report %r has unsupported retentionPolicy=%r",
+            "audit_reader: exact %s report %r has unsupported retentionPolicy=%r for schemaVersion=%r",
+            pipeline_id,
             final_key,
             data.get("retentionPolicy"),
+            schema_version,
         )
         return {}
+    if pipeline_id == "website" and schema_version == "website-audit-report/v2":
+        if data.get("reportStatus") != "complete":
+            logger.warning(
+                "audit_reader: exact website report %r is not complete reportStatus=%r",
+                final_key,
+                data.get("reportStatus"),
+            )
+            return {}
+        operational = data.get("operational")
+        if not isinstance(operational, dict) or operational.get("ramsDispatchPermitted") is not True:
+            logger.warning(
+                "audit_reader: exact website report %r does not permit RAMS dispatch",
+                final_key,
+            )
+            return {}
     result = dict(data)
     result["sourceAuditKey"] = final_key
     return result
