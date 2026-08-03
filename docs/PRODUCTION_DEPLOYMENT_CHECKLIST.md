@@ -103,4 +103,4 @@ curl -fsS -X POST \
   "$BASE_URL/rebuild/website/run"
 ```
 
-The smoke key must point at an actual retained `website-audit.json` from AIMS. RAMS validates `website-audit-report/v1` + `rams-website/v1` before it creates work.
+The smoke key must point at an actual retained `website-audit.json` from AIMS. RAMS validates the current complete `website-audit-report/v2` + `rams-website/v1` contract before it creates work, while retaining explicit v1 compatibility for older final reports.
