@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from repo_mgmt.headroom_optimizer import HeadroomOptimizer, HeadroomOutcome
+
 if TYPE_CHECKING:
     from repo_mgmt.config import Settings
 
@@ -94,6 +96,7 @@ class ModelRouter:
         self._usage_lock = threading.Lock()
         self._run_id: str | None = None
         self._usage: dict[str, Any] = self._empty_usage()
+        self._headroom = HeadroomOptimizer(cfg)
 
     @staticmethod
     def _empty_usage() -> dict[str, Any]:
@@ -108,6 +111,18 @@ class ModelRouter:
             "cost": 0.0,
             "models": {},
             "providers": {},
+            "headroom": {
+                "attempts": 0,
+                "compressedRequests": 0,
+                "tokensBefore": 0,
+                "tokensAfter": 0,
+                "tokensSaved": 0,
+                "failures": 0,
+                "skippedExactContext": 0,
+                "skippedOversize": 0,
+                "rejectedRetrievalMarkers": 0,
+                "transforms": {},
+            },
         }
 
     def warmup(self) -> dict[str, object]:
@@ -136,6 +151,10 @@ class ModelRouter:
             data = dict(self._usage)
             data["models"] = dict(self._usage.get("models", {}))
             data["providers"] = dict(self._usage.get("providers", {}))
+            headroom = self._usage.get("headroom", {})
+            data["headroom"] = dict(headroom) if isinstance(headroom, Mapping) else {}
+            if isinstance(data["headroom"].get("transforms"), Mapping):
+                data["headroom"]["transforms"] = dict(data["headroom"]["transforms"])
             data["runId"] = self._run_id
             return data
 
@@ -425,6 +444,13 @@ class ModelRouter:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+        headroom_outcome = self._headroom.optimise(
+            messages,
+            model=model,
+            exact_context=self._requires_exact_context(system),
+        )
+        messages = headroom_outcome.messages
+        self._record_headroom(headroom_outcome)
         payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -452,6 +478,59 @@ class ModelRouter:
         if self._cfg.rms_openrouter_log_prompts:
             logger.debug("model_router: prompt logging enabled length=%d", len(prompt))
         return f"{self._api_base}/chat/completions", headers, payload
+
+    @staticmethod
+    def _requires_exact_context(system: str) -> bool:
+        """Protect AnchorPatch planning/repair prompts from any lossy transform."""
+        return "AnchorPatch/v1" in system
+
+    def _record_headroom(self, outcome: HeadroomOutcome) -> None:
+        """Add Headroom savings/skips to the per-run OpenRouter usage summary."""
+        with self._usage_lock:
+            headroom = self._usage.get("headroom")
+            if not isinstance(headroom, dict):
+                return
+            if outcome.attempted:
+                headroom["attempts"] = int(headroom.get("attempts", 0)) + 1
+            if outcome.compressed:
+                headroom["compressedRequests"] = (
+                    int(headroom.get("compressedRequests", 0)) + 1
+                )
+            headroom["tokensBefore"] = (
+                int(headroom.get("tokensBefore", 0)) + outcome.tokens_before
+            )
+            headroom["tokensAfter"] = (
+                int(headroom.get("tokensAfter", 0)) + outcome.tokens_after
+            )
+            headroom["tokensSaved"] = (
+                int(headroom.get("tokensSaved", 0)) + outcome.tokens_saved
+            )
+            if outcome.failed:
+                headroom["failures"] = int(headroom.get("failures", 0)) + 1
+            if outcome.skipped_reason == "exact_context":
+                headroom["skippedExactContext"] = (
+                    int(headroom.get("skippedExactContext", 0)) + 1
+                )
+            if outcome.skipped_reason == "oversize":
+                headroom["skippedOversize"] = (
+                    int(headroom.get("skippedOversize", 0)) + 1
+                )
+            if outcome.skipped_reason == "retrieval_marker":
+                headroom["rejectedRetrievalMarkers"] = (
+                    int(headroom.get("rejectedRetrievalMarkers", 0)) + 1
+                )
+            transforms = headroom.get("transforms")
+            if isinstance(transforms, dict):
+                for transform in outcome.transforms:
+                    transforms[transform] = int(transforms.get(transform, 0)) + 1
+        if self._cfg.rms_headroom_log_savings and outcome.tokens_saved > 0:
+            logger.info(
+                "model_router: headroom saved=%d tokens before=%d after=%d transforms=%s",
+                outcome.tokens_saved,
+                outcome.tokens_before,
+                outcome.tokens_after,
+                ",".join(outcome.transforms) or "unknown",
+            )
 
     def _parse_response(
         self, response: httpx.Response, requested_model: str, duration: float

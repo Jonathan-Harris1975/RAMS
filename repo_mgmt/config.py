@@ -127,6 +127,17 @@ class Settings(BaseSettings):
     rms_openrouter_log_cost: bool = True
     rms_openrouter_log_prompts: bool = False
 
+    # Headroom inline context optimisation.  RAMS intentionally uses the core
+    # library instead of a second proxy process so the Koyeb eMicro footprint
+    # stays bounded.  The ML Kompress model is disabled by default; structured
+    # JSON compression remains available without a runtime model download.
+    rms_headroom_enabled: bool = True
+    rms_headroom_target_ratio: float = Field(default=0.7, ge=0.5, le=0.95)
+    rms_headroom_min_tokens_to_compress: int = Field(default=250, ge=64, le=4096)
+    rms_headroom_max_input_chars: int = Field(default=262_144, ge=16_384, le=1_048_576)
+    rms_headroom_kompress_model: str = "disabled"
+    rms_headroom_log_savings: bool = True
+
     # ── Target repo paths ──────────────────────────────────────────────────
     # Current architecture:
     #   website     -> website repo (unified Digital Growth + SEO/AEO/GEO + Mobile UX report)
