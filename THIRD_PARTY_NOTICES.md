@@ -1,5 +1,5 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 16 June 2026  
+> **Last reviewed:** 7 August 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # Third-Party Notices
@@ -49,6 +49,12 @@ The following open-source libraries are used by this project.
 ### python-dotenv
 - **License**: BSD-3-Clause
 - **URL**: https://github.com/theskumar/python-dotenv
+
+### Headroom
+- **License**: Apache-2.0
+- **URL**: https://github.com/headroomlabs-ai/headroom
+- **Version**: 0.32.0
+- **Use**: Local inline context compression before eligible OpenRouter requests.
 
 ### pytest / pytest-asyncio (dev)
 - **License**: MIT
