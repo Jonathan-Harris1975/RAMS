@@ -210,3 +210,47 @@ def test_both_models_failure_reports_last_model_status(settings) -> None:
     assert exc_info.value.status_code == 504
     assert len(client.calls) == 2
     assert router.usage_summary()["fallbacks"] == 1
+
+
+def test_anchor_patch_system_context_is_never_compressed(settings) -> None:
+    router, client = _router_with_sync(settings, [_success("patch-ok")])
+    system = "Return AnchorPatch/v1 only. Preserve exact source anchors."
+    prompt = "FULL FILE CONTENT\nline one\nline two"
+
+    assert router.complete(prompt, system=system) == "patch-ok"
+
+    sent = client.calls[0]["json"]["messages"]
+    assert sent == [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+    headroom = router.usage_summary()["headroom"]
+    assert headroom["skippedExactContext"] == 1
+    assert headroom["compressedRequests"] == 0
+
+
+def test_eligible_request_uses_headroom_output_and_accounts_savings(settings) -> None:
+    router, client = _router_with_sync(settings, [_success("compressed-ok")])
+
+    def fake_compress(messages, **kwargs):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            messages=[{"role": "user", "content": "compressed payload"}],
+            tokens_before=900,
+            tokens_after=500,
+            tokens_saved=400,
+            transforms_applied=["smartcrusher"],
+        )
+
+    router._headroom._compressor = fake_compress
+
+    assert router.complete("original payload " * 300) == "compressed-ok"
+    assert client.calls[0]["json"]["messages"] == [
+        {"role": "user", "content": "compressed payload"}
+    ]
+    headroom = router.usage_summary()["headroom"]
+    assert headroom["attempts"] == 1
+    assert headroom["compressedRequests"] == 1
+    assert headroom["tokensSaved"] == 400
+    assert headroom["transforms"] == {"smartcrusher": 1}
