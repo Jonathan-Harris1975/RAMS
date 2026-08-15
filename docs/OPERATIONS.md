@@ -13,8 +13,8 @@ RAMS runs as a single-worker FastAPI service on the paid Koyeb production instan
 - Website repository target for `website` and the legacy `seo-aeo-geo` / `mobile-ux` lanes.
 - AIMS repository target for `on-brand`.
 - Repository checkouts materialised on demand beneath `/tmp/rams-repos`.
-- Reports and live evidence published to the governed `audits` bucket.
-- HIVE skills loaded from the shared `hive-skills` bucket when required.
+- Reports and live evidence are read/written in the governed `audits` bucket through authenticated R2/S3 access; RAMS does not require `R2_PUBLIC_BASE_URL_AUDITS`.
+- HIVE skills remain referenced through the shared `hive-skills` public URL until the separate coordinated skills migration is completed.
 
 ## Production gate meaning
 
