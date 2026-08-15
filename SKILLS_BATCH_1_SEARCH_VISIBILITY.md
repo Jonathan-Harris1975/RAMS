@@ -11,7 +11,7 @@ RAMS no longer installs Batch 1 search visibility skills into the local repo. Th
 | Item | Value |
 |---|---|
 | R2 bucket | `hive-skills` |
-| Public base URL | `https://pub-da50a6512f164566955a3076a1c795ef.r2.dev` |
+| Public base URL | None; bucket is private |
 | RAMS manifest | `manifests/rams-skills-manifest.json` |
 | Search index | `index/search-documents.json` |
 | Descriptor lookup | `index/reference-prefix-map.json` |

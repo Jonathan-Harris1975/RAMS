@@ -1,14 +1,15 @@
 {
   "patch": "RAMS HIVE central skills R2 update",
-  "version": "v4-rams-r2-centralised",
-  "date": "2026-06-11",
+  "version": "v5-rams-private-r2-centralised",
+  "date": "2026-08-15",
   "r2": {
-    "R2_PUBLIC_BASE_URL_HIVE_SKILLS": "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev",
+    "R2_PUBLIC_BASE_URL_HIVE_SKILLS": "",
     "R2_BUCKET_HIVE_SKILLS": "hive-skills",
-    "rams_manifest": "manifests/rams-skills-manifest.json"
+    "rams_manifest": "manifests/rams-skills-manifest.json",
+    "access_mode": "private-r2-read-only"
   },
   "summary": [
-    "RAMS now consumes the central HIVE/R2 skill pool through a read-only RAMS manifest.",
+    "RAMS consumes the central private HIVE/R2 skill pool through a read-only RAMS manifest and authenticated R2 access.",
     "Local .agents skill folder and Skills.sh install scripts are deprecated for RAMS.",
     "Spreadsheet updated to V4 so RAMS mapping reflects central control."
   ],

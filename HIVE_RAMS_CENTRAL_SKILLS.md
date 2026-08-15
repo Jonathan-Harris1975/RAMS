@@ -9,8 +9,9 @@ RAMS now treats HIVE as the central controller for shared skills.
 ## R2 details
 
 ```text
-R2_PUBLIC_BASE_URL_HIVE_SKILLS=https://pub-da50a6512f164566955a3076a1c795ef.r2.dev
+R2_PUBLIC_BASE_URL_HIVE_SKILLS=
 R2_BUCKET_HIVE_SKILLS=hive-skills
+# Use authenticated R2 access; internal references use r2://hive-skills/<object-key>.
 ```
 
 ## Objects RAMS expects

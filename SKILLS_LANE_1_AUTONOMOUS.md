@@ -13,7 +13,7 @@ Lane 1 skill metadata is now centrally controlled by HIVE in the shared R2 `hive
 | Controller | HIVE |
 | RAMS access mode | Central R2 read-only manifest |
 | R2 bucket | `hive-skills` |
-| Public base URL | `https://pub-da50a6512f164566955a3076a1c795ef.r2.dev` |
+| Public base URL | None; bucket is private |
 | RAMS manifest | `manifests/rams-skills-manifest.json` |
 | Search documents | `index/search-documents.json` |
 | Capability map | `index/capability-map.json` |
