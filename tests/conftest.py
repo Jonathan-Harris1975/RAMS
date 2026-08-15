@@ -22,7 +22,7 @@ VALID_ENV: dict[str, str] = {
     "R2_SECRET_ACCESS_KEY": "test-secret",
     "R2_BUCKET_AUDITS": "audits",
     "R2_BUCKET_HIVE_SKILLS": "hive-skills",
-    "R2_PUBLIC_BASE_URL_HIVE_SKILLS": "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev",
+    "R2_PUBLIC_BASE_URL_HIVE_SKILLS": "",
     "OPENROUTER_API_KEY": "test-or-key",
     "OPENROUTER_PRIMARY_MODEL": "anthropic/claude-3-5-sonnet",
     "OPENROUTER_SECONDARY_MODEL": "anthropic/claude-3-haiku",
