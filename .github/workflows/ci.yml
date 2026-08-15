@@ -37,7 +37,6 @@ jobs:
           R2_ACCESS_KEY_ID: "test-key"
           R2_SECRET_ACCESS_KEY: "test-secret"
           R2_BUCKET_HIVE_SKILLS: "hive-skills"
-          R2_PUBLIC_BASE_URL_HIVE_SKILLS: "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev"
           OPENROUTER_API_KEY: "test-or-key"
           OPENROUTER_PRIMARY_MODEL: "qwen/qwen3.7-plus"
           OPENROUTER_SECONDARY_MODEL: "openai/gpt-5.4-mini"
@@ -91,7 +90,6 @@ jobs:
             -e R2_ACCESS_KEY_ID='test-key' \
             -e R2_SECRET_ACCESS_KEY='test-secret' \
             -e R2_BUCKET_HIVE_SKILLS='hive-skills' \
-            -e R2_PUBLIC_BASE_URL_HIVE_SKILLS='https://pub-da50a6512f164566955a3076a1c795ef.r2.dev' \
             -e OPENROUTER_API_KEY='test-or-key' \
             -e OPENROUTER_PRIMARY_MODEL='qwen/qwen3.7-plus' \
             -e OPENROUTER_SECONDARY_MODEL='openai/gpt-5.4-mini' \
