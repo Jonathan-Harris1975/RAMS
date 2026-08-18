@@ -181,8 +181,10 @@ class Settings(BaseSettings):
     )
 
     # ── API authentication ────────────────────────────────────────────────
-    # Rebuild/write endpoints require RMS_API_KEY unless a local developer
-    # explicitly opts out with RMS_ALLOW_UNAUTHENTICATED_DEV=true.
+    # Environment defaults to production so authentication/documentation fail closed.
+    rms_environment: Literal["production", "development", "test"] = "production"
+    # Rebuild/write endpoints require RMS_API_KEY unless a loopback development
+    # request explicitly opts out with RMS_ALLOW_UNAUTHENTICATED_DEV=true.
     rms_api_key: str | None = Field(default=None)
     rms_allow_unauthenticated_dev: bool = False
 

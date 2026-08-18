@@ -46,6 +46,10 @@ from repo_mgmt.runtime_guard import cleanup_stale_reports
 logger = logging.getLogger(__name__)
 
 
+def _runtime_is_nonproduction() -> bool:
+    return os.environ.get("RMS_ENVIRONMENT", "production").strip().lower() in {"development", "test"}
+
+
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Initialise local state and close clients within Koyeb shutdown handling."""
@@ -87,6 +91,9 @@ app = FastAPI(
     description="Autonomous repository audit and patch pipeline service.",
     version="1.1.0",
     lifespan=_lifespan,
+    docs_url="/docs" if _runtime_is_nonproduction() else None,
+    redoc_url="/redoc" if _runtime_is_nonproduction() else None,
+    openapi_url="/openapi.json" if _runtime_is_nonproduction() else None,
 )
 
 
@@ -743,10 +750,11 @@ async def livez() -> JSONResponse:
 
 @app.get("/ops/warmup")
 async def ops_warmup(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Warm local configuration and HTTP pools without starting operational work."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg = _get_cfg()
@@ -777,10 +785,11 @@ async def ops_warmup(
 
 @app.get("/ops/excellence")
 async def operational_excellence(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return professional-operations evidence without exposing credentials."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg = _get_cfg()
@@ -849,10 +858,11 @@ async def operational_excellence(
 @app.get("/readiness")
 @app.get("/readyz")
 async def readiness(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return authenticated dependency readiness detail."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     payload = _readiness_payload()
@@ -862,10 +872,11 @@ async def readiness(
 
 @app.get("/admin/lifecycle")
 async def get_lifecycle(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return the current self-observed lifecycle snapshot."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     return JSONResponse(status_code=200, content=lifecycle.snapshot())
@@ -878,11 +889,12 @@ class MaintenanceRequest(BaseModel):
 
 @app.post("/admin/lifecycle/maintenance")
 async def set_maintenance(
+    request: Request,
     request_body: MaintenanceRequest,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Force RAMS into or out of Maintenance state (operator/MAST controlled)."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     if request_body.on:
@@ -892,7 +904,16 @@ async def set_maintenance(
     return JSONResponse(status_code=200, content=snapshot)
 
 
-def _auth_error_response(authorization: str | None) -> JSONResponse | None:
+
+def _local_development_bypass_allowed(cfg: Settings, request: Request) -> bool:
+    if not cfg.rms_allow_unauthenticated_dev or cfg.rms_environment != "development":
+        return False
+    host = (request.client.host if request.client else "").strip().lower()
+    # ``testclient`` is Starlette's in-process sentinel and cannot be a deployed remote peer.
+    return host in {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _auth_error_response(authorization: str | None, request: Request) -> JSONResponse | None:
     """Return an auth error for protected endpoints, leaving only / and /health public."""
     cfg_for_auth = _get_cfg()
     if cfg_for_auth is None:
@@ -906,7 +927,7 @@ def _auth_error_response(authorization: str | None) -> JSONResponse | None:
 
     expected_key = _usable_secret(cfg_for_auth.rms_api_key)
     if not expected_key:
-        if cfg_for_auth.rms_allow_unauthenticated_dev:
+        if _local_development_bypass_allowed(cfg_for_auth, request):
             return None
         return JSONResponse(
             status_code=503,
@@ -928,7 +949,7 @@ def _auth_error_response(authorization: str | None) -> JSONResponse | None:
     )
 
 
-def _write_auth_error_response(authorization: str | None) -> JSONResponse | None:
+def _write_auth_error_response(authorization: str | None, request: Request) -> JSONResponse | None:
     """Fail closed for public rebuild endpoints unless explicitly authorised."""
     cfg_for_auth = _get_cfg()
     if cfg_for_auth is None:
@@ -940,7 +961,7 @@ def _write_auth_error_response(authorization: str | None) -> JSONResponse | None
             },
         )
     if not _usable_secret(cfg_for_auth.rms_api_key):
-        if cfg_for_auth.rms_allow_unauthenticated_dev:
+        if _local_development_bypass_allowed(cfg_for_auth, request):
             return None
         return JSONResponse(
             status_code=503,
@@ -949,7 +970,7 @@ def _write_auth_error_response(authorization: str | None) -> JSONResponse | None
                 "hint": "Set RMS_API_KEY for deployed use, or set RMS_ALLOW_UNAUTHENTICATED_DEV=true for local-only development.",
             },
         )
-    return _auth_error_response(authorization)
+    return _auth_error_response(authorization, request)
 
 
 def _report_config_or_response() -> tuple[Settings | None, JSONResponse | None]:
@@ -1100,10 +1121,11 @@ def _read_r2_json_report(
 
 @app.get("/reports/dry-run")
 async def list_all_dry_run_reports(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """List local dry-run reports retained inside the running container."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg, error_response = _report_config_or_response()
@@ -1131,11 +1153,12 @@ async def list_all_dry_run_reports(
 
 @app.get("/reports/dry-run/{pipeline_id}")
 async def list_pipeline_dry_run_reports(
+    request: Request,
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """List local dry-run report metadata for a single pipeline."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg, error_response = _report_config_or_response()
@@ -1159,11 +1182,12 @@ async def list_pipeline_dry_run_reports(
 
 @app.get("/reports/dry-run/{pipeline_id}/latest")
 async def get_latest_dry_run_report(
+    request: Request,
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return the newest local dry-run report for the requested pipeline."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg, error_response = _report_config_or_response()
@@ -1214,12 +1238,13 @@ async def get_latest_dry_run_report(
 
 @app.get("/reports/dry-run/{pipeline_id}/{run_id}")
 async def get_dry_run_report(
+    request: Request,
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     run_id: Annotated[str, Path()],
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return a specific local dry-run report by pipeline and run ID."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg, error_response = _report_config_or_response()
@@ -1265,11 +1290,12 @@ async def get_dry_run_report(
 
 @app.get("/reports/{pipeline_id}")
 async def get_live_report_index(
+    request: Request,
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return live R2 report locations for one pipeline."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg, error_response = _report_config_or_response()
@@ -1292,11 +1318,12 @@ async def get_live_report_index(
 
 @app.get("/reports/{pipeline_id}/latest")
 async def get_latest_live_report(
+    request: Request,
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return the latest live report published to R2 for the requested pipeline."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg, error_response = _report_config_or_response()
@@ -1333,12 +1360,13 @@ async def get_latest_live_report(
 
 @app.get("/reports/{pipeline_id}/{run_id}")
 async def get_live_report(
+    request: Request,
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     run_id: Annotated[str, Path()],
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     """Return a specific live report published to R2."""
-    auth_error = _auth_error_response(authorization)
+    auth_error = _auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
     cfg, error_response = _report_config_or_response()
@@ -1388,6 +1416,7 @@ async def get_live_report(
 async def trigger_run(
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
     background_tasks: BackgroundTasks,
+    request: Request,
     body: RunRequest = Body(default=RunRequest()),
     authorization: Annotated[str | None, Header()] = None,
     x_idempotency_key: Annotated[str | None, Header(alias="X-Idempotency-Key")] = None,
@@ -1395,7 +1424,7 @@ async def trigger_run(
 ) -> JSONResponse:
     """Admit at most one heavyweight RAMS pipeline across all pipeline IDs."""
     global _active_pipeline, _active_run_id
-    auth_error = _write_auth_error_response(authorization)
+    auth_error = _write_auth_error_response(authorization, request)
     if auth_error is not None:
         return auth_error
 
