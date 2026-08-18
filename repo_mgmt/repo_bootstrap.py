@@ -334,13 +334,13 @@ def targets_for_pipeline(
                 path=cfg.repo_path_for(pipeline_id),
             )
         ]
-    if pipeline_id == "on-brand":
+    if pipeline_id in {"on-brand", "content"}:
         return [
             BootstrapTarget(
                 label="aims",
                 url=cfg.rms_aims_repo_url,
                 branch=cfg.rms_aims_repo_branch,
-                path=cfg.repo_path_for("on-brand"),
+                path=cfg.repo_path_for(pipeline_id),
             )
         ]
     return []

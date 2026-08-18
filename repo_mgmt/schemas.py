@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand"]
+PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand", "content"]
 Severity = Literal["critical", "high", "medium", "low"]
 Classification = Literal["code_fix", "future_guidance", "manual_review", "skipped"]
 PatchOperation = Literal["replace", "insert_after", "delete"]

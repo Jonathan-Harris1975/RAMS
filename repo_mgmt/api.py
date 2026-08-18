@@ -379,7 +379,7 @@ def _ensure_repos_bootstrapped(
     label = "all"
     if pipeline_id in {"website", "seo-aeo-geo", "mobile-ux"}:
         label = "website"
-    elif pipeline_id == "on-brand":
+    elif pipeline_id in {"on-brand", "content"}:
         label = "aims"
     existing = {result.label: result for result in _bootstrap_results}
     if not existing.get(
@@ -453,6 +453,7 @@ def _dependency_details() -> dict[str, object]:
             "seo-aeo-geo": str(website_path),
             "mobile-ux": str(cfg.repo_path_for("mobile-ux")),
             "on-brand": str(aims_path),
+            "content": str(cfg.repo_path_for("content")),
         }
     github_write_ready = True
     if cfg is not None and (cfg.rms_push_enabled or cfg.rms_create_pr):

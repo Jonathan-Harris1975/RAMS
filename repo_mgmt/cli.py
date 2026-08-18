@@ -31,7 +31,7 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-_PIPELINES: tuple[PipelineId, ...] = ("website", "seo-aeo-geo", "mobile-ux", "on-brand")
+_PIPELINES: tuple[PipelineId, ...] = ("website", "seo-aeo-geo", "mobile-ux", "on-brand", "content")
 
 
 def _validate_pipeline(value: str) -> str:
@@ -63,7 +63,7 @@ def dry_run(
     audit_json_key: Optional[str] = typer.Option(
         None,
         "--audit-json-key",
-        help="Exact AIMS website-audit.json R2 key (required for website)",
+        help="Exact AIMS final audit JSON R2 key (required for website/content)",
     ),
 ) -> None:
     """Run a pipeline in dry-run mode (no writes, no commits, no pushes)."""
@@ -74,8 +74,8 @@ def dry_run(
         typer.secho(f"Configuration error: {exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
-    if pipeline_id == "website" and not audit_json_key:
-        typer.secho("website requires --audit-json-key", fg=typer.colors.RED)
+    if pipeline_id in {"website", "content"} and not audit_json_key:
+        typer.secho(f"{pipeline_id} requires --audit-json-key", fg=typer.colors.RED)
         raise typer.Exit(code=2)
     report = asyncio.run(
         pipeline.run(dry_run=True, audit_json_key=audit_json_key)
@@ -96,7 +96,7 @@ def run_pipeline(
     audit_json_key: Optional[str] = typer.Option(
         None,
         "--audit-json-key",
-        help="Exact AIMS website-audit.json R2 key (required for website)",
+        help="Exact AIMS final audit JSON R2 key (required for website/content)",
     ),
 ) -> None:
     """Run a pipeline, respecting RMS_DRY_RUN (or the --dry-run flag)."""
@@ -111,8 +111,8 @@ def run_pipeline(
     effective_dry_run = (
         force_dry_run if force_dry_run is not None else pipeline.cfg.rms_dry_run
     )
-    if pipeline_id == "website" and not audit_json_key:
-        typer.secho("website requires --audit-json-key", fg=typer.colors.RED)
+    if pipeline_id in {"website", "content"} and not audit_json_key:
+        typer.secho(f"{pipeline_id} requires --audit-json-key", fg=typer.colors.RED)
         raise typer.Exit(code=2)
     report = asyncio.run(
         pipeline.run(dry_run=effective_dry_run, audit_json_key=audit_json_key)
