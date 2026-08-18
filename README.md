@@ -12,7 +12,7 @@ RAMS is the controlled repository-remediation service for the website/AIMS estat
 | `seo-aeo-geo` | legacy compatibility lane |
 | `mobile-ux` | legacy compatibility lane |
 
-The public API accepts `content`, and the pipeline/audit-reader/normaliser contain content-lane logic. There is, however, a current type-schema inconsistency: `repo_mgmt/schemas.py` still defines `PipelineId` without `content`, while `repo_mgmt/config.py`, `api.py` and `pipeline.py` include it. This must be corrected and covered by a content-pipeline regression test before the content remediation lane can be treated as fully closed.
+The `content` lane is a first-class pipeline across configuration, schemas, API, CLI, repository bootstrap, audit reading, normalisation, remediation safety and reporting. Exact-key content runs target the AIMS repository and fail closed when the final AIMS content-audit key is absent or invalid.
 
 ## Remediation safety
 
@@ -54,6 +54,6 @@ python scripts/emicro_benchmark.py --label candidate
 
 ## Production evidence and roadmap status
 
-The machinery for the final professional content-system audit and RAMS content hand-off is substantially present. The roadmap item still requires real production evidence from the content lanes before the final audit can be considered complete, and the `PipelineId` schema drift above should be fixed first.
+The repository contract for the final professional content-system audit and RAMS content hand-off is complete. Natural-run content evidence remains an operational monitoring activity in the separate content-production roadmap rows; it is not a missing RAMS implementation dependency.
 
 See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/OPERATIONAL_ALERTING.md` and `docs/OPTIMISATION_ENGINE.md`.
