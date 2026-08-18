@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from repo_mgmt.repo_bootstrap import _git_base_command, _safe_command_for_log
+from repo_mgmt.repo_bootstrap import _git_base_command, _safe_command_for_log, targets_for_pipeline
 
 
 def test_git_base_command_uses_github_basic_auth_header() -> None:
@@ -31,3 +31,11 @@ def test_safe_command_log_redacts_encoded_auth_header() -> None:
 
     assert "ghp_example" not in rendered
     assert "<redacted>" in rendered
+
+
+def test_content_pipeline_bootstraps_aims_target(settings) -> None:
+    targets = targets_for_pipeline(settings, "content")
+    assert len(targets) == 1
+    assert targets[0].label == "aims"
+    assert targets[0].path == settings.repo_path_for("content")
+    assert targets[0].url == settings.rms_aims_repo_url

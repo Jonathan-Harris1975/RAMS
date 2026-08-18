@@ -27,6 +27,15 @@ def _issue() -> dict[str, object]:
     }
 
 
+
+def test_normalised_issue_accepts_content_pipeline() -> None:
+    payload = _issue()
+    payload["pipeline"] = "content"
+    payload["taskId"] = "rms-content-2026-08-18-001"
+    payload["allowedFixClass"] = "validator_fix"
+    issue = NormalisedIssueModel.model_validate(payload)
+    assert issue.pipeline == "content"
+
 def test_normalised_issue_rejects_invalid_severity() -> None:
     payload = _issue()
     payload["severity"] = "urgent"

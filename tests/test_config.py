@@ -71,6 +71,16 @@ class TestSettingsValidation:
         assert isinstance(p, Path)
         assert str(p) == "/tmp/fake-aims-repo"
 
+    def test_content_pipeline_uses_aims_repo_and_validation(self, settings: Settings) -> None:
+        from pathlib import Path
+
+        p = settings.repo_path_for("content")
+        assert isinstance(p, Path)
+        assert str(p) == "/tmp/fake-aims-repo"
+        assert settings.repo_url_for("content") == settings.rms_aims_repo_url
+        assert settings.repo_branch_for("content") == settings.rms_aims_repo_branch
+        assert settings.validation_commands_for("content") == settings.validation_commands_for("on-brand")
+
 
 class TestLoadSettings:
     def test_load_settings_raises_configuration_error_on_missing(self) -> None:
