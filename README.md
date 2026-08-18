@@ -1,70 +1,43 @@
-> **Document status:** Production reference  
-> **Last reviewed:** 26 July 2026  
-> **Operational authority:** README, SECURITY policy, release gate and operations guide.
-
 # Repository Automation Management Service (RAMS)
 
-RAMS is the controlled Repository Automation Management Service for the website and AIMS estate. It is a Python/FastAPI service deployed to the paid Koyeb production instance, with bounded model use, R2 evidence handling, branch-scoped repository writes and fail-closed safety gates.
+RAMS is the controlled repository-remediation service for the website/AIMS estate. It is a Python/FastAPI application deployed on Koyeb with bounded model use, R2 evidence handling, branch-scoped repository writes and fail-closed validation.
 
-## Production responsibilities
+## Pipelines
 
-- Run the primary unified `website` remediation pipeline from AIMS's final `website-audit.json`, plus the independent `on-brand` lane. Legacy `seo-aeo-geo` and `mobile-ux` endpoints remain for compatibility only.
-- Read audit evidence from the governed Cloudflare R2 `audits` bucket.
-- Produce dry-run plans, validated patch artefacts and live reports.
-- For live runs, push every validated RAMS QA-branch commit and automatically create or reuse one non-draft GitHub pull request for the run.
-- Keep `website`, legacy `seo-aeo-geo`, and legacy `mobile-ux` mapped to the website repository.
-- Keep `on-brand` mapped to the AIMS / AI-management-suite repository.
-- Use the shared HIVE skills bucket for central skill discovery.
-- Expose authenticated operational evidence for readiness, warm-up, reports and excellence checks.
+| Pipeline | Purpose |
+|---|---|
+| `website` | primary unified website remediation from AIMS `website-audit.json` |
+| `content` | confirmed micro-surgery from the AIMS master content audit |
+| `on-brand` | independent AIMS/on-brand remediation lane |
+| `seo-aeo-geo` | legacy compatibility lane |
+| `mobile-ux` | legacy compatibility lane |
 
-## Endpoint contract
+The public API accepts `content`, and the pipeline/audit-reader/normaliser contain content-lane logic. There is, however, a current type-schema inconsistency: `repo_mgmt/schemas.py` still defines `PipelineId` without `content`, while `repo_mgmt/config.py`, `api.py` and `pipeline.py` include it. This must be corrected and covered by a content-pipeline regression test before the content remediation lane can be treated as fully closed.
+
+## Remediation safety
+
+RAMS reads governed audit evidence from R2, normalises only eligible findings, plans bounded changes and validates them before any live repository mutation. Live mode writes only to RAMS QA branches and can create/reuse a non-draft pull request. It does not auto-merge to `main`/`master`.
+
+For the `content` lane, autonomous work is restricted to confirmed findings with exact existing affected paths and approved fix classes such as content-prompt, validator, council, retry, metadata, scheduler and link fixes. Anything ambiguous falls back to manual review.
+
+## Main endpoints
 
 | Endpoint | Auth | Purpose |
 |---|---:|---|
-| `GET /health` | No | Lightweight public process health for Koyeb checks. |
-| `GET /livez` | No | Public liveness alias with the same lightweight payload. |
-| `GET /readiness` | Bearer | Dependency readiness, repository materialisation and admission state. |
-| `GET /readyz` | Bearer | Readiness alias for operators and deployment probes. |
-| `GET /ops/warmup` | Bearer | Local configuration and HTTP client warm-up only. No audits, model calls, R2 checks, validation or repository mutation. |
-| `GET /ops/excellence` | Bearer | Production evidence for R2 verification, release identity, live-write controls, model policy and Koyeb contract. |
-| `GET /reports/*` | Bearer | Local dry-run report metadata or live R2 report reads with bounded size checks. |
-| `POST /rebuild/{pipeline_id}/run` | Bearer | Admit one heavyweight pipeline run, with idempotency replay and global single-run enforcement. |
+| `GET /health` / `/livez` | No | lightweight process health |
+| `GET /readiness` / `/readyz` | Bearer | dependency/repository/admission readiness |
+| `GET /ops/warmup` | Bearer | local warm-up without repository mutation |
+| `GET /ops/excellence` | Bearer | production controls/evidence |
+| `GET /reports/*` | Bearer | bounded report access |
+| `POST /rebuild/{pipeline_id}/run` | Bearer | run a governed remediation pipeline |
 
-## Production mode, without the fog machine
+Website/content exact-key runs validate the supplied AIMS R2 key shape before work starts.
 
-The current production environment is allowed to run governed live-write workflows only when both gates are explicitly set and parseable:
+## Production controls
 
-```env
-RMS_DRY_RUN=false
-RMS_LIVE_WRITE_ENABLED=true
-```
+Live repository mutation requires the explicit live settings, including dry-run disabled, live-write enabled, push enabled and PR creation enabled. Keep one worker and the global single-pipeline admission control unless concurrency has been deliberately re-profiled.
 
-The production publication controls are also enabled:
-
-```env
-RMS_PUSH_ENABLED=true
-RMS_CREATE_PR=true
-```
-
-RAMS still never writes to `main` or `master`. Each eligible fix must pass repository/path safety, the Phase 4C autonomous engineering gate and configured validation. Successful commits are pushed to the run's `rms-qa/*` branch, then RAMS creates or reuses one non-draft GitHub pull request targeting the configured base branch. RAMS does **not** auto-merge the PR.
-
-## Deployment invariants
-
-```env
-WEB_CONCURRENCY=1
-UVICORN_WORKERS=1
-RMS_MAX_CONCURRENT_PIPELINES=1
-RMS_MAX_ISSUES_PER_RUN=3
-RMS_WEBSITE_MAX_ISSUES_PER_RUN=5  # all eligible Confirmed website code fixes
-RMS_SINGLE_WORKER_MODE=true
-RMS_OPENROUTER_LOG_PROMPTS=false
-RMS_OPENROUTER_DATA_COLLECTION=deny
-RMS_VALIDATE_AFTER_EACH_TASK=true
-RMS_REVERT_ON_VALIDATION_FAILURE=true
-RMS_ALLOW_UNAUTHENTICATED_DEV=false
-RMS_TEMP_CLEANUP_ENABLED=true
-RMS_MIN_FREE_DISK_MB=256
-```
+The exact production values are documented in `RAMS-KOYEB-PRODUCTION-ENV.txt` and `repo_mgmt/config.py`. Secrets belong in the deployment secret store.
 
 ## Local verification
 
@@ -79,21 +52,8 @@ python -m mypy repo_mgmt/ --no-incremental --show-error-codes
 python scripts/emicro_benchmark.py --label candidate
 ```
 
-`scripts/release_gate.sh` adds Docker runtime checks when Docker is available.
+## Production evidence and roadmap status
 
-## Production references
+The machinery for the final professional content-system audit and RAMS content hand-off is substantially present. The roadmap item still requires real production evidence from the content lanes before the final audit can be considered complete, and the `PipelineId` schema drift above should be fixed first.
 
-- [`RAMS-KOYEB-PRODUCTION-ENV.txt`](RAMS-KOYEB-PRODUCTION-ENV.txt) contains the paid Koyeb production environment contract.
-- [`.env.example-dry-run`](.env.example-dry-run) is deliberately non-production.
-- [`RELEASE_GATE.md`](RELEASE_GATE.md) defines the local, Docker and Koyeb verification gauntlet.
-- [`SECURITY.md`](SECURITY.md) defines authentication, secret and repository-mutation boundaries.
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) defines operator recovery and dry-run-first procedures.
-- [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md) defines HIVE Ops alerting and deployment-watch expectations.
-- [`docs/OPTIMISATION_ENGINE.md`](docs/OPTIMISATION_ENGINE.md) defines the deterministic, confidence-scored, reversible Optimisation Subsystem for AIMS.
-
-## Unified website audit handoff
-
-AIMS owns the website audit sequence and retains exactly three final audit representations: `website-audit.pdf`, `website-audit.html`, and `website-audit.json`. After AIMS verifies temporary evidence cleanup, it calls `POST /rebuild/website/run` with the exact JSON R2 key. RAMS validates the key shape and report schema before creating any remediation task; it does not discover the website audit through a `latest.json` pointer.
-
-Only council findings with **Confirmed** confidence, source-finding traceability, an exact existing website-repository file path, a bounded approved fix class, and executable remediation can become autonomous `code_fix` work. URLs, routes, missing paths and AIMS/R2-owned dynamic content fail closed to manual review.
-RAMS accepts the current complete `website-audit-report/v2` contract and the retained `website-audit-report/v1` compatibility contract, both with `rams-website/v1`; RAMS treats the final council `masterIssueLedger` as the primary remediation queue and only falls back to narrative council rows when that ledger is absent. For the unified `website` lane, `RMS_WEBSITE_MAX_ISSUES_PER_RUN=5` means every eligible Confirmed `code_fix` in that governed ledger is processed in the single AIMS-triggered run rather than silently dropping lower-ranked fixes.
+See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/OPERATIONAL_ALERTING.md` and `docs/OPTIMISATION_ENGINE.md`.
