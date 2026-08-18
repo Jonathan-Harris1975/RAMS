@@ -3,7 +3,7 @@
 **Status:** Production-controlled  
 **Last reviewed:** 26 July 2026
 
-RAMS can inspect and alter repositories, so access is deliberately narrow. `/health` and `/livez` are public and lightweight. `/readiness`, `/readyz`, `/ops/warmup`, `/ops/excellence`, report reads and rebuild endpoints require `RMS_API_KEY` unless a local-only developer has explicitly set `RMS_ALLOW_UNAUTHENTICATED_DEV=true`.
+RAMS can inspect and alter repositories, so access is deliberately narrow. `/health` and `/livez` are public and lightweight. `/readiness`, `/readyz`, `/ops/warmup`, `/ops/excellence`, report reads and rebuild endpoints require `RMS_API_KEY` unless a loopback-only development request has explicitly set both `RMS_ENVIRONMENT=development` and `RMS_ALLOW_UNAUTHENTICATED_DEV=true`. Production ignores the bypass flag and keeps API documentation disabled.
 
 ## Secret handling
 
@@ -44,3 +44,7 @@ Publication does not weaken branch safety: RAMS may push only its configured `rm
 ## Operational hardening
 
 Responses include restrictive API security headers. Warm-up never launches audits, validation, R2 checks, model calls or repository mutation. R2 verification and HIVE Ops alerts are bounded and redacted. Report reads use constrained keys and size limits.
+
+## Dependency governance
+
+Production direct dependencies in `pyproject.toml` are exact-version pinned. Dependency upgrades must be deliberate pull requests that run the RAMS test and security gates before merge; do not reintroduce open-ended `>=` production ranges.

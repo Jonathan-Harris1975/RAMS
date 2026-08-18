@@ -3,16 +3,16 @@ name = "repo-management-suite"
 version = "1.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.111",
-    "uvicorn[standard]>=0.29",
-    "pydantic>=2.7",
-    "pydantic-settings>=2.3",
-    "boto3>=1.34",
-    "httpx>=0.27",
-    "gitpython>=3.1",
-    "typer>=0.12",
-    "pathspec>=0.12",
-    "python-dotenv>=1.0",
+    "fastapi==0.128.2",
+    "uvicorn[standard]==0.48.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.1",
+    "boto3==1.43.18",
+    "httpx==0.28.1",
+    "gitpython==3.1.59",
+    "typer==0.26.3",
+    "pathspec==1.1.1",
+    "python-dotenv==1.2.2",
     "headroom-ai==0.32.0",
 ]
 
@@ -21,7 +21,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "anyio>=4",
-    "httpx>=0.27",
+    "httpx==0.28.1",
     "ruff>=0.5",
     # Keep CI on the type-checker major this repository is governed against.
     "mypy>=1.10,<2",
