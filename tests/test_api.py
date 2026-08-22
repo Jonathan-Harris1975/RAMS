@@ -129,6 +129,14 @@ def install_valid_api(
     return mock_r2
 
 
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [("v22.22.0", True), ("22.0.0", True), ("v21.7.3", False), ("v23.0.0", False), ("v26.0.0", False)],
+)
+def test_node_validation_runtime_is_pinned_to_major_22(version: str, expected: bool) -> None:
+    assert api_mod._node_major_ok(version) is expected
+
+
 def install_ready_validation_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate readiness unit tests from GitHub runner binary availability."""
     monkeypatch.setattr(
@@ -138,7 +146,7 @@ def install_ready_validation_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
             "ready": True,
             "python": "Python test",
             "git": "git version test",
-            "node": "v20.0.0",
+            "node": "v22.22.0",
             "npm": "10.0.0",
         },
     )
