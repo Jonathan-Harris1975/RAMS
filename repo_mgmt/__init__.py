@@ -6,4 +6,4 @@ Each pipeline reads an R2 audit snapshot, normalises issues, plans and applies
 patches, runs validation, and publishes a run report back to R2.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
