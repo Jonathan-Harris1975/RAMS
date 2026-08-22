@@ -31,6 +31,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
+        libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Bring in Node.js 20.x and npm without relying on distro packages that may lag
