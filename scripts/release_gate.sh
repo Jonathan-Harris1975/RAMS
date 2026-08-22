@@ -34,7 +34,7 @@ docker run --rm "$IMAGE_NAME" python --version
 docker run --rm "$IMAGE_NAME" git --version
 docker run --rm "$IMAGE_NAME" node --version
 docker run --rm "$IMAGE_NAME" npm --version
-docker run --rm "$IMAGE_NAME" node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
+docker run --rm "$IMAGE_NAME" node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
 
 docker rm -f rams-release-gate >/dev/null 2>&1 || true
 docker run -d --name rams-release-gate -p "$PORT:8000" --env-file .env.example-dry-run -e RMS_API_KEY="$RMS_RELEASE_GATE_API_KEY" "$IMAGE_NAME" >/dev/null
