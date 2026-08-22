@@ -91,7 +91,7 @@ jobs:
           docker run --rm rams:ci git --version
           docker run --rm rams:ci node --version
           docker run --rm rams:ci npm --version
-          docker run --rm rams:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
+          docker run --rm rams:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
       - name: Boot API and probe health/readiness shape
         run: |
           docker run -d --name rams-ci-api -p 8000:8000 \
