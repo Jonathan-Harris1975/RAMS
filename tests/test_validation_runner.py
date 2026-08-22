@@ -54,3 +54,19 @@ def test_timeout_terminates_command(tmp_path: Path) -> None:
     assert result.passed is False
     assert result.return_code == 124
     assert "TIMEOUT" in result.output_tail
+
+
+def test_shell_operators_are_rejected_without_execution(tmp_path: Path) -> None:
+    sentinel = tmp_path / "should-not-exist"
+    result = run_commands([f"printf ok > {sentinel}"], cwd=tmp_path)
+    assert result.passed is False
+    assert result.return_code == 2
+    assert "shell operators are not allowed" in result.output_tail
+    assert not sentinel.exists()
+
+
+def test_command_substitution_is_rejected(tmp_path: Path) -> None:
+    result = run_commands(["printf $(whoami)"], cwd=tmp_path)
+    assert result.passed is False
+    assert result.return_code == 2
+    assert "shell control syntax" in result.output_tail
