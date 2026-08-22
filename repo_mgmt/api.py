@@ -298,10 +298,10 @@ def _version_output(command: str) -> tuple[bool, str]:
 
 
 def _node_major_ok(version_text: str) -> bool:
-    """Return True when node --version reports major version 20 or newer."""
+    """Return True only for the governed Node.js 22 validation runtime."""
     token = version_text.strip().lstrip("v").split(".", 1)[0]
     try:
-        return int(token) >= 20
+        return int(token) == 22
     except ValueError:
         return False
 
