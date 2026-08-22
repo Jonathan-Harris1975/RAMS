@@ -20,7 +20,7 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
-    "anyio>=4",
+    "anyio>=4.14.2",
     "httpx==0.28.1",
     "ruff>=0.5",
     # Keep CI on the type-checker major this repository is governed against.
