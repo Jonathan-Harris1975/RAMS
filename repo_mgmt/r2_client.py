@@ -207,3 +207,7 @@ class R2Client:
             raise R2Error(
                 f"R2 object_exists failed for bucket={bucket!r} key={key!r}: {exc}"
             ) from exc
+        except (EndpointConnectionError, BotoCoreError) as exc:
+            raise R2Error(
+                f"R2 object_exists failed for bucket={bucket!r} key={key!r}: {exc}"
+            ) from exc

@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,7 +60,7 @@ def _is_placeholder_secret(value: str | None) -> bool:
     if not value:
         return False
     stripped = value.strip()
-    return stripped.startswith("{{secret.") or stripped.startswith("${{")
+    return bool(re.match(r"^\{\{\s*secret\.", stripped, flags=re.IGNORECASE)) or stripped.startswith("${{")
 
 
 def _is_github_https_url(url: str) -> bool:
