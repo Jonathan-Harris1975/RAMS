@@ -30,7 +30,7 @@ docker run --rm rams-production-check python --version
 docker run --rm rams-production-check git --version
 docker run --rm rams-production-check node --version
 docker run --rm rams-production-check npm --version
-docker run --rm rams-production-check node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
+docker run --rm rams-production-check node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
 ```
 
 Then boot the image with `.env.example-dry-run` and verify:
