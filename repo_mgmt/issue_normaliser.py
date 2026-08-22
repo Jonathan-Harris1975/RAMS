@@ -562,8 +562,19 @@ def _extract_findings(
     if pipeline_id == "content":
         ledger = audit.get("masterIssueLedger")
         if not isinstance(ledger, list):
-            ledger = (audit.get("council") or {}).get("masterIssueLedger") if isinstance(audit.get("council"), dict) else []
-        return [_map_content_candidate(item) for item in ledger if isinstance(item, dict) and _map_content_candidate(item)]
+            council = audit.get("council")
+            ledger = council.get("masterIssueLedger") if isinstance(council, dict) else []
+        if not isinstance(ledger, list):
+            return []
+
+        mapped_content: list[dict[str, Any]] = []
+        for item in ledger:
+            if not isinstance(item, dict):
+                continue
+            finding = _map_content_candidate(item)
+            if finding is not None:
+                mapped_content.append(finding)
+        return mapped_content
     direct = audit.get("findings")
     if isinstance(direct, list) and direct:
         return [item for item in direct if isinstance(item, dict)]
