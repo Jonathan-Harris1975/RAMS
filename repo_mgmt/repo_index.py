@@ -51,7 +51,7 @@ def _load_gitignore(repo_root: Path) -> Any:
         return None
     patterns = gitignore.read_text(encoding="utf-8", errors="replace").splitlines()
     if _HAS_PATHSPEC:
-        return _pathspec_mod.PathSpec.from_lines("gitwildmatch", patterns)
+        return _pathspec_mod.GitIgnoreSpec.from_lines(patterns)
     return [
         pattern.strip().rstrip("/")
         for pattern in patterns
