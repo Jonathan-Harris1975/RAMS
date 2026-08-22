@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import shlex
 from typing import TYPE_CHECKING
 
 from repo_mgmt.process_runner import run_bounded
@@ -27,6 +28,24 @@ class ValidationResult:
     failed_command: str | None = None
 
 
+_FORBIDDEN_SHELL_TOKENS = {"|", "||", "&&", ";", "&", ">", ">>", "<", "<<", "2>", "2>>"}
+
+
+def _argv_for_validation(cmd: str) -> list[str]:
+    """Parse one governed validation command without invoking a shell."""
+    if "\n" in cmd or "\r" in cmd or "`" in cmd or "$(" in cmd:
+        raise ValueError("shell control syntax is not allowed in validation commands")
+    try:
+        argv = shlex.split(cmd, posix=True)
+    except ValueError as exc:
+        raise ValueError(f"invalid validation command quoting: {exc}") from exc
+    if not argv:
+        raise ValueError("validation command is empty")
+    if any(token in _FORBIDDEN_SHELL_TOKENS for token in argv):
+        raise ValueError("shell operators are not allowed in validation commands; configure each command separately")
+    return argv
+
+
 def _run_command(
     cmd: str,
     cwd: Path,
@@ -34,14 +53,18 @@ def _run_command(
     max_output_lines: int,
     max_output_bytes: int,
 ) -> tuple[int, str, bool]:
-    """Run one operator-configured validation chain with bounded diagnostics."""
+    """Run one operator-configured command as explicit argv with bounded diagnostics."""
+    try:
+        argv = _argv_for_validation(cmd)
+    except ValueError as exc:
+        return 2, f"VALIDATION CONFIG ERROR: {exc}", False
     result = run_bounded(
-        cmd,
+        argv,
         cwd=cwd,
         timeout_seconds=timeout_seconds,
         max_output_lines=max_output_lines,
         max_output_bytes=max_output_bytes,
-        shell=True,
+        shell=False,
         output_label="validation",
     )
     return result.return_code, result.output, result.timed_out
