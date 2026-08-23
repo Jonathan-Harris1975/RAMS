@@ -67,10 +67,36 @@ def _percentile(values: list[float], percentile: float) -> float:
     return ordered[index]
 
 
+def _limit(name: str, default: float) -> float:
+    return float(os.environ.get(name, str(default)))
+
+
+def _performance_violations(result: dict[str, Any]) -> list[str]:
+    thresholds = result["thresholds"]
+    health = result["health"]
+    repository_index = result["repositoryIndex"]
+    context = result["context"]
+    validation = result["validation"]
+    checks = [
+        (result["importMs"] <= thresholds["importMaxMs"], f"importMs={result['importMs']} exceeds {thresholds['importMaxMs']}"),
+        (health["meanMs"] <= thresholds["healthMeanMaxMs"], f"health meanMs={health['meanMs']} exceeds {thresholds['healthMeanMaxMs']}"),
+        (health["p95Ms"] <= thresholds["healthP95MaxMs"], f"health p95Ms={health['p95Ms']} exceeds {thresholds['healthP95MaxMs']}"),
+        (repository_index["durationMs"] <= thresholds["repositoryIndexMaxMs"], f"repository index durationMs={repository_index['durationMs']} exceeds {thresholds['repositoryIndexMaxMs']}"),
+        (repository_index["truncated"] is False, "repository index unexpectedly truncated"),
+        (context["durationMs"] <= thresholds["contextMaxMs"], f"context durationMs={context['durationMs']} exceeds {thresholds['contextMaxMs']}"),
+        (validation["durationMs"] <= thresholds["validationMaxMs"], f"validation durationMs={validation['durationMs']} exceeds {thresholds['validationMaxMs']}"),
+        (validation["passed"] is True, "validation fixture command failed"),
+        (result["maxRssKb"] <= thresholds["maxRssKb"], f"maxRssKb={result['maxRssKb']} exceeds {thresholds['maxRssKb']}"),
+        (result["externalCalls"] == 0, f"externalCalls={result['externalCalls']} must be 0"),
+    ]
+    return [message for passed, message in checks if not passed]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", default="current")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--enforce", action="store_true", help="Fail when governed performance limits are exceeded")
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="rams-emicro-benchmark-") as tmp:
@@ -140,13 +166,19 @@ def main() -> None:
             )
         )
 
+        # Deliberately do not enter TestClient as a context manager. Entering it
+        # runs the production lifespan, including the R2 monitor; this benchmark
+        # is required to remain dependency-isolated and make zero network calls.
         health_times: list[float] = []
-        with TestClient(api.app) as client:
+        client = TestClient(api.app)
+        try:
             for _ in range(100):
                 started = time.perf_counter()
                 response = client.get("/health")
                 response.raise_for_status()
                 health_times.append((time.perf_counter() - started) * 1000)
+        finally:
+            client.close()
 
         max_rss_kb = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         result = {
@@ -182,11 +214,31 @@ def main() -> None:
                 "retainedOutputBytes": len(validation.output_tail.encode("utf-8")),
             },
             "externalCalls": 0,
+            "thresholds": {
+                "importMaxMs": _limit("RAMS_PERF_IMPORT_MAX_MS", 2000),
+                "healthMeanMaxMs": _limit("RAMS_PERF_HEALTH_MEAN_MAX_MS", 15),
+                "healthP95MaxMs": _limit("RAMS_PERF_HEALTH_P95_MAX_MS", 30),
+                "repositoryIndexMaxMs": _limit("RAMS_PERF_INDEX_MAX_MS", 500),
+                "contextMaxMs": _limit("RAMS_PERF_CONTEXT_MAX_MS", 500),
+                "validationMaxMs": _limit("RAMS_PERF_VALIDATION_MAX_MS", 5000),
+                "maxRssKb": _limit("RAMS_PERF_MAX_RSS_KB", 512000),
+            },
         }
+        violations = _performance_violations(result) if args.enforce else []
+        result["enforced"] = args.enforce
+        result["violations"] = violations
         rendered = json.dumps(result, indent=2, sort_keys=True)
         print(rendered)
         if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(rendered + "\n", encoding="utf-8")
+        if violations:
+            print("RAMS performance gate failed:", file=sys.stderr)
+            for violation in violations:
+                print(f" - {violation}", file=sys.stderr)
+            raise SystemExit(1)
+        if args.enforce:
+            print("RAMS performance gate passed.")
 
 
 if __name__ == "__main__":
