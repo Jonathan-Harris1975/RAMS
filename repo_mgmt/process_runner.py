@@ -132,7 +132,6 @@ def run_bounded(
     max_output_bytes: int,
     max_output_lines: int,
     env: Mapping[str, str] | None = None,
-    shell: bool = False,
     output_label: str = "process",
 ) -> BoundedProcessResult:
     """Run one command while draining and retaining only a bounded output tail."""
@@ -140,7 +139,6 @@ def run_bounded(
         command,
         cwd=cwd,
         env=dict(env) if env is not None else None,
-        shell=shell,  # noqa: S602 - only validation passes operator-controlled command chains
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         start_new_session=True,

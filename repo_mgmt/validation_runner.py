@@ -64,7 +64,6 @@ def _run_command(
         timeout_seconds=timeout_seconds,
         max_output_lines=max_output_lines,
         max_output_bytes=max_output_bytes,
-        shell=False,
         output_label="validation",
     )
     return result.return_code, result.output, result.timed_out

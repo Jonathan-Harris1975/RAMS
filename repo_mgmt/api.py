@@ -1571,7 +1571,7 @@ def serve() -> None:
     import uvicorn
 
     cfg = _get_cfg()
-    host = cfg.rms_host if cfg is not None else "0.0.0.0"
+    host = cfg.rms_host if cfg is not None else "0.0.0.0"  # nosec B104 - container fallback
     port_raw = os.getenv("RMS_PORT") or os.getenv("PORT")
     try:
         port = (

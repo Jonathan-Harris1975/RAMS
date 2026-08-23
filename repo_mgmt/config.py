@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +29,8 @@ class ConfigurationError(Exception):
 
 _TRUE_VALUES = frozenset({"true", "1", "yes", "y", "on"})
 _FALSE_VALUES = frozenset({"false", "0", "no", "n", "off"})
+_DEFAULT_REPO_BASE_DIR = str(Path(tempfile.gettempdir()) / "rams-repos")
+_DEFAULT_REPORT_DIR = str(Path(tempfile.gettempdir()) / "rams-reports")
 
 
 
@@ -160,7 +163,7 @@ class Settings(BaseSettings):
 
     # ── Optional Koyeb/runtime repo bootstrap ──────────────────────────────
     rms_repo_bootstrap_enabled: bool = False
-    rms_repo_base_dir: str = "/tmp/rams-repos"
+    rms_repo_base_dir: str = _DEFAULT_REPO_BASE_DIR
     rms_website_repo_url: str = ""
     rms_website_repo_branch: str = "main"
     rms_aims_repo_url: str = ""
@@ -244,7 +247,7 @@ class Settings(BaseSettings):
     ops_alert_timeout_seconds: float = Field(default=8.0, ge=1.0, le=30.0)
 
     rms_report_prefix: str = "qa-suite/reports"
-    rms_report_dir: str = "/tmp/rams-reports"
+    rms_report_dir: str = _DEFAULT_REPORT_DIR
     rms_qa_branch_prefix: str = "rms-qa/"
     rms_push_enabled: bool = False
     rms_create_pr: bool = False
@@ -255,7 +258,7 @@ class Settings(BaseSettings):
     rms_single_worker_mode: bool = True
 
     # ── API server ─────────────────────────────────────────────────────────
-    rms_host: str = "0.0.0.0"
+    rms_host: str = "0.0.0.0"  # nosec B104 - container service must bind the pod interface
     rms_port: int = 8000
     log_level: str = "info"
 
