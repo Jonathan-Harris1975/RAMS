@@ -52,7 +52,7 @@ Production and staging must preserve these unless a new engineering review expli
 WEB_CONCURRENCY=1
 UVICORN_WORKERS=1
 RMS_MAX_CONCURRENT_PIPELINES=1
-RMS_MAX_ISSUES_PER_RUN=3
+RMS_MAX_ISSUES_PER_RUN=1
 RMS_WEBSITE_MAX_ISSUES_PER_RUN=5
 RMS_SINGLE_WORKER_MODE=true
 RMS_OPENROUTER_LOG_PROMPTS=false
@@ -78,11 +78,11 @@ Paid production live-write permission:
 ```env
 RMS_DRY_RUN=false
 RMS_LIVE_WRITE_ENABLED=true
-RMS_PUSH_ENABLED=true
-RMS_CREATE_PR=true
+RMS_PUSH_ENABLED=false
+RMS_CREATE_PR=false
 ```
 
-A production candidate is not release-ready unless validated live commits can authenticate to GitHub, push only to `rms-qa/*`, and create/reuse the matching non-draft pull request. PR merge remains a separate human/repository-policy action.
+A production candidate is not release-ready unless it can authenticate to and refresh the private target repositories, apply a bounded change in the ephemeral checkout, and complete the configured validation. This profile deliberately stops before GitHub push or pull-request creation.
 
 ## Manual Koyeb verification
 

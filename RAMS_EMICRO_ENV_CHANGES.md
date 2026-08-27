@@ -1,4 +1,4 @@
-> **Superseded operational note (26 July 2026):** production now uses `RMS_PUSH_ENABLED=true` and `RMS_CREATE_PR=true` for validated `rms-qa/*` branches, with automatic non-draft PR creation. Historical recommendations below describe the earlier guarded rollout state.
+> **Current operational note (27 August 2026):** production permits governed writes in the ephemeral checkout but uses `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`. The historical material below may describe earlier publication profiles; current authority is the README, release gate, operations guide, and Koyeb production contract.
 
 > **Document status:** Historical implementation record, superseded for production deployment  
 > **Last reviewed:** 21 June 2026  
@@ -136,7 +136,7 @@ No production variable is recommended for removal without the actual Koyeb expor
 2. Confirm repo URLs, paths and validation commands.
 3. Add secrets through Koyeb Secrets.
 4. For dry-run/staging, deploy with `RMS_DRY_RUN=true` and `RMS_LIVE_WRITE_ENABLED=false`.
-5. Historical rollout state: live-write permission used `RMS_DRY_RUN=false` and `RMS_LIVE_WRITE_ENABLED=true` while push/PR remained disabled. **Superseded 26 July 2026:** production now uses `RMS_PUSH_ENABLED=true` and `RMS_CREATE_PR=true` for validated `rms-qa/*` branches.
+5. Current 27 August 2026 profile: `RMS_DRY_RUN=false` and `RMS_LIVE_WRITE_ENABLED=true`, while `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`; the automatic push/PR profile used in July is no longer current.
 6. Verify `/health`, `/livez`, authenticated `/ops/warmup`, `/readiness`, `/readyz` and `/ops/excellence`.
 7. Run one dry-run pipeline.
 8. Inspect report AI usage, validation tail, disk guard and runtime logs before considering any non-dry-run request.

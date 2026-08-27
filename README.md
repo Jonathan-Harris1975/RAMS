@@ -35,9 +35,9 @@ Website/content exact-key runs validate the supplied AIMS R2 key shape before wo
 
 ## Production controls
 
-Live repository mutation requires the explicit live settings, including dry-run disabled, live-write enabled, push enabled and PR creation enabled. Keep one worker and the global single-pipeline admission control unless concurrency has been deliberately re-profiled.
+Live repository mutation requires dry-run disabled and live-write enabled. The current production profile intentionally keeps GitHub push and PR creation disabled, so validated changes stay inside the ephemeral checkout. Keep one worker and the global single-pipeline admission control unless concurrency has been deliberately re-profiled.
 
-The exact production values are documented in `RAMS-KOYEB-PRODUCTION-ENV.txt` and `repo_mgmt/config.py`. Secrets belong in the deployment secret store.
+All non-secret production values are version-controlled in `Dockerfile` (with application-safe fallbacks in `repo_mgmt/config.py`). `RAMS-KOYEB-PRODUCTION-ENV.txt` contains only the required secret/sensitive Koyeb bindings.
 
 ## Local verification
 

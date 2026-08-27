@@ -1,4 +1,4 @@
-> **Superseded operational note (26 July 2026):** production now uses `RMS_PUSH_ENABLED=true` and `RMS_CREATE_PR=true` for validated `rms-qa/*` branches, with automatic non-draft PR creation. Historical recommendations below describe the earlier guarded rollout state.
+> **Current operational note (27 August 2026):** production permits governed writes in the ephemeral checkout but uses `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`. The historical material below may describe earlier publication profiles; current authority is the README, release gate, operations guide, and Koyeb production contract.
 
 > **Document status:** Historical implementation record  
 > **Last reviewed:** 21 June 2026  
