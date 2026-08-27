@@ -1,7 +1,7 @@
 # RAMS Koyeb production deployment checklist
 
 **Status:** Operator checklist  
-**Last reviewed:** 26 July 2026
+**Last reviewed:** 27 August 2026
 
 ## Koyeb service
 
@@ -10,70 +10,36 @@
 - Public liveness path: `/livez`.
 - Instance profile: paid production instance, single process, single worker.
 
-## Required Koyeb secret bindings
+## Required Koyeb secret/sensitive bindings
 
-```text
-R2_ACCESS_KEY_ID
-R2_SECRET_ACCESS_KEY
-OPENROUTER_API_KEY
-RMS_WEBSITE_REPO_URL
-RMS_AIMS_REPO_URL
-GITHUB_TOKEN_WEBSITE_AUDITS or RMS_GITHUB_TOKEN (fine-grained: Contents read/write + Pull requests read/write)
-RMS_API_KEY
-OPS_ALERT_WEBHOOK_URL
-OPS_EVENT_INGEST_TOKEN
-RMS_RELEASE_ID
-```
-
-## Required non-secret environment values
+Koyeb service configuration must contain only these bindings:
 
 ```env
-APP_ENV=production
-WEB_CONCURRENCY=1
-UVICORN_WORKERS=1
-R2_ENDPOINT=https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com
-R2_REGION=auto
-R2_BUCKET_AUDITS=audits
-R2_PUBLIC_BASE_URL_AUDITS=
-R2_BUCKET_HIVE_SKILLS=hive-skills
-R2_PUBLIC_BASE_URL_HIVE_SKILLS=
-RMS_REPO_BOOTSTRAP_ENABLED=true
-RMS_REPO_BASE_DIR=/tmp/rams-repos
-RMS_WEBSITE_REPO_BRANCH=main
-RMS_AIMS_REPO_BRANCH=main
-RMS_WEBSITE_REPO_PATH=/tmp/rams-repos/website
-RMS_AIMS_REPO_PATH=/tmp/rams-repos/aims
-RMS_MAX_CONCURRENT_PIPELINES=1
-RMS_MAX_ISSUES_PER_RUN=3
-RMS_WEBSITE_MAX_ISSUES_PER_RUN=5
-RMS_SINGLE_WORKER_MODE=true
-RMS_OPENROUTER_LOG_PROMPTS=false
-RMS_OPENROUTER_DATA_COLLECTION=deny
-RMS_VALIDATE_AFTER_EACH_TASK=true
-RMS_REVERT_ON_VALIDATION_FAILURE=true
-RMS_ENVIRONMENT=production
-RMS_ALLOW_UNAUTHENTICATED_DEV=false
+OPENROUTER_API_KEY={{ secret.OPENROUTER_API_KEY }}
+R2_ACCESS_KEY_ID={{ secret.R2_ACCESS_KEY_ID }}
+R2_SECRET_ACCESS_KEY={{ secret.R2_SECRET_ACCESS_KEY }}
+RMS_API_KEY={{ secret.RMS_API_KEY }}
+RMS_GITHUB_TOKEN={{ secret.GITHUB_TOKEN_WEBSITE_AUDITS }}
+RMS_WEBSITE_REPO_URL={{ secret.RMS_WEBSITE_REPO_URL }}
+RMS_AIMS_REPO_URL={{ secret.RMS_AIMS_REPO_URL }}
 ```
 
-## Production live-write permission
+`AIMS_API_KEY` is not a RAMS runtime dependency and must not be added to this service. Optional HIVE alert/release secrets are also not part of the current RAMS Koyeb contract.
+
+## Version-controlled production configuration
+
+All non-secret production values are baked into `Dockerfile`. Application-safe fallback defaults remain in `repo_mgmt/config.py`. Do not duplicate those values in Koyeb service environment settings. This keeps deployment policy reviewable in Git and prevents platform-side configuration drift.
+
+The current production write gates are:
 
 ```env
 RMS_DRY_RUN=false
 RMS_LIVE_WRITE_ENABLED=true
-RMS_PUSH_ENABLED=true
-RMS_CREATE_PR=true
-```
-
-This is the operational website-remediation contract: RAMS writes only to `rms-qa/*`, pushes validated commits, then creates or reuses one non-draft PR per run. The PR is not auto-merged. `RMS_CREATE_PR=true` is rejected at configuration load unless `RMS_PUSH_ENABLED=true` and a usable GitHub write token/repository URLs are present.
-
-## Dry-run or staging mode
-
-```env
-RMS_DRY_RUN=true
-RMS_LIVE_WRITE_ENABLED=false
 RMS_PUSH_ENABLED=false
 RMS_CREATE_PR=false
 ```
+
+RAMS may mutate and validate its ephemeral checkout, but it does not push branches or create GitHub pull requests in this production profile. The GitHub token is retained for authenticated cloning/refresh of private target repositories.
 
 ## Verification commands
 
@@ -91,7 +57,7 @@ Expected shapes:
 - `/health` and `/livez`: `status=ok` and all four pipeline IDs (`website`, `seo-aeo-geo`, `mobile-ux`, `on-brand`) listed as `idle` or `running`.
 - `/readiness` and `/readyz`: `status=ready` when dependencies are available, otherwise `status=degraded` with dependency detail.
 - `/ops/warmup`: `status=warm`, `warmupScope` lists local warm-up, `excludedWork` includes OpenRouter requests, R2, repositories, audits and validation.
-- `/ops/excellence`: `status=healthy` when the audits bucket verifies, otherwise `status=degraded`; includes `liveWriteControls`, `deploymentContract`, `modelProviderPolicy` and `auditStorage`. Confirm `pushEnabled=true`, `createPr=true`, and `websiteMaxIssuesPerRun=0`.
+- `/ops/excellence`: `status=healthy` when the audits bucket verifies, otherwise `status=degraded`; includes `liveWriteControls`, `deploymentContract`, `modelProviderPolicy` and `auditStorage`. Confirm `pushEnabled=false`, `createPr=false`, and `maxIssuesPerRun=1`.
 
 Safe dry-run smoke:
 

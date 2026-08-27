@@ -1,7 +1,7 @@
 # RAMS production operations
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 26 July 2026
+**Last reviewed:** 27 August 2026
 
 RAMS runs as a single-worker FastAPI service on the paid Koyeb production instance. Use public `/livez` for process liveness and bearer-protected `/readyz`, `/readiness`, `/ops/warmup` and `/ops/excellence` for operational evidence.
 
@@ -25,15 +25,15 @@ RMS_DRY_RUN=false
 RMS_LIVE_WRITE_ENABLED=true
 ```
 
-The production publication contract is:
+The current production publication contract is:
 
 ```env
-RMS_PUSH_ENABLED=true
-RMS_CREATE_PR=true
-RMS_WEBSITE_MAX_ISSUES_PER_RUN=5
+RMS_PUSH_ENABLED=false
+RMS_CREATE_PR=false
+RMS_MAX_ISSUES_PER_RUN=1
 ```
 
-For the unified website lane, `0` means process every eligible Confirmed council `code_fix` in the final report. Each successful task is committed and pushed only on the run's `rms-qa/*` branch. After all eligible tasks have been attempted, RAMS automatically creates or reuses one non-draft GitHub pull request targeting the configured base branch. Failed or manual-review tasks are reported but are not smuggled into the PR. RAMS does not auto-merge.
+Each run remains bounded to one issue. RAMS can make and validate governed changes in the ephemeral checkout, but this profile does not push `rms-qa/*` branches or create GitHub pull requests.
 
 ## Recovery procedure
 
@@ -43,7 +43,7 @@ For the unified website lane, `0` means process every eligible Confirmed council
 4. Repair missing R2, GitHub, OpenRouter or repository-bootstrap configuration without printing secrets.
 5. Run authenticated `/ops/warmup` to prepare local clients only.
 6. Run one safe dry-run pipeline before resuming any live-write work.
-7. Resume live writes only after clean release-gate evidence and clean target-repository validation evidence; production then pushes validated QA-branch commits and creates the PR automatically.
+7. Resume live writes only after clean release-gate evidence and clean target-repository validation evidence; the current production profile keeps GitHub push and PR creation disabled.
 
 ## Operator commands
 
@@ -82,8 +82,9 @@ The current JSON contract is `website-audit-report/v2` with remediation contract
 
 The `RMS_GITHUB_TOKEN` / `GITHUB_TOKEN` used by production must be a fine-grained token scoped only to repositories RAMS may remediate, with at least:
 
-- **Contents: Read and write** for branch push.
-- **Pull requests: Read and write** for idempotent PR lookup/creation.
+- **Contents: Read** for authenticated clone/fetch of the private target repositories.
 - Repository metadata read access (implicit/default for fine-grained repository tokens).
+
+Write and pull-request permissions are not required while `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`.
 
 RAMS sends Git credentials through an ephemeral Git HTTP extra-header and never stores the token in `origin`. GitHub REST authentication is sent only in the HTTPS Authorization header.
