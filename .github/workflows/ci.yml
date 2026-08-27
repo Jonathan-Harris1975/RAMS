@@ -134,6 +134,7 @@ jobs:
             -e OPENROUTER_TRIAGE_MODEL='openai/gpt-5.4-nano' \
             -e RMS_AIMS_REPO_PATH='/tmp/fake-aims' \
             -e RMS_WEBSITE_REPO_PATH='/tmp/fake-website' \
+            -e RMS_REPO_BOOTSTRAP_ENABLED='false' \
             -e RMS_DRY_RUN='true' \
             -e RMS_LIVE_WRITE_ENABLED='false' \
             -e RMS_PUSH_ENABLED='false' \
