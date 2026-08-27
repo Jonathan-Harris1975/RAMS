@@ -84,22 +84,22 @@ class Settings(BaseSettings):
     )
 
     # ── Cloudflare R2 ──────────────────────────────────────────────────────
-    r2_endpoint: str = ""
+    r2_endpoint: str = "https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com"
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_region: str = "auto"
     r2_bucket_audits: str = "audits"
-    r2_public_base_url_audits: str = ""
+    r2_public_base_url_audits: str = "https://pub-f6b6cfd7d07e46f695d08e4a8dc3bd6b.r2.dev"
     r2_bucket_hive_skills: str = "hive-skills"
-    r2_public_base_url_hive_skills: str = ""
+    r2_public_base_url_hive_skills: str = "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev"
 
     # ── OpenRouter ─────────────────────────────────────────────────────────
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str = ""
-    openrouter_primary_model: str = ""
-    openrouter_secondary_model: str = ""
-    openrouter_triage_model: str = ""
-    openrouter_http_referer: str = ""
+    openrouter_primary_model: str = "anthropic/claude-sonnet-4-6"
+    openrouter_secondary_model: str = "openai/gpt-4o-mini"
+    openrouter_triage_model: str = "google/gemini-2.5-flash-lite"
+    openrouter_http_referer: str = "https://jonathan-harris.online"
     openrouter_app_name: str = "RAMS"
 
     # eMicro-safe OpenRouter transport and generation controls.
@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     rms_openrouter_provider_sort: Literal["price", "throughput", "latency"] = "price"
     rms_openrouter_allow_fallbacks: bool = True
     rms_openrouter_data_collection: Literal["allow", "deny"] = "deny"
-    rms_primary_max_tokens: int = Field(default=3072, ge=512, le=8192)
+    rms_primary_max_tokens: int = Field(default=6144, ge=512, le=8192)
     rms_secondary_max_tokens: int = Field(default=3072, ge=512, le=8192)
     rms_triage_max_tokens: int = Field(default=128, ge=32, le=512)
     rms_primary_temperature: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -145,8 +145,8 @@ class Settings(BaseSettings):
     #   seo-aeo-geo -> website repo (legacy compatibility)
     #   mobile-ux   -> website repo (legacy compatibility)
     #   on-brand    -> AIMS / AI-management-suite repo
-    rms_website_repo_path: str = ""
-    rms_aims_repo_path: str = ""
+    rms_website_repo_path: str = str(Path(_DEFAULT_REPO_BASE_DIR) / "website")
+    rms_aims_repo_path: str = str(Path(_DEFAULT_REPO_BASE_DIR) / "aims")
     rms_seo_repo_path: str = ""  # legacy alias; no longer used for SEO routing
 
     # ── Optimisation Subsystem (deterministic self-adjusting QA for AIMS) ──
@@ -232,7 +232,7 @@ class Settings(BaseSettings):
     rms_temp_max_age_hours: int = Field(default=24, ge=1, le=168)
     rms_min_free_disk_mb: int = Field(default=256, ge=64, le=1024)
     rms_shutdown_grace_seconds: int = Field(default=25, ge=5, le=29)
-    rms_readiness_cache_seconds: int = Field(default=300, ge=10, le=1800)
+    rms_readiness_cache_seconds: int = Field(default=60, ge=10, le=1800)
     rms_idempotency_cache_size: int = Field(default=128, ge=16, le=1024)
     rms_busy_retry_after_seconds: int = Field(default=60, ge=5, le=900)
     rms_report_max_bytes: int = Field(default=4_194_304, ge=262_144, le=16_777_216)
