@@ -29,7 +29,7 @@ pydantic-core==2.46.4
 pydantic-settings==2.14.2
 pygments==2.20.0
 python-dateutil==2.9.0.post0
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 pyyaml==6.0.3
 regex==2026.5.9
 requests==2.32.5
@@ -45,7 +45,7 @@ typer==0.27.1
 typing-extensions==4.16.0
 typing-inspection==0.4.2
 urllib3==2.7.0
-uvicorn[standard]==0.48.0
+uvicorn[standard]==0.52.4
 uvloop==0.22.1
 watchfiles==1.2.0
 websockets==16.0
