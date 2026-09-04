@@ -123,6 +123,8 @@ jobs:
           docker run --rm rams:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
       - name: Boot API and probe health/readiness shape
         run: |
+          ci_api_key="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          test -n "$ci_api_key"
           docker run -d --name rams-ci-api -p 8000:8000 \
             -e R2_ENDPOINT='https://test.r2.cloudflarestorage.com' \
             -e R2_ACCESS_KEY_ID='test-key' \
@@ -139,7 +141,7 @@ jobs:
             -e RMS_LIVE_WRITE_ENABLED='false' \
             -e RMS_PUSH_ENABLED='false' \
             -e RMS_CREATE_PR='false' \
-            -e RMS_API_KEY='ci-local-rams-key' \
+            -e RMS_API_KEY="$ci_api_key" \
             rams:ci
           trap 'docker logs rams-ci-api || true; docker rm -f rams-ci-api || true' EXIT
           api_started=false
@@ -156,11 +158,11 @@ jobs:
           readiness_http_status="$(curl -sS \
             -o /tmp/readiness.json \
             -w '%{http_code}' \
-            -H 'Authorization: Bearer ci-local-rams-key' \
+            -H "Authorization: Bearer $ci_api_key" \
             http://127.0.0.1:8000/readyz)"
           test "$readiness_http_status" = "503"
           cat /tmp/readiness.json
-          curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/ops/warmup | tee /tmp/warmup.json
+          curl -fsS -H "Authorization: Bearer $ci_api_key" http://127.0.0.1:8000/ops/warmup | tee /tmp/warmup.json
           python - <<'PY'
           import json
           from pathlib import Path
