@@ -13,7 +13,7 @@ dependencies = [
     "typer==0.27.1",
     "pathspec==1.1.1",
     "python-dotenv==1.2.3",
-    "headroom-ai==0.32.0",
+    "headroom-ai==0.37.0",
 ]
 
 [project.optional-dependencies]
