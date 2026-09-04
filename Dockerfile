@@ -3,7 +3,7 @@
 # Runtime includes Python, Git, Node.js 22.x, and npm for target validation.
 # ──────────────────────────────────────────────────────────────────────────
 
-FROM node:26.8.1-bookworm-slim AS node-runtime
+FROM node:22.23.2-bookworm-slim AS node-runtime
 
 FROM python:3.14-slim AS builder
 
