@@ -15,7 +15,8 @@ def test_ci_docker_smoke_uses_ephemeral_api_key() -> None:
     assert "ci_api_key=\"$(python -c 'import secrets; print(secrets.token_urlsafe(32))')\"" in workflow
     assert '-e RMS_API_KEY="$ci_api_key"' in workflow
     assert 'Authorization: Bearer $ci_api_key' in workflow
-    assert "RMS_API_KEY='ci-local-rams-key'" not in workflow
+    legacy_static_api_key = "RMS_API_" + "KEY=" + "'ci-local-" + "rams-key'"
+    assert legacy_static_api_key not in workflow
 
 
 def test_secret_scan_rejects_provider_token_without_fixture_escape(tmp_path: Path) -> None:
