@@ -36,6 +36,7 @@ from repo_mgmt.config import (
 )
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt import lifecycle
+from repo_mgmt.model_governance import apply_rams_model_governance, restore_rams_model_governance
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.ops_alerts import send_operational_event
 from repo_mgmt.pipeline import RmsPipeline
@@ -67,6 +68,11 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
         if deleted:
             logger.info("rms-api: removed %d stale local report(s)", deleted)
     if cfg is not None and _r2_configured(cfg):
+        r2 = _get_r2()
+        if r2 is not None:
+            restored = await asyncio.to_thread(restore_rams_model_governance, cfg, r2)
+            if not restored.get("ok"):
+                logger.warning("rms-api: model governance restore failed: %s", restored.get("error"))
         _r2_monitor_task = asyncio.create_task(_r2_monitor_loop(cfg))
     try:
         yield
@@ -149,6 +155,13 @@ class RunRequest(BaseModel):
     dry_run: bool | None = None
     audit_json_key: str | None = None
     audit_session_id: str | None = None
+
+
+class ModelGovernanceRequest(BaseModel):
+    """HIVE AI Council registry payload for governed RAMS model defaults."""
+
+    sourceRunId: str | None = None
+    registry: dict[str, list[dict[str, object]]]
 
 
 class AdmissionError(Exception):
@@ -783,6 +796,44 @@ async def ops_warmup(
     )
 
 
+@app.post("/ops/model-governance/apply")
+async def apply_model_governance(
+    body: ModelGovernanceRequest,
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Persist and activate HIVE AI Council model selections for RAMS."""
+    global _model_router
+    auth_error = _auth_error_response(authorization, request)
+    if auth_error is not None:
+        return auth_error
+    cfg = _get_cfg()
+    r2 = _get_r2()
+    if cfg is None or r2 is None or not _r2_configured(cfg):
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "R2 model-governance persistence unavailable"},
+        )
+    try:
+        result = await asyncio.to_thread(
+            apply_rams_model_governance,
+            cfg,
+            r2,
+            registry=body.registry,
+            source_run_id=body.sourceRunId,
+        )
+    except (R2Error, ValueError) as exc:
+        logger.warning("rms-api: model governance apply failed: %s", exc)
+        return JSONResponse(status_code=503, content={"ok": False, "error": str(exc)})
+
+    if result.get("applied"):
+        old_router = _model_router
+        _model_router = None
+        if old_router is not None:
+            await old_router.aclose()
+    return JSONResponse(status_code=200, content=result)
+
+
 @app.get("/ops/excellence")
 async def operational_excellence(
     request: Request,
@@ -847,6 +898,7 @@ async def operational_excellence(
                 "/readyz",
                 "/ops/warmup",
                 "/ops/excellence",
+                "/ops/model-governance/apply",
                 "/reports/*",
                 "/rebuild/{pipeline_id}/run",
             ],
