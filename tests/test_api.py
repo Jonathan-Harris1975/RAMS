@@ -122,6 +122,7 @@ def install_valid_api(
     """Patch config, R2, and optional pipeline construction for an API test."""
     mock_r2 = MagicMock()
     mock_r2.verify_bucket.return_value = True
+    mock_r2.object_exists.return_value = False
     monkeypatch.setattr(api_mod, "load_settings", lambda: settings)
     monkeypatch.setattr(api_mod, "R2Client", lambda cfg: mock_r2)
     if fake_pipeline is not None:
@@ -827,3 +828,46 @@ def test_operational_excellence_reports_audit_verification(
     assert payload["releaseId"] == "release-123"
     assert payload["auditStorage"]["verified"] is True
     assert payload["auditStorage"]["reportRetentionDays"] == 180
+
+
+def test_model_governance_apply_is_authenticated_persisted_and_reloads_router(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs, RMS_API_KEY="test-key")
+    mock_r2 = install_valid_api(monkeypatch, settings)
+    old_router = MagicMock()
+    old_router.aclose = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock()
+    api_mod._model_router = old_router
+    registry = {
+        "coding": [
+            {"model_id": "openai/gpt-5.2-codex", "score": 0.98},
+            {"model_id": "anthropic/claude-sonnet-4.6", "score": 0.90},
+        ],
+        "reasoning": [{"model_id": "openai/gpt-5.2", "score": 0.97}],
+        "fast": [{"model_id": "google/gemini-2.5-flash-lite", "score": 0.95}],
+    }
+    with TestClient(api_mod.app) as client:
+        unauthorised = client.post(
+            "/ops/model-governance/apply",
+            json={"sourceRunId": "council-1", "registry": registry},
+        )
+        response = client.post(
+            "/ops/model-governance/apply",
+            headers={"Authorization": "Bearer test-key"},
+            json={"sourceRunId": "council-1", "registry": registry},
+        )
+
+    assert unauthorised.status_code == 401
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["applied"] is True
+    assert payload["persisted"] is True
+    assert payload["sourceRunId"] == "council-1"
+    assert settings.openrouter_primary_model == "openai/gpt-5.2-codex"
+    assert settings.openrouter_secondary_model == "anthropic/claude-sonnet-4.6"
+    assert settings.openrouter_triage_model == "google/gemini-2.5-flash-lite"
+    mock_r2.put_object.assert_called_once()
+    assert mock_r2.put_object.call_args.args[1] == "state/model-governance/rams.json"
+    old_router.aclose.assert_awaited_once_with()
+    assert api_mod._model_router is None
