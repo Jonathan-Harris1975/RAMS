@@ -1,21 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "repository-automation-management-service"
-version = "1.1.0"
-description = "Repository Automation Management Service (RAMS)"
+name = "jh-ops-chat-backend"
+version = "0.1.0"
+description = "Standalone Python OpenRouter ops chatbot backend"
 requires-python = ">=3.11,<3.15"
 dependencies = [
-  "boto3==1.43.18",
-  "botocore==1.43.18",
-  "fastapi==0.141.1",
+  "fastapi>=0.141.1",
+  "starlette>=1.6.0",
+  "uvicorn[standard]>=0.50.2",
+  "httpx>=0.28.1",
+  "pydantic-settings>=2.14.2",
+  "python-multipart>=0.0.32",
+  "boto3>=1.43.41",
+  "pypdf>=6.16.1",
+  "python-docx>=1.2.0",
+  "openpyxl>=3.1.5",
+  "beautifulsoup4>=4.15.0",
   "headroom-ai==0.37.0",
-  "httpx==0.28.1",
-  "pathspec==1.1.1",
-  "pydantic==2.13.5",
-  "pydantic-settings==2.14.2",
-  "starlette==1.6.0",
-  "typer==0.27.1",
-  "uvicorn[standard]==0.52.4"
+  "psycopg[binary]>=3.3.4"
 ]
+
+[project.scripts]
+rms-api = "repo_mgmt.api:serve"
 
 [project.optional-dependencies]
 dev = [
@@ -29,13 +38,8 @@ dev = [
   "pip-tools>=7.6.1,<8"
 ]
 
-[project.scripts]
-rms = "repo_mgmt.cli:app"
-rms-api = "repo_mgmt.api:serve"
-
 [tool.setuptools.packages.find]
 include = ["repo_mgmt*"]
-exclude = ["config*", "scripts*", "tests*"]
 
 [tool.ruff]
 line-length = 100
