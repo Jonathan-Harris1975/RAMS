@@ -13,7 +13,7 @@ dependencies = [
   "pydantic==2.13.5",
   "pydantic-settings==2.14.2",
   "starlette==1.6.0",
-  "typer==0.27.1",
+  "typer==0.27.2",
   "uvicorn[standard]==0.52.4"
 ]
 
