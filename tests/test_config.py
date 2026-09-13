@@ -233,3 +233,13 @@ def test_website_issue_limit_defaults_to_bounded_micro_surgery() -> None:
     with patch.dict(os.environ, _complete_env(), clear=True):
         cfg = Settings()
     assert cfg.rms_website_max_issues_per_run == 5
+
+
+def test_default_model_route_uses_cost_effective_standard_models() -> None:
+    env = _complete_env()
+    env.pop("OPENROUTER_PRIMARY_MODEL")
+    env.pop("OPENROUTER_SECONDARY_MODEL")
+    with patch.dict(os.environ, env, clear=True):
+        cfg = Settings()
+    assert cfg.openrouter_primary_model == "openai/gpt-5.6-sol"
+    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5"

@@ -428,6 +428,7 @@ def test_readiness_accepts_bearer_api_key(
         repo_dirs, RMS_API_KEY="unit-rms-key", RMS_ALLOW_UNAUTHENTICATED_DEV="false"
     )
     install_valid_api(monkeypatch, settings)
+    install_ready_validation_runtime(monkeypatch)
     with TestClient(api_mod.app) as client:
         response = client.get(
             "/readiness", headers={"Authorization": "Bearer unit-rms-key"}
@@ -871,3 +872,32 @@ def test_model_governance_apply_is_authenticated_persisted_and_reloads_router(
     assert mock_r2.put_object.call_args.args[1] == "state/model-governance/rams.json"
     old_router.aclose.assert_awaited_once_with()
     assert api_mod._model_router is None
+
+
+def test_model_governance_rejects_unjustified_premium_selection(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs, RMS_API_KEY="test-key")
+    mock_r2 = install_valid_api(monkeypatch, settings)
+    registry = {
+        "coding": [{"model_id": "openai/gpt-5.6-sol", "score": 1.0}],
+        "expert": [
+            {
+                "model_id": "anthropic/claude-opus-5",
+                "score": 1.0,
+                "approved_roles": ["chair"],
+            }
+        ],
+    }
+
+    with TestClient(api_mod.app) as client:
+        mock_r2.put_object.reset_mock()
+        response = client.post(
+            "/ops/model-governance/apply",
+            headers={"Authorization": "Bearer test-key"},
+            json={"sourceRunId": "council-unapproved", "registry": registry},
+        )
+
+    assert response.status_code == 422
+    assert "structured premium_justification" in response.json()["error"]
+    mock_r2.put_object.assert_not_called()

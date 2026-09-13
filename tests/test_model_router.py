@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -155,6 +156,16 @@ def test_token_cap_and_usage_accounting(settings) -> None:
     assert usage["promptTokens"] == 10
     assert usage["completionTokens"] == 5
     assert usage["cost"] == 0.0001
+    assert usage["models"]["actual/model"] == {
+        "requests": 1,
+        "promptTokens": 10,
+        "completionTokens": 5,
+        "reasoningTokens": 0,
+        "cachedTokens": 0,
+        "cost": 0.0001,
+        "durationSeconds": usage["models"]["actual/model"]["durationSeconds"],
+        "premiumRequests": 0,
+    }
 
 
 def test_retry_after_is_captured_on_busy_response(settings) -> None:
@@ -210,6 +221,46 @@ def test_both_models_failure_reports_last_model_status(settings) -> None:
     assert exc_info.value.status_code == 504
     assert len(client.calls) == 2
     assert router.usage_summary()["fallbacks"] == 1
+
+
+def test_unapproved_premium_primary_is_refused_before_request(settings) -> None:
+    settings.openrouter_primary_model = "anthropic/claude-opus-5"
+    router, client = _router_with_sync(settings, [_success("must-not-run")])
+
+    with pytest.raises(ModelError, match="active governance justification"):
+        router.complete("prompt")
+
+    assert client.calls == []
+
+
+def test_governed_premium_primary_is_allowed_and_counted(settings) -> None:
+    settings.openrouter_primary_model = "anthropic/claude-opus-5"
+    settings.rms_model_governance_premium_approvals = {
+        "OPENROUTER_PRIMARY_MODEL": "approval-1"
+    }
+    settings.rms_model_governance_premium_approval_expiries = {
+        "OPENROUTER_PRIMARY_MODEL": (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    }
+    router, _ = _router_with_sync(settings, [_success("approved")])
+
+    assert router.complete("prompt") == "approved"
+    assert router.usage_summary()["premiumRequests"] == 1
+
+
+def test_expired_premium_approval_is_refused_before_request(settings) -> None:
+    settings.openrouter_primary_model = "anthropic/claude-opus-5"
+    settings.rms_model_governance_premium_approvals = {
+        "OPENROUTER_PRIMARY_MODEL": "approval-1"
+    }
+    settings.rms_model_governance_premium_approval_expiries = {
+        "OPENROUTER_PRIMARY_MODEL": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    }
+    router, client = _router_with_sync(settings, [_success("must-not-run")])
+
+    with pytest.raises(ModelError, match="justification is expired"):
+        router.complete("prompt")
+
+    assert client.calls == []
 
 
 def test_anchor_patch_system_context_is_never_compressed(settings) -> None:
