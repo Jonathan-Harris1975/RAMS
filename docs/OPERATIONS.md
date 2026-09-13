@@ -1,7 +1,7 @@
 # RAMS production operations
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 27 August 2026
+**Last reviewed:** 13 September 2026
 
 RAMS runs as a single-worker FastAPI service on the paid Koyeb production instance. Use public `/livez` for process liveness and bearer-protected `/readyz`, `/readiness`, `/ops/warmup` and `/ops/excellence` for operational evidence.
 
@@ -76,6 +76,19 @@ curl -fsS -X POST \
 AIMS normally sends this request automatically after final report publication and temporary cleanup. Operators should use it manually only for recovery/replay with the same exact JSON key.
 
 The current JSON contract is `website-audit-report/v2` with remediation contract `rams-website/v1`; RAMS also accepts retained `website-audit-report/v1` reports for backward compatibility. Version 2 is accepted only when `reportStatus` is `complete`, `operational.ramsDispatchPermitted` is true, and its retention policy matches the governed post-acceptance contract. RAMS consumes the council `masterIssueLedger` as the governed work queue. A row can become an autonomous code fix only when it explicitly carries `classification: code_fix`, `confidence: Confirmed`, an approved `fixClass`, exact `affectedPaths`, deterministic remediation, evidence, and non-empty `sourceFindingIds`; everything else fails closed to review/guidance.
+
+## Model-governance operation
+
+HIVE submits its evaluated OpenRouter registry to the authenticated
+`POST /ops/model-governance/apply` endpoint. Treat HTTP 200 with `persisted: true` as success, HTTP
+422 as an invalid selection or premium justification, and HTTP 503 as a persistence failure. After
+an applied change, run one dry-run pipeline and confirm the report's per-model request, token, cost,
+duration and premium-request totals. Do not manually enable the premium chair: it is enabled only by
+an active, independently approved HIVE justification restored from R2.
+
+The complete selection, retirement, audit and approval procedure is in
+`docs/MODEL_GOVERNANCE.md`. Cost targets prompt review and optimisation; they do not stop authorised
+RAMS workloads.
 
 
 ## GitHub write token contract
