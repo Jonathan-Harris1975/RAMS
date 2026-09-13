@@ -19,6 +19,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from repo_mgmt.headroom_optimizer import HeadroomOptimizer, HeadroomOutcome
+from repo_mgmt.model_policy import (
+    clean_justification_id,
+    is_premium_model,
+    premium_approval_is_active,
+)
 
 if TYPE_CHECKING:
     from repo_mgmt.config import Settings
@@ -109,6 +114,7 @@ class ModelRouter:
             "reasoningTokens": 0,
             "cachedTokens": 0,
             "cost": 0.0,
+            "premiumRequests": 0,
             "models": {},
             "providers": {},
             "headroom": {
@@ -149,7 +155,12 @@ class ModelRouter:
         """Return a JSON-safe copy of aggregate OpenRouter usage."""
         with self._usage_lock:
             data = dict(self._usage)
-            data["models"] = dict(self._usage.get("models", {}))
+            models = self._usage.get("models", {})
+            data["models"] = (
+                {str(name): dict(value) for name, value in models.items()}
+                if isinstance(models, Mapping)
+                else {}
+            )
             data["providers"] = dict(self._usage.get("providers", {}))
             headroom = self._usage.get("headroom", {})
             data["headroom"] = dict(headroom) if isinstance(headroom, Mapping) else {}
@@ -167,6 +178,7 @@ class ModelRouter:
     ) -> str:
         """Synchronously call primary, then secondary only on retryable failure."""
         primary_tokens = min(max_tokens, self._cfg.rms_primary_max_tokens)
+        self._require_premium_approval(self._primary, "OPENROUTER_PRIMARY_MODEL")
         try:
             return self._complete_model_sync(
                 self._primary,
@@ -182,6 +194,7 @@ class ModelRouter:
             self._mark_fallback()
             logger.warning("model_router: primary failed retryably; using secondary")
         secondary_tokens = min(max_tokens, self._cfg.rms_secondary_max_tokens)
+        self._require_premium_approval(self._secondary, "OPENROUTER_SECONDARY_MODEL")
         try:
             return self._complete_model_sync(
                 self._secondary,
@@ -208,6 +221,7 @@ class ModelRouter:
     ) -> str:
         """Asynchronously call primary, then secondary only on retryable failure."""
         primary_tokens = min(max_tokens, self._cfg.rms_primary_max_tokens)
+        self._require_premium_approval(self._primary, "OPENROUTER_PRIMARY_MODEL")
         try:
             return await self._complete_model_async(
                 self._primary,
@@ -223,6 +237,7 @@ class ModelRouter:
             self._mark_fallback()
             logger.warning("model_router: primary failed retryably; using secondary")
         secondary_tokens = min(max_tokens, self._cfg.rms_secondary_max_tokens)
+        self._require_premium_approval(self._secondary, "OPENROUTER_SECONDARY_MODEL")
         try:
             return await self._complete_model_async(
                 self._secondary,
@@ -242,6 +257,7 @@ class ModelRouter:
 
     def triage(self, prompt: str, max_tokens: int = 256) -> str:
         tokens = min(max_tokens, self._cfg.rms_triage_max_tokens)
+        self._require_premium_approval(self._triage_model, "OPENROUTER_TRIAGE_MODEL")
         return self._complete_model_sync(
             self._triage_model,
             prompt,
@@ -259,16 +275,24 @@ class ModelRouter:
         max_tokens: int = 2048,
         json_mode: bool = False,
         temperature: float = 0.0,
+        governance_role: str | None = None,
+        justification_id: str | None = None,
     ) -> str:
         """Call one explicitly selected council model with the normal bounded transport."""
         if not str(model or "").strip():
             raise ModelError("Explicit council model is empty")
+        self._require_premium_approval(
+            str(model).strip(),
+            str(governance_role or "").strip(),
+            explicit_justification_id=justification_id,
+        )
         return await self._complete_model_async(
             str(model).strip(), prompt, system, min(max_tokens, 4096), json_mode, temperature
         )
 
     async def triage_async(self, prompt: str, max_tokens: int = 256) -> str:
         tokens = min(max_tokens, self._cfg.rms_triage_max_tokens)
+        self._require_premium_approval(self._triage_model, "OPENROUTER_TRIAGE_MODEL")
         return await self._complete_model_async(
             self._triage_model,
             prompt,
@@ -277,6 +301,43 @@ class ModelRouter:
             False,
             self._cfg.rms_triage_temperature,
         )
+
+    def _require_premium_approval(
+        self,
+        model: str,
+        governance_role: str,
+        *,
+        explicit_justification_id: str | None = None,
+    ) -> None:
+        """Refuse an unapproved premium route without imposing spend ceilings."""
+        governed_premium = (
+            governance_role in self._cfg.rms_model_governance_premium_roles
+            or model in self._cfg.rms_model_governance_premium_models
+        )
+        if not is_premium_model(model) and not governed_premium:
+            return
+        approvals = self._cfg.rms_model_governance_premium_approvals
+        configured_approval_id = (
+            clean_justification_id(approvals.get(governance_role))
+            if governance_role
+            else ""
+        )
+        supplied_approval_id = clean_justification_id(explicit_justification_id)
+        if supplied_approval_id and supplied_approval_id != configured_approval_id:
+            raise ModelError(
+                f"Premium model {model!r} received an invalid governance justification"
+            )
+        if not configured_approval_id:
+            raise ModelError(
+                f"Premium model {model!r} requires an active governance justification"
+            )
+        expiry = self._cfg.rms_model_governance_premium_approval_expiries.get(
+            governance_role
+        )
+        if not premium_approval_is_active(expiry):
+            raise ModelError(
+                f"Premium model {model!r} governance justification is expired"
+            )
 
     def _complete_model_sync(
         self,
@@ -599,15 +660,38 @@ class ModelRouter:
             self._usage["reasoningTokens"] += reasoning_tokens
             self._usage["cachedTokens"] += cached_tokens
             self._usage["cost"] = round(float(self._usage["cost"]) + cost, 10)
+            premium = (
+                is_premium_model(requested_model)
+                or requested_model in self._cfg.rms_model_governance_premium_models
+            )
+            if premium:
+                self._usage["premiumRequests"] += 1
             models = self._usage["models"]
             if isinstance(models, dict):
                 item = models.setdefault(
-                    actual_model, {"requests": 0, "durationSeconds": 0.0}
+                    actual_model,
+                    {
+                        "requests": 0,
+                        "promptTokens": 0,
+                        "completionTokens": 0,
+                        "reasoningTokens": 0,
+                        "cachedTokens": 0,
+                        "cost": 0.0,
+                        "durationSeconds": 0.0,
+                        "premiumRequests": 0,
+                    },
                 )
                 item["requests"] += 1
+                item["promptTokens"] += prompt_tokens
+                item["completionTokens"] += completion_tokens
+                item["reasoningTokens"] += reasoning_tokens
+                item["cachedTokens"] += cached_tokens
+                item["cost"] = round(float(item["cost"]) + cost, 10)
                 item["durationSeconds"] = round(
                     float(item["durationSeconds"]) + duration, 4
                 )
+                if premium:
+                    item["premiumRequests"] += 1
             providers = self._usage["providers"]
             if provider and isinstance(providers, dict):
                 providers[provider] = int(providers.get(provider, 0)) + 1

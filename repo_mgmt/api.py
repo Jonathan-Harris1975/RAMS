@@ -36,7 +36,10 @@ from repo_mgmt.config import (
 )
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt import lifecycle
-from repo_mgmt.model_governance import apply_rams_model_governance, restore_rams_model_governance
+from repo_mgmt.model_governance import (
+    apply_rams_model_governance,
+    restore_rams_model_governance,
+)
 from repo_mgmt.model_router import ModelRouter
 from repo_mgmt.ops_alerts import send_operational_event
 from repo_mgmt.pipeline import RmsPipeline
@@ -822,7 +825,10 @@ async def apply_model_governance(
             registry=body.registry,
             source_run_id=body.sourceRunId,
         )
-    except (R2Error, ValueError) as exc:
+    except (TypeError, ValueError) as exc:
+        logger.warning("rms-api: model governance selection rejected: %s", exc)
+        return JSONResponse(status_code=422, content={"ok": False, "error": str(exc)})
+    except R2Error as exc:
         logger.warning("rms-api: model governance apply failed: %s", exc)
         return JSONResponse(status_code=503, content={"ok": False, "error": str(exc)})
 

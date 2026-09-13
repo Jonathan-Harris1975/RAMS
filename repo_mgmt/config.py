@@ -19,6 +19,7 @@ from typing import Literal
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from repo_mgmt.model_policy import is_premium_model, premium_approval_is_active
 
 PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand", "content"]
 
@@ -96,8 +97,8 @@ class Settings(BaseSettings):
     # ── OpenRouter ─────────────────────────────────────────────────────────
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str = ""
-    openrouter_primary_model: str = "anthropic/claude-sonnet-4-6"
-    openrouter_secondary_model: str = "openai/gpt-4o-mini"
+    openrouter_primary_model: str = "openai/gpt-5.6-sol"
+    openrouter_secondary_model: str = "anthropic/claude-sonnet-5"
     openrouter_triage_model: str = "google/gemini-2.5-flash-lite"
     openrouter_http_referer: str = "https://jonathan-harris.online"
     openrouter_app_name: str = "RAMS"
@@ -127,6 +128,16 @@ class Settings(BaseSettings):
     rms_openrouter_log_usage: bool = True
     rms_openrouter_log_cost: bool = True
     rms_openrouter_log_prompts: bool = False
+    # Populated from the persisted HIVE governance decision. Keys are RAMS model
+    # role environment names and values are the corresponding approval IDs.
+    rms_model_governance_premium_approvals: dict[str, str] = Field(
+        default_factory=dict
+    )
+    rms_model_governance_premium_approval_expiries: dict[str, str] = Field(
+        default_factory=dict
+    )
+    rms_model_governance_premium_roles: set[str] = Field(default_factory=set)
+    rms_model_governance_premium_models: set[str] = Field(default_factory=set)
 
     # Headroom inline context optimisation.  RAMS intentionally uses the core
     # library instead of a second proxy process so the Koyeb eMicro footprint
@@ -202,9 +213,13 @@ class Settings(BaseSettings):
 
     # Autonomous engineering council / micro-surgery guardrails.
     rms_engineering_council_enabled: bool = True
-    rms_engineering_council_architect_model: str = "anthropic/claude-opus-5"
+    rms_engineering_council_architect_model: str = "openai/gpt-5.6-sol"
     rms_engineering_council_specialist_model: str = "anthropic/claude-sonnet-5"
     rms_engineering_council_chair_model: str = "anthropic/claude-opus-5"
+    rms_engineering_council_expert_enabled: bool = False
+    rms_engineering_council_expert_justification_id: str = ""
+    rms_engineering_council_review_confidence: int = Field(default=85, ge=0, le=100)
+    rms_engineering_council_chair_confidence: int = Field(default=85, ge=0, le=100)
     rms_autonomous_max_files: int = Field(default=3, ge=1, le=5)
     rms_autonomous_max_changes: int = Field(default=6, ge=1, le=10)
     rms_autonomous_max_replace_chars: int = Field(default=8000, ge=1000, le=18000)
@@ -284,6 +299,8 @@ class Settings(BaseSettings):
         "rms_openrouter_log_usage",
         "rms_openrouter_log_cost",
         "rms_openrouter_log_prompts",
+        "rms_engineering_council_enabled",
+        "rms_engineering_council_expert_enabled",
         "rms_temp_cleanup_enabled",
         mode="before",
     )
@@ -365,6 +382,38 @@ class Settings(BaseSettings):
                         missing.append(f"{name} (unresolved secret reference)")
                 elif not _configured_value(value) and name not in missing:
                     missing.append(name)
+        premium_roles = (
+            ("OPENROUTER_PRIMARY_MODEL", self.openrouter_primary_model, True),
+            ("OPENROUTER_SECONDARY_MODEL", self.openrouter_secondary_model, True),
+            (
+                "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL",
+                self.rms_engineering_council_architect_model,
+                self.rms_engineering_council_enabled,
+            ),
+            (
+                "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL",
+                self.rms_engineering_council_specialist_model,
+                self.rms_engineering_council_enabled,
+            ),
+            (
+                "RMS_ENGINEERING_COUNCIL_CHAIR_MODEL",
+                self.rms_engineering_council_chair_model,
+                self.rms_engineering_council_enabled
+                and self.rms_engineering_council_expert_enabled,
+            ),
+        )
+        for env_name, model_id, active in premium_roles:
+            if not active or not is_premium_model(model_id):
+                continue
+            approval_id = _configured_value(
+                self.rms_model_governance_premium_approvals.get(env_name)
+            )
+            if not approval_id:
+                missing.append(f"{env_name} premium justification approval")
+                continue
+            expiry = self.rms_model_governance_premium_approval_expiries.get(env_name)
+            if not premium_approval_is_active(expiry):
+                missing.append(f"{env_name} active premium approval expiry")
         if missing:
             raise ConfigurationError(
                 f"Missing required configuration fields: {', '.join(missing)}"
