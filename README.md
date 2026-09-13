@@ -28,6 +28,7 @@ For the `content` lane, autonomous work is restricted to confirmed findings with
 | `GET /readiness` / `/readyz` | Bearer | dependency/repository/admission readiness |
 | `GET /ops/warmup` | Bearer | local warm-up without repository mutation |
 | `GET /ops/excellence` | Bearer | production controls/evidence |
+| `POST /ops/model-governance/apply` | Bearer | validate, persist and activate HIVE model selections |
 | `GET /reports/*` | Bearer | bounded report access |
 | `POST /rebuild/{pipeline_id}/run` | Bearer | run a governed remediation pipeline |
 
@@ -56,4 +57,5 @@ python scripts/emicro_benchmark.py --label candidate
 
 The repository contract for the final professional content-system audit and RAMS content hand-off is complete. Natural-run content evidence remains an operational monitoring activity in the separate content-production roadmap rows; it is not a missing RAMS implementation dependency.
 
-See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/OPERATIONAL_ALERTING.md` and `docs/OPTIMISATION_ENGINE.md`.
+See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/MODEL_GOVERNANCE.md`,
+`docs/OPERATIONAL_ALERTING.md` and `docs/OPTIMISATION_ENGINE.md`.
