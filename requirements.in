@@ -1,4 +1,4 @@
-# Direct production dependencies. Update deliberately and regenerate requirements.txt.
+# Direct production dependencies. Update deliberately and regenerate both lock files.
 fastapi==0.141.1
 # Direct pin keeps Starlette above all audited 2026 request/form parsing advisory floors.
 starlette==1.6.0
@@ -13,3 +13,5 @@ openpyxl==3.1.5
 beautifulsoup4==4.15.0
 headroom-ai==0.37.0
 psycopg[binary]==3.3.4
+# Required directly by repo_mgmt.cli; do not rely on another package to install it.
+typer==0.27.1
