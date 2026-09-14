@@ -108,6 +108,15 @@
    completes the council without an expert call. Disagreement or low confidence may reach an
    expert only after the premium gate. Otherwise the item goes to manual review.
 
+   For autonomous code repair, RAMS first runs progressive self-improvement using the governed
+   `triage -> secondary -> primary` role ladder (up to three loops by default, hard-capped at four).
+   A loop that reaches `RMS_SELF_IMPROVEMENT_CONFIDENCE` bypasses the engineering council but not
+   deterministic patch validation or the Phase 4C auto-PR gate. Only an exhausted loop sequence may
+   reach the engineering council. Council execution is hard-capped at two meetings per task and a
+   second meeting is permitted only after a technical council failure. Positive council approvals
+   within `RMS_ENGINEERING_COUNCIL_NEAR_THRESHOLD_TOLERANCE_PERCENT` points of the configured confidence
+   threshold are accepted; rejection decisions are never converted into approvals by the tolerance.
+
 7. **Make premium use an exception with a structured approval.**
 
    GPT-4-class models excluding mini/nano variants, Claude Opus, explicit `expert`/`premium`
