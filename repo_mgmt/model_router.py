@@ -18,6 +18,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from repo_mgmt.context_resilience import (
+    add_openrouter_context_compression,
+    deterministic_compact_payload,
+    provider_order,
+)
 from repo_mgmt.headroom_optimizer import HeadroomOptimizer, HeadroomOutcome
 from repo_mgmt.model_policy import (
     clean_justification_id,
@@ -101,6 +106,7 @@ class ModelRouter:
         self._usage_lock = threading.Lock()
         self._run_id: str | None = None
         self._usage: dict[str, Any] = self._empty_usage()
+        self._usage["contextRouting"]["primary"] = cfg.rms_context_primary_provider
         self._headroom = HeadroomOptimizer(cfg)
 
     @staticmethod
@@ -117,6 +123,12 @@ class ModelRouter:
             "premiumRequests": 0,
             "models": {},
             "providers": {},
+            "contextRouting": {
+                "primary": "",
+                "attempts": 0,
+                "fallbacks": 0,
+                "routes": {},
+            },
             "headroom": {
                 "attempts": 0,
                 "compressedRequests": 0,
@@ -150,6 +162,7 @@ class ModelRouter:
         with self._usage_lock:
             self._run_id = run_id
             self._usage = self._empty_usage()
+            self._usage["contextRouting"]["primary"] = self._cfg.rms_context_primary_provider
 
     def usage_summary(self) -> dict[str, Any]:
         """Return a JSON-safe copy of aggregate OpenRouter usage."""
@@ -162,6 +175,12 @@ class ModelRouter:
                 else {}
             )
             data["providers"] = dict(self._usage.get("providers", {}))
+            context_routing = self._usage.get("contextRouting", {})
+            data["contextRouting"] = (
+                dict(context_routing) if isinstance(context_routing, Mapping) else {}
+            )
+            if isinstance(data["contextRouting"].get("routes"), Mapping):
+                data["contextRouting"]["routes"] = dict(data["contextRouting"]["routes"])
             headroom = self._usage.get("headroom", {})
             data["headroom"] = dict(headroom) if isinstance(headroom, Mapping) else {}
             if isinstance(data["headroom"].get("transforms"), Mapping):
@@ -449,21 +468,52 @@ class ModelRouter:
         json_mode: bool,
         temperature: float,
     ) -> str:
-        url, headers, payload = self._request_parts(
+        headers, payload = self._request_parts(
             model, prompt, system, max_tokens, json_mode, temperature
         )
-        started = time.monotonic()
-        try:
-            response = self._get_sync_client().post(url, headers=headers, json=payload)
-        except httpx.TimeoutException as exc:
-            raise ModelError(
-                f"OpenRouter request timed out: {exc}", retryable=True
-            ) from exc
-        except httpx.RequestError as exc:
-            raise ModelError(
-                f"OpenRouter request error: {exc}", retryable=True
-            ) from exc
-        return self._parse_response(response, model, time.monotonic() - started)
+        exact_context = self._requires_exact_context(system)
+        last_error: ModelError | None = None
+        for route_name, url, route_headers, route_payload in self._context_attempts(
+            headers, payload, model=model, exact_context=exact_context
+        ):
+            self._record_context_route(route_name, attempted=True)
+            started = time.monotonic()
+            try:
+                response = self._get_sync_client().post(
+                    url, headers=route_headers, json=route_payload
+                )
+                result = self._parse_response(response, model, time.monotonic() - started)
+                self._record_context_route(route_name, success=True)
+                return result
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                last_error = ModelError(
+                    f"Context route {route_name} request failed: {exc}", retryable=True
+                )
+                self._record_context_route(route_name, failed=True)
+                if route_name in {"leanctx", "context_gateway"}:
+                    logger.warning(
+                        "model_router: proxy context route %s unavailable; trying fallback",
+                        route_name,
+                    )
+                    continue
+                raise last_error from exc
+            except ModelError as exc:
+                last_error = exc
+                self._record_context_route(route_name, failed=True)
+                if route_name in {"leanctx", "context_gateway"}:
+                    logger.warning(
+                        "model_router: proxy context route %s failed; trying fallback",
+                        route_name,
+                    )
+                    continue
+                if route_name in {"openrouter", "deterministic"} and self._is_context_limit_error(exc):
+                    logger.warning(
+                        "model_router: context route %s could not fit the prompt; trying fallback",
+                        route_name,
+                    )
+                    continue
+                raise
+        raise last_error or ModelError("All context routes failed", retryable=True)
 
     async def _call_async(
         self,
@@ -474,23 +524,52 @@ class ModelRouter:
         json_mode: bool,
         temperature: float,
     ) -> str:
-        url, headers, payload = self._request_parts(
+        headers, payload = self._request_parts(
             model, prompt, system, max_tokens, json_mode, temperature
         )
-        started = time.monotonic()
-        try:
-            response = await self._get_async_client().post(
-                url, headers=headers, json=payload
-            )
-        except httpx.TimeoutException as exc:
-            raise ModelError(
-                f"OpenRouter request timed out: {exc}", retryable=True
-            ) from exc
-        except httpx.RequestError as exc:
-            raise ModelError(
-                f"OpenRouter request error: {exc}", retryable=True
-            ) from exc
-        return self._parse_response(response, model, time.monotonic() - started)
+        exact_context = self._requires_exact_context(system)
+        last_error: ModelError | None = None
+        for route_name, url, route_headers, route_payload in self._context_attempts(
+            headers, payload, model=model, exact_context=exact_context
+        ):
+            self._record_context_route(route_name, attempted=True)
+            started = time.monotonic()
+            try:
+                response = await self._get_async_client().post(
+                    url, headers=route_headers, json=route_payload
+                )
+                result = self._parse_response(response, model, time.monotonic() - started)
+                self._record_context_route(route_name, success=True)
+                return result
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                last_error = ModelError(
+                    f"Context route {route_name} request failed: {exc}", retryable=True
+                )
+                self._record_context_route(route_name, failed=True)
+                if route_name in {"leanctx", "context_gateway"}:
+                    logger.warning(
+                        "model_router: proxy context route %s unavailable; trying fallback",
+                        route_name,
+                    )
+                    continue
+                raise last_error from exc
+            except ModelError as exc:
+                last_error = exc
+                self._record_context_route(route_name, failed=True)
+                if route_name in {"leanctx", "context_gateway"}:
+                    logger.warning(
+                        "model_router: proxy context route %s failed; trying fallback",
+                        route_name,
+                    )
+                    continue
+                if route_name in {"openrouter", "deterministic"} and self._is_context_limit_error(exc):
+                    logger.warning(
+                        "model_router: context route %s could not fit the prompt; trying fallback",
+                        route_name,
+                    )
+                    continue
+                raise
+        raise last_error or ModelError("All context routes failed", retryable=True)
 
     def _request_parts(
         self,
@@ -500,18 +579,11 @@ class ModelRouter:
         max_tokens: int,
         json_mode: bool,
         temperature: float,
-    ) -> tuple[str, dict[str, str], dict[str, Any]]:
+    ) -> tuple[dict[str, str], dict[str, Any]]:
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        headroom_outcome = self._headroom.optimise(
-            messages,
-            model=model,
-            exact_context=self._requires_exact_context(system),
-        )
-        messages = headroom_outcome.messages
-        self._record_headroom(headroom_outcome)
         payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -538,7 +610,151 @@ class ModelRouter:
             headers["HTTP-Referer"] = self._cfg.openrouter_http_referer.strip()
         if self._cfg.rms_openrouter_log_prompts:
             logger.debug("model_router: prompt logging enabled length=%d", len(prompt))
-        return f"{self._api_base}/chat/completions", headers, payload
+        return headers, payload
+
+    def _context_attempts(
+        self,
+        openrouter_headers: dict[str, str],
+        payload: dict[str, Any],
+        *,
+        model: str,
+        exact_context: bool,
+    ):
+        order = provider_order(
+            self._cfg.rms_context_primary_provider,
+            self._cfg.rms_context_fallback_providers,
+        )
+        for route_name in order:
+            if route_name == "leanctx":
+                base = self._cfg.rms_leanctx_base_url.strip().rstrip("/")
+                if not base:
+                    continue
+                yield (
+                    route_name,
+                    f"{base}/chat/completions",
+                    self._proxy_headers(
+                        self._cfg.rms_leanctx_api_key, openrouter_headers
+                    ),
+                    dict(payload),
+                )
+                continue
+            if route_name == "context_gateway":
+                base = self._cfg.rms_context_gateway_base_url.strip().rstrip("/")
+                if not base:
+                    continue
+                yield (
+                    route_name,
+                    f"{base}/chat/completions",
+                    self._proxy_headers(
+                        self._cfg.rms_context_gateway_api_key, openrouter_headers
+                    ),
+                    dict(payload),
+                )
+                continue
+            if route_name == "headroom":
+                raw_messages = payload.get("messages")
+                messages = (
+                    [dict(message) for message in raw_messages]
+                    if isinstance(raw_messages, list)
+                    else []
+                )
+                outcome = self._headroom.optimise(
+                    messages, model=model, exact_context=exact_context
+                )
+                self._record_headroom(outcome)
+                if outcome.failed or (
+                    outcome.skipped_reason and outcome.skipped_reason != "exact_context"
+                ):
+                    logger.warning(
+                        "model_router: Headroom did not produce a usable context result reason=%s; trying next route",
+                        outcome.skipped_reason or "failed",
+                    )
+                    continue
+                candidate = {**payload, "messages": outcome.messages}
+                yield (
+                    route_name,
+                    f"{self._api_base}/chat/completions",
+                    openrouter_headers,
+                    candidate,
+                )
+                continue
+            if route_name == "openrouter":
+                if exact_context:
+                    continue
+                yield (
+                    route_name,
+                    f"{self._api_base}/chat/completions",
+                    openrouter_headers,
+                    add_openrouter_context_compression(payload),
+                )
+                continue
+            if route_name == "deterministic":
+                if exact_context:
+                    continue
+                yield (
+                    route_name,
+                    f"{self._api_base}/chat/completions",
+                    openrouter_headers,
+                    deterministic_compact_payload(
+                        payload,
+                        max_chars=self._cfg.rms_context_local_max_chars,
+                        exact_context=False,
+                    ),
+                )
+                continue
+            if route_name == "direct":
+                yield (
+                    route_name,
+                    f"{self._api_base}/chat/completions",
+                    openrouter_headers,
+                    dict(payload),
+                )
+
+    def _proxy_headers(
+        self, proxy_api_key: str, openrouter_headers: Mapping[str, str]
+    ) -> dict[str, str]:
+        headers = dict(openrouter_headers)
+        key = str(proxy_api_key or "").strip()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        return headers
+
+    def _record_context_route(
+        self, route_name: str, *, attempted: bool = False, success: bool = False, failed: bool = False
+    ) -> None:
+        with self._usage_lock:
+            routing = self._usage.get("contextRouting")
+            if not isinstance(routing, dict):
+                return
+            if attempted:
+                routing["attempts"] = int(routing.get("attempts", 0)) + 1
+            routes = routing.get("routes")
+            if not isinstance(routes, dict):
+                return
+            stats = routes.setdefault(route_name, {"attempts": 0, "successes": 0, "failures": 0})
+            if attempted:
+                stats["attempts"] += 1
+            if success:
+                stats["successes"] += 1
+            if failed:
+                stats["failures"] += 1
+                routing["fallbacks"] = int(routing.get("fallbacks", 0)) + 1
+
+    @staticmethod
+    def _is_context_limit_error(exc: ModelError) -> bool:
+        if exc.status_code not in {400, 413, 422}:
+            return False
+        message = str(exc).lower()
+        markers = (
+            "context length",
+            "context_length",
+            "maximum context",
+            "too many messages",
+            "prompt is too long",
+            "input is too long",
+            "token limit",
+        )
+        return any(marker in message for marker in markers)
 
     @staticmethod
     def _requires_exact_context(system: str) -> bool:

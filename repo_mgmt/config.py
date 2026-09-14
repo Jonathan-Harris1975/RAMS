@@ -150,6 +150,22 @@ class Settings(BaseSettings):
     rms_headroom_kompress_model: str = "disabled"
     rms_headroom_log_savings: bool = True
 
+    # ── Context resilience / compression routing ──────────────────────────
+    # RAMS is a coding-focused service, so LeanCTX is the preferred route when
+    # configured. External proxy URLs are intentionally blank by default; an
+    # unavailable/unconfigured proxy is skipped without blocking OpenRouter.
+    rms_context_primary_provider: Literal[
+        "leanctx", "context_gateway", "headroom", "openrouter", "deterministic", "direct"
+    ] = "leanctx"
+    rms_context_fallback_providers: str = (
+        "context_gateway,headroom,openrouter,deterministic,direct"
+    )
+    rms_leanctx_base_url: str = ""
+    rms_leanctx_api_key: str = ""
+    rms_context_gateway_base_url: str = ""
+    rms_context_gateway_api_key: str = ""
+    rms_context_local_max_chars: int = Field(default=120_000, ge=8_192, le=1_048_576)
+
     # ── Target repo paths ──────────────────────────────────────────────────
     # Current architecture:
     #   website     -> website repo (unified Digital Growth + SEO/AEO/GEO + Mobile UX report)
