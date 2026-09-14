@@ -45,6 +45,7 @@ def _settings(**overrides: object) -> SimpleNamespace:
         "rms_engineering_council_expert_justification_id": "",
         "rms_engineering_council_review_confidence": 85,
         "rms_engineering_council_chair_confidence": 85,
+        "rms_engineering_council_near_threshold_tolerance_percent": 5,
         "rms_model_governance_premium_approvals": {},
         "rms_model_governance_premium_approval_expiries": {},
         "rms_model_governance_premium_roles": set(),
@@ -135,3 +136,16 @@ async def test_nonpremium_chair_can_adjudicate_without_premium_approval() -> Non
     assert result["route"] == "chair-adjudication"
     assert result["premiumJustificationId"] is None
     assert len(router.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_near_threshold_standard_approval_is_accepted() -> None:
+    router = FakeRouter([_response("approve", 81), _response("approve", 80)])
+
+    result = await run_engineering_council({}, {}, _settings(), router)
+
+    assert result["decision"] == "approve_micro_surgery"
+    assert result["acceptedUnderTolerance"] is True
+    assert result["threshold"] == 85
+    assert result["effectiveThreshold"] == 80
+    assert len(router.calls) == 2

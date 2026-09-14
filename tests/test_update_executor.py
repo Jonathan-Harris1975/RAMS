@@ -6,7 +6,7 @@ import asyncio
 import subprocess
 from pathlib import Path
 from types import MethodType
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from repo_mgmt import update_executor
 from repo_mgmt.git_manager import GitManager
@@ -249,3 +249,78 @@ def test_post_patch_sync_runs_partial_injector(tmp_path: Path) -> None:
     )
     assert result["passed"] is True
     assert result["commands"] == ["python3 scripts/inject_partials.py"]
+
+
+def test_self_improvement_acceptance_skips_council_and_commits(
+    settings, mock_router, sample_audit, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo-self-approved"
+    repo.mkdir()
+    gm = init_git_repo(repo)
+    patch_doc = {
+        "patchProtocol": "AnchorPatch/v1",
+        "changes": [
+            {
+                "file": "index.html",
+                "operation": "replace",
+                "anchorBefore": "<title>Old</title>",
+                "find": "<title>Old</title>",
+                "replace": "<title>New</title>",
+                "rationale": "Update the page title.",
+            }
+        ],
+    }
+    improvement = {
+        "decision": "accept",
+        "accepted": True,
+        "threshold": 85,
+        "maxLoops": 3,
+        "loops": [{"iteration": 1, "confidence": 91, "accepted": True}],
+        "patch": patch_doc,
+        "reason": "threshold met",
+    }
+
+    with (
+        patch(
+            "repo_mgmt.update_executor.self_improvement.run_self_improvement",
+            new=AsyncMock(return_value=improvement),
+        ),
+        patch(
+            "repo_mgmt.update_executor.run_engineering_council",
+            new=AsyncMock(),
+        ) as council_mock,
+        patch(
+            "repo_mgmt.update_executor.validation_runner.run",
+            return_value=ValidationResult(True, ["true"], "ok"),
+        ),
+    ):
+        result = run_executor(issue(sample_audit), repo, settings, mock_router, gm, False)
+
+    assert result["status"] == "committed"
+    assert result["reviewRoute"] == "self-improvement"
+    assert result["engineeringCouncilRuns"] == []
+    council_mock.assert_not_awaited()
+
+
+def test_council_retry_is_hard_capped_at_two_on_technical_failure(settings) -> None:
+    task = {"taskId": "t1"}
+    patch_doc = {"patchProtocol": "AnchorPatch/v1", "changes": []}
+    router = MagicMock()
+    settings.rms_engineering_council_max_runs = 2
+    failure = {
+        "decision": "manual_review",
+        "route": "council-failure",
+        "reason": "provider failed",
+    }
+
+    with patch(
+        "repo_mgmt.update_executor.run_engineering_council",
+        new=AsyncMock(side_effect=[failure, failure, failure]),
+    ) as council_mock:
+        result, runs = asyncio.run(
+            update_executor._run_council_bounded(task, patch_doc, settings, router)  # noqa: SLF001
+        )
+
+    assert result["route"] == "council-failure"
+    assert len(runs) == 2
+    assert council_mock.await_count == 2

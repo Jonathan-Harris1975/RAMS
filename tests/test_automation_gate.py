@@ -55,3 +55,35 @@ def test_phase4c_gate_requires_validation():
 
     assert decision.ok is False
     assert "validation" in " ".join(decision.defects).lower()
+
+
+def test_phase4c_gate_allows_self_improvement_without_council():
+    decision = evaluate_phase4c_auto_pr_gate(
+        task={"classification": "code_fix"},
+        patch_doc=_patch(),
+        modified_files=["assets/css/site.css"],
+        validation=SimpleNamespace(passed=True),
+        self_improvement={"decision": "accept", "accepted": True},
+    )
+
+    assert decision.ok is True
+    assert decision.evidence["approvalRoute"] == "self-improvement"
+    assert decision.evidence["engineeringCouncilDecision"] is None
+
+
+def test_phase4c_gate_uses_configured_change_limit():
+    decision = evaluate_phase4c_auto_pr_gate(
+        task={"classification": "code_fix"},
+        patch_doc=_patch(),
+        modified_files=["assets/css/site.css"],
+        validation=SimpleNamespace(passed=True),
+        self_improvement={"decision": "accept", "accepted": True},
+        cfg=SimpleNamespace(
+            rms_autonomous_max_files=3,
+            rms_autonomous_max_changes=0,
+            rms_autonomous_max_replace_chars=8000,
+        ),
+    )
+
+    assert decision.ok is False
+    assert "maximum is 0" in " ".join(decision.defects)
