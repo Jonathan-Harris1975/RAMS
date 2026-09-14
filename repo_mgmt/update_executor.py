@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from repo_mgmt import patch_applier, patch_planner, validation_runner
+from repo_mgmt import patch_applier, patch_planner, self_improvement, validation_runner
 from repo_mgmt.automation_gate import evaluate_phase4c_auto_pr_gate
 from repo_mgmt.engineering_council import run_engineering_council
 from repo_mgmt.git_manager import TaskRepoSnapshot
@@ -121,6 +121,30 @@ def _restore_after_failure(
     task["reverted"] = True
 
 
+async def _run_council_bounded(
+    task: dict[str, Any],
+    patch_doc: dict[str, Any],
+    cfg: "Settings",
+    model_router: "ModelRouter",
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Run at most two council meetings, retrying only a technical council failure."""
+    max_runs = min(2, max(1, int(cfg.rms_engineering_council_max_runs)))
+    runs: list[dict[str, Any]] = []
+    result: dict[str, Any] = {
+        "decision": "manual_review",
+        "route": "not-run",
+        "reason": "engineering council did not run",
+    }
+    for run_number in range(1, max_runs + 1):
+        result = await run_engineering_council(task, patch_doc, cfg, model_router)
+        runs.append({"run": run_number, **result})
+        if result.get("decision") == "approve_micro_surgery":
+            break
+        if result.get("route") != "council-failure":
+            break
+    return result, runs
+
+
 async def run_task(
     issue: dict[str, Any],
     target_repo: Path,
@@ -133,7 +157,8 @@ async def run_task(
     """
     Build context, plan a bounded patch, and optionally apply/validate/commit it.
 
-    Dry-run intentionally stops after context and planning. Live mode captures the
+    Dry-run stops after planning plus progressive self-improvement. Live mode
+    escalates to council only when the loops miss threshold, then captures the
     exact task-touched file state before applying a patch and restores that state
     after any validation, stage, commit, push, or unexpected post-apply failure.
     """
@@ -166,15 +191,30 @@ async def run_task(
             task["modified_files"] = []
             return task
 
+        improvement = await self_improvement.run_self_improvement(
+            task, patch_doc, target_repo, pipeline_id, cfg, model_router
+        )
+        task["selfImprovement"] = {
+            key: value for key, value in improvement.items() if key != "patch"
+        }
+        patch_doc = improvement["patch"]
+        validate_patch(patch_doc)
+        task["patch"] = patch_doc
         modified_candidates = _change_files(patch_doc)
+        self_approved = bool(improvement.get("accepted"))
 
         if dry_run:
             task["status"] = "planned"
             task["modified_files"] = modified_candidates
+            task["reviewRoute"] = (
+                "self-improvement" if self_approved else "engineering-council-required"
+            )
             logger.info(
-                "update_executor [%s]: dry-run planned %d change(s); no writes performed",
+                "update_executor [%s]: dry-run planned %d change(s); "
+                "self-improvement=%s; no writes performed",
                 task_id,
                 len(patch_doc.get("changes", [])),
+                improvement.get("decision"),
             )
             return task
 
@@ -182,6 +222,27 @@ async def run_task(
             task["status"] = "manual_review"
             task["error"] = "missing Git manager before patch application"
             return task
+
+        council: dict[str, Any] | None = None
+        if not self_approved:
+            council, council_runs = await _run_council_bounded(
+                task, patch_doc, cfg, model_router
+            )
+            task["engineeringCouncil"] = council
+            task["engineeringCouncilRuns"] = council_runs
+            if council.get("decision") != "approve_micro_surgery":
+                logger.warning(
+                    "update_executor [%s]: engineering council refused autonomous patch",
+                    task_id,
+                )
+                task["status"] = "manual_review"
+                task["error"] = "Engineering council refused autonomous patch"
+                return task
+            task["reviewRoute"] = "engineering-council"
+        else:
+            task["engineeringCouncil"] = None
+            task["engineeringCouncilRuns"] = []
+            task["reviewRoute"] = "self-improvement"
 
         git_mgr.assert_write_allowed()
         snapshot_paths = _snapshot_candidates(
@@ -258,21 +319,14 @@ async def run_task(
                 return task
 
         modified = list(task.get("modified_files", modified))
-        council = await run_engineering_council(task, patch_doc, cfg, model_router)
-        task["engineeringCouncil"] = council
-        if council.get("decision") != "approve_micro_surgery":
-            logger.warning("update_executor [%s]: engineering council refused autonomous patch", task_id)
-            _restore_after_failure(git_mgr, snapshot, task)
-            task["status"] = "manual_review"
-            task["error"] = "Engineering council refused autonomous patch"
-            return task
-
         phase4c_gate = evaluate_phase4c_auto_pr_gate(
             task=task,
             patch_doc=patch_doc,
             modified_files=modified,
             validation=post_patch_validation,
             council=council,
+            self_improvement=improvement,
+            cfg=cfg,
         )
         task["phase4cGate"] = phase4c_gate.to_report()
         if not phase4c_gate.ok:

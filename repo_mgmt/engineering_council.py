@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from typing import Any
 
 from repo_mgmt.model_policy import (
@@ -157,7 +158,22 @@ async def run_engineering_council(
             "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL",
         ),
     )
-    review_threshold = cfg.rms_engineering_council_review_confidence
+    review_threshold = int(cfg.rms_engineering_council_review_confidence)
+    tolerance_percent = min(
+        5,
+        max(
+            0,
+            int(
+                getattr(
+                    cfg,
+                    "rms_engineering_council_near_threshold_tolerance_percent",
+                    5,
+                )
+            ),
+        ),
+    )
+    review_margin = math.ceil(review_threshold * tolerance_percent / 100)
+    effective_review_threshold = max(0, review_threshold - review_margin)
     try:
         reviews = list(
             await asyncio.gather(
@@ -180,16 +196,23 @@ async def run_engineering_council(
             )
 
         standard_consensus = all(
-            review["decision"] == "approve" and review["confidence"] >= review_threshold
+            review["decision"] == "approve"
+            and review["confidence"] >= effective_review_threshold
             for review in reviews
         )
         if standard_consensus:
+            accepted_under_tolerance = any(
+                review["confidence"] < review_threshold for review in reviews
+            )
             return {
                 "decision": "approve_micro_surgery",
                 "reason": "independent standard reviewers approved the bounded patch",
                 "route": "standard-consensus",
                 "seats": list(SEATS),
                 "reviews": reviews,
+                "threshold": review_threshold,
+                "effectiveThreshold": effective_review_threshold,
+                "acceptedUnderTolerance": accepted_under_tolerance,
             }
 
         chair_model = cfg.rms_engineering_council_chair_model
@@ -223,9 +246,15 @@ async def run_engineering_council(
             justification_id=justification_id or None,
         )
         reviews.append(chair)
+        chair_threshold = int(cfg.rms_engineering_council_chair_confidence)
+        chair_margin = math.ceil(chair_threshold * tolerance_percent / 100)
+        effective_chair_threshold = max(0, chair_threshold - chair_margin)
         approved = (
             chair["decision"] == "approve"
-            and chair["confidence"] >= cfg.rms_engineering_council_chair_confidence
+            and chair["confidence"] >= effective_chair_threshold
+        )
+        accepted_under_tolerance = bool(
+            approved and chair["confidence"] < chair_threshold
         )
         return {
             "decision": "approve_micro_surgery" if approved else "manual_review",
@@ -234,6 +263,9 @@ async def run_engineering_council(
             "seats": list(SEATS),
             "reviews": reviews,
             "premiumJustificationId": justification_id if premium_chair else None,
+            "threshold": chair_threshold,
+            "effectiveThreshold": effective_chair_threshold,
+            "acceptedUnderTolerance": accepted_under_tolerance,
         }
     except Exception as exc:  # noqa: BLE001 - every council failure must fail closed
         return _manual(

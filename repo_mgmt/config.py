@@ -211,6 +211,13 @@ class Settings(BaseSettings):
     rms_website_max_issues_per_run: int = Field(default=5, ge=1, le=5)
     rms_max_concurrent_pipelines: int = Field(default=1, ge=1, le=1)
 
+    # Progressive patch self-improvement runs before any engineering council.
+    # The role ladder is fixed in code as triage -> secondary -> primary -> architect;
+    # model IDs remain governed by the existing HIVE role assignments.
+    rms_self_improvement_enabled: bool = True
+    rms_self_improvement_max_loops: int = Field(default=3, ge=1, le=4)
+    rms_self_improvement_confidence: int = Field(default=85, ge=0, le=100)
+
     # Autonomous engineering council / micro-surgery guardrails.
     rms_engineering_council_enabled: bool = True
     rms_engineering_council_architect_model: str = "openai/gpt-5.6-sol"
@@ -220,6 +227,8 @@ class Settings(BaseSettings):
     rms_engineering_council_expert_justification_id: str = ""
     rms_engineering_council_review_confidence: int = Field(default=85, ge=0, le=100)
     rms_engineering_council_chair_confidence: int = Field(default=85, ge=0, le=100)
+    rms_engineering_council_near_threshold_tolerance_percent: int = Field(default=5, ge=0, le=5)
+    rms_engineering_council_max_runs: int = Field(default=2, ge=1, le=2)
     rms_autonomous_max_files: int = Field(default=3, ge=1, le=5)
     rms_autonomous_max_changes: int = Field(default=6, ge=1, le=10)
     rms_autonomous_max_replace_chars: int = Field(default=8000, ge=1000, le=18000)
@@ -299,6 +308,7 @@ class Settings(BaseSettings):
         "rms_openrouter_log_usage",
         "rms_openrouter_log_cost",
         "rms_openrouter_log_prompts",
+        "rms_self_improvement_enabled",
         "rms_engineering_council_enabled",
         "rms_engineering_council_expert_enabled",
         "rms_temp_cleanup_enabled",
@@ -385,6 +395,7 @@ class Settings(BaseSettings):
         premium_roles = (
             ("OPENROUTER_PRIMARY_MODEL", self.openrouter_primary_model, True),
             ("OPENROUTER_SECONDARY_MODEL", self.openrouter_secondary_model, True),
+            ("OPENROUTER_TRIAGE_MODEL", self.openrouter_triage_model, True),
             (
                 "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL",
                 self.rms_engineering_council_architect_model,
