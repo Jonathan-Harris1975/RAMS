@@ -10,3 +10,8 @@ RMS_API_KEY={{ secret.RMS_API_KEY }}
 RMS_GITHUB_TOKEN={{ secret.GITHUB_TOKEN_WEBSITE_AUDITS }}
 RMS_WEBSITE_REPO_URL={{ secret.RMS_WEBSITE_REPO_URL }}
 RMS_AIMS_REPO_URL={{ secret.RMS_AIMS_REPO_URL }}
+# Optional context-proxy client credentials. Add only after the corresponding
+# proxy endpoint has been deployed and configured to inject/forward OpenRouter auth.
+# RMS_LEANCTX_API_KEY={{ secret.RMS_LEANCTX_API_KEY }}
+# RMS_CONTEXT_GATEWAY_API_KEY={{ secret.RMS_CONTEXT_GATEWAY_API_KEY }}
+
