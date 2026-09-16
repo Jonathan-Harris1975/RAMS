@@ -5,7 +5,6 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_KOYEB_BINDINGS = {
@@ -33,10 +32,8 @@ EXPECTED_IMAGE_DEFAULTS = {
     "PYTHONHASHSEED": "random",
     "PYTHONUNBUFFERED": "1",
     "R2_BUCKET_AUDITS": "audits",
-    "R2_BUCKET_HIVE_SKILLS": "hive-skills",
     "R2_ENDPOINT": "https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com",
     "R2_PUBLIC_BASE_URL_AUDITS": "https://pub-f6b6cfd7d07e46f695d08e4a8dc3bd6b.r2.dev",
-    "R2_PUBLIC_BASE_URL_HIVE_SKILLS": "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev",
     "R2_REGION": "auto",
     "RMS_AIMS_REPO_BRANCH": "main",
     "RMS_AIMS_REPO_PATH": "/tmp/rams-repos/aims",

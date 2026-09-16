@@ -12,11 +12,12 @@ def test_search_visibility_baseline_is_seo_pipeline_only():
     assert baseline is not None
     assert baseline["batch"] == "Batch 1 - Search visibility baseline"
     assert baseline["mode"] == "reports-only"
-    assert baseline["centralSkillPool"]["mode"] == "central-r2-read-only"
-    assert baseline["centralSkillPool"]["manifest"]["objectKey"] == "manifests/rams-skills-manifest.json"
-    assert [skill["name"] for skill in baseline["skills"]] == ["seo-audit", "ai-seo"]
-    assert all("installCommand" not in skill for skill in baseline["skills"])
-    assert all(skill["source"] == "HIVE shared skill pool" for skill in baseline["skills"])
+    assert baseline["localSkillCatalogue"]["mode"] == "repository-local-native"
+    assert baseline["localSkillCatalogue"]["sharedBucketRequired"] is False
+    assert [item["id"] for item in baseline["capabilities"]] == ["RAMS-sk001"]
+    assert baseline["skills"] == baseline["capabilities"]
+    assert all("installCommand" not in item for item in baseline["capabilities"])
+    assert all(item["sourceUri"].startswith("repo://") for item in baseline["capabilities"])
     assert search_visibility_baseline_for("mobile-ux") is None
     assert search_visibility_baseline_for("on-brand") is None
 
@@ -33,5 +34,6 @@ def test_seo_pipeline_report_serialises_batch_1_metadata(settings, mock_r2, mock
     dest = publish(report, settings, mock_r2)
     data = json.loads(Path(dest).read_text())
     assert data["skillsBaseline"]["batch"] == "Batch 1 - Search visibility baseline"
-    assert data["skillsBaseline"]["mode"] == "central-r2-read-only"
-    assert data["skillsBaseline"]["centralSkillPool"]["manifest"]["objectKey"] == "manifests/rams-skills-manifest.json"
+    assert data["skillsBaseline"]["mode"] == "repository-local-native"
+    assert data["skillsBaseline"]["sharedBucketRequired"] is False
+    assert data["skillsBaseline"]["localSkillCatalogue"]["externalNetworkRequired"] is False

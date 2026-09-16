@@ -1,19 +1,24 @@
 from __future__ import annotations
 
+from repo_mgmt.issue_normaliser import normalise
 from repo_mgmt.phase5_skills import phase5_skills_summary
 from repo_mgmt.report_publisher import CommitInfo, RunReport, ValidationSummary, _report_quality
-from repo_mgmt.issue_normaliser import normalise
 
 
-def test_phase5_mobile_ux_summary_includes_accessibility_skill() -> None:
+def test_phase5_mobile_ux_summary_uses_local_accessibility_capabilities() -> None:
     summary = phase5_skills_summary("mobile-ux")
 
     assert summary["phase"] == "5A/5B/5C"
-    assert summary["activeSkills"] == {"accessibilityMobileUx": ["accessibility-audit"]}
+    assert summary["activeCapabilities"] == {
+        "accessibilityMobileUx": ["RAMS-sk001", "RAMS-sk002", "RAMS-sk003"]
+    }
+    assert summary["activeSkills"] == summary["activeCapabilities"]
     assert summary["localAgentsFolderRequired"] is False
     assert summary["manifestControlled"] is True
-    assert summary["skillSource"]["mode"] == "central-r2-read-only"
-    assert "paid-ads" in summary["parkedSkills"]
+    assert summary["sharedBucketRequired"] is False
+    assert summary["localSkillCatalogue"]["mode"] == "repository-local-native"
+    assert summary["skillSource"] == summary["localSkillCatalogue"]
+    assert "paid-ads" in summary["parkedCapabilities"]
 
 
 def test_report_quality_adds_accessibility_evidence_to_mobile_ux() -> None:
@@ -30,8 +35,11 @@ def test_report_quality_adds_accessibility_evidence_to_mobile_ux() -> None:
     quality = _report_quality(report)
 
     assert "accessibility-appendix.json" in quality["requiredEvidence"]
-    assert quality["phase5Skills"]["activeSkills"] == {"accessibilityMobileUx": ["accessibility-audit"]}
+    assert quality["phase5Skills"]["activeCapabilities"] == {
+        "accessibilityMobileUx": ["RAMS-sk001", "RAMS-sk002", "RAMS-sk003"]
+    }
     assert quality["phase5Skills"]["manifestControlled"] is True
+    assert quality["phase5Skills"]["sharedBucketRequired"] is False
 
 
 def test_mobile_ux_accessibility_finding_maps_to_governed_source(settings) -> None:
