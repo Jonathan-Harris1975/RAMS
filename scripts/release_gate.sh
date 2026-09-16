@@ -7,6 +7,7 @@ RMS_RELEASE_GATE_API_KEY="${RMS_API_KEY:-example-local-rams-key}"
 
 python -V
 python -m compileall -q repo_mgmt tests
+python scripts/verify_dependency_lock.py
 python -m pytest tests/ -q --tb=short
 python -m ruff check .
 python -m mypy repo_mgmt/ --no-incremental --show-error-codes

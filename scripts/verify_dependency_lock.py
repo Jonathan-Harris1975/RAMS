@@ -1,4 +1,4 @@
-"""Verify that the production runtime is installed from an exact dependency lock."""
+"""Verify that RAMS has one dependency source and an exact production lock."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN_RE = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^;\s]+)$")
+LEGACY_DEPENDENCY_MANIFESTS = ("requirements.in", "requirements.txt")
 
 
 def normalise_name(value: str) -> str:
@@ -21,12 +22,26 @@ def exact_pin(value: str) -> tuple[str, str]:
     return normalise_name(match.group(1)), match.group(2)
 
 
+def verify_single_dependency_source() -> None:
+    present = [name for name in LEGACY_DEPENDENCY_MANIFESTS if (ROOT / name).exists()]
+    if present:
+        names = ", ".join(present)
+        raise AssertionError(
+            "pyproject.toml must be the only dependency declaration manifest; "
+            f"remove legacy manifest(s): {names}"
+        )
+
+
 def main() -> None:
+    verify_single_dependency_source()
+
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     declared = dict(exact_pin(item) for item in project["project"]["dependencies"])
 
     locked: dict[str, str] = {}
-    for line_number, raw in enumerate((ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, raw in enumerate(
+        (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines(), 1
+    ):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -56,7 +71,7 @@ def main() -> None:
     if "--no-deps ." not in dockerfile:
         raise AssertionError("Dockerfile must install the RAMS package without re-resolving dependencies")
 
-    print(f"production dependency lock verified: {len(locked)} exact pins")
+    print(f"production dependency architecture verified: {len(locked)} exact pins")
 
 
 if __name__ == "__main__":
