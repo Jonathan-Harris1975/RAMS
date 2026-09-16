@@ -47,4 +47,4 @@ Responses include restrictive API security headers. Warm-up never launches audit
 
 ## Dependency governance
 
-Production direct dependencies in `pyproject.toml` are exact-version pinned, and `requirements.lock` is the resolved transitive lock used by CI and Docker. `pyproject.toml` is the only dependency declaration manifest: do not add `requirements.in` or `requirements.txt`. Dependency upgrades must be deliberate pull requests that regenerate `requirements.lock` from `pyproject.toml` and run the RAMS test and security gates before merge; do not reintroduce open-ended `>=` production ranges.
+Production direct dependencies are exact-version pinned in `requirements.in`, which is the single Dependabot-visible direct dependency source. `requirements.txt` is the compiled transitive production set consumed by CI and Docker, while `pyproject.toml` loads its runtime dependency metadata dynamically from `requirements.in`. Dependency upgrades must regenerate `requirements.txt` and pass the RAMS test and security gates before merge. Do not reintroduce `requirements.lock` or a second hard-coded runtime dependency list.

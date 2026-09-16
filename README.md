@@ -47,7 +47,7 @@ All non-secret production values are version-controlled in `Dockerfile` (with ap
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -c requirements.lock -e '.[dev]'
+pip install -c requirements.txt -e '.[dev]'
 python -m compileall -q repo_mgmt tests scripts/emicro_benchmark.py
 python -m pytest tests/ -q --tb=short
 python -m ruff check .
@@ -57,14 +57,14 @@ python scripts/emicro_benchmark.py --label candidate
 
 ## Dependency architecture
 
-`pyproject.toml` is the single dependency declaration source for RAMS. Production dependencies are exact-version pinned there; `requirements.lock` is the resolved transitive lock consumed by CI and Docker and is not a second declaration manifest. Regenerate it only after an intentional dependency change:
+`requirements.in` is RAMS's single direct production dependency source and is visible to Dependabot. `requirements.txt` is the exact transitive file generated from it and consumed by CI and Docker. `pyproject.toml` reads its runtime dependency metadata dynamically from `requirements.in`, so a Dependabot update cannot leave a second hard-coded dependency list behind. Regenerate `requirements.txt` after an intentional dependency change:
 
 ```bash
-python -m piptools compile --output-file=requirements.lock pyproject.toml
+python -m piptools compile --output-file=requirements.txt requirements.in
 python scripts/verify_dependency_lock.py
 ```
 
-Do not add `requirements.in` or `requirements.txt`; duplicate declaration manifests make dependency ownership ambiguous and are rejected by the dependency-lock verification gate.
+Do not reintroduce `requirements.lock`; production, CI and packaging must stay on the same Dependabot-visible dependency path.
 
 ## Production evidence and roadmap status
 

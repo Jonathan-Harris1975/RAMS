@@ -7,22 +7,7 @@ name = "jh-ops-chat-backend"
 version = "0.1.0"
 description = "Standalone Python OpenRouter ops chatbot backend"
 requires-python = ">=3.11,<3.15"
-dependencies = [
-  "fastapi==0.141.1",
-  "starlette==1.6.0",
-  "uvicorn[standard]==0.50.2",
-  "httpx==0.28.1",
-  "pydantic-settings==2.14.2",
-  "python-multipart==0.0.32",
-  "boto3==1.43.41",
-  "pypdf==6.16.1",
-  "python-docx==1.2.0",
-  "openpyxl==3.1.5",
-  "beautifulsoup4==4.15.0",
-  "headroom-ai==0.37.0",
-  "psycopg[binary]==3.3.4",
-  "typer==0.27.1"
-]
+dynamic = ["dependencies"]
 
 [project.scripts]
 rms-api = "repo_mgmt.api:serve"
@@ -39,6 +24,9 @@ dev = [
   "pip-tools>=7.6.1,<8",
   "setuptools>=84,<85"
 ]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.in"]}
 
 [tool.setuptools.packages.find]
 include = ["repo_mgmt*"]
