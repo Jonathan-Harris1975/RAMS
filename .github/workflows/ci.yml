@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -c requirements.lock -e ".[dev]"
+          pip install -c requirements.txt -e ".[dev]"
           python -m pip check
 
       - name: Run tests
@@ -63,7 +63,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -c requirements.lock -e ".[dev]"
+          pip install -c requirements.txt -e ".[dev]"
           python -m pip check
       - name: Enforce repeatable performance SLOs
         env:
@@ -94,7 +94,7 @@ jobs:
       - name: Install linters
         run: |
           python -m pip install --upgrade pip
-          pip install -c requirements.lock -e ".[dev]"
+          pip install -c requirements.txt -e ".[dev]"
       - name: Verify production dependency lock
         run: python scripts/verify_dependency_lock.py
       - name: Ruff check
