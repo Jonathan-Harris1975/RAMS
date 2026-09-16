@@ -1,37 +1,40 @@
-"""Lane 1 central skill-pool metadata for RAMS reports."""
+"""Lane 1 repository-local capability metadata for RAMS reports."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
 
-from repo_mgmt.hive_skill_pool import rams_skill_pool_contract
+from repo_mgmt.local_skills import rams_local_skills_contract
 
 
 def build_lane1_skills_baseline(*, pipeline_id: str | None = None) -> dict[str, Any]:
-    """Return deterministic Lane 1 skill governance metadata for reports.
+    """Return deterministic native-capability governance metadata.
 
-    Skills are no longer read from ``.agents`` or installed into RAMS. The RAMS
-    repo consumes the HIVE shared skill pool through the RAMS R2 manifest in
-    read-only mode. HIVE remains the central controller for discovery,
-    orchestration and execution decisions.
+    The legacy function name is retained for report compatibility. Its source is
+    now the versioned ``config/skills`` directory; RAMS never fetches a shared
+    manifest or executes capability metadata as code.
     """
-    contract = rams_skill_pool_contract(pipeline_id=pipeline_id)
+
+    contract = rams_local_skills_contract(pipeline_id=pipeline_id)
     return {
-        "batch": "Batch 1 - Search visibility baseline" if pipeline_id == "seo-aeo-geo" else "Lane 1 autonomous skills",
+        "batch": (
+            "Batch 1 - Search visibility baseline"
+            if pipeline_id == "seo-aeo-geo"
+            else "Lane 1 native capabilities"
+        ),
         "mode": contract["mode"],
         "generatedAt": datetime.now(tz=timezone.utc).isoformat(),
         "pipeline": pipeline_id,
-        "schemaVersion": "central-r2-v1",
+        "schemaVersion": "rams-local-v1",
         "lane": "Lane 1 - Autonomous",
-        "repoSideSetup": False,
+        "repoSideSetup": True,
         "externalInstallRequired": False,
-        "centralSkillPoolRequired": True,
+        "sharedBucketRequired": False,
         "localAgentsFolderRequired": False,
-        "skillCount": 0,
+        "skillCount": contract["skillCount"],
         "manifestControlled": True,
-        "skills": [],
-        "batchCounts": {},
-        "centralSkillPool": contract,
+        "skills": contract["skills"],
+        "localSkillCatalogue": contract,
         "governance": contract["governance"],
     }

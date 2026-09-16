@@ -1,8 +1,8 @@
 """Phase 4C autonomous engineering gate for RAMS live patching.
 
-The gate makes `writing-plans`, `systematic-debugging`, and `executing-plans`
-auto-PR safe by requiring a bounded plan, path-scoped diff, validation evidence,
-and no protected/high-risk operations before a live task can be committed.
+The gate applies the native `RAMS-sk002`, `RAMS-sk003` and `RAMS-sk004`
+capability contract by requiring a bounded plan, path-scoped diff, validation
+evidence and no protected/high-risk operations before a live task is committed.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class AutomationGateDecision:
     decision: str
     phase: str = "4C"
     skills: list[str] = field(
-        default_factory=lambda: ["writing-plans", "systematic-debugging", "executing-plans"]
+        default_factory=lambda: ["RAMS-sk002", "RAMS-sk003", "RAMS-sk004"]
     )
     defects: list[str] = field(default_factory=list)
     evidence: dict[str, Any] = field(default_factory=dict)
