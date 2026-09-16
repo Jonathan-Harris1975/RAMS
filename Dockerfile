@@ -13,10 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml requirements.lock .
+COPY pyproject.toml requirements.txt .
 COPY repo_mgmt/ ./repo_mgmt/
 
-RUN pip install --no-cache-dir --prefix=/install -r requirements.lock \
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
     && pip install --no-cache-dir --prefix=/install --no-deps .
 
 
