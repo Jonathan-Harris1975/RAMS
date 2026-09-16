@@ -72,9 +72,7 @@ ENV APP_ENV=production \
 ENV R2_ENDPOINT=https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com \
     R2_REGION=auto \
     R2_BUCKET_AUDITS=audits \
-    R2_BUCKET_HIVE_SKILLS=hive-skills \
-    R2_PUBLIC_BASE_URL_AUDITS=https://pub-f6b6cfd7d07e46f695d08e4a8dc3bd6b.r2.dev \
-    R2_PUBLIC_BASE_URL_HIVE_SKILLS=https://pub-da50a6512f164566955a3076a1c795ef.r2.dev
+    R2_PUBLIC_BASE_URL_AUDITS=https://pub-f6b6cfd7d07e46f695d08e4a8dc3bd6b.r2.dev
 
 ENV OPENROUTER_API_BASE=https://openrouter.ai/api/v1 \
     OPENROUTER_HTTP_REFERER=https://jonathan-harris.online \

@@ -20,6 +20,8 @@ RAMS reads governed audit evidence from R2, normalises only eligible findings, p
 
 For the `content` lane, autonomous work is restricted to confirmed findings with exact existing affected paths and approved fix classes such as content-prompt, validator, council, retry, metadata, scheduler and link fixes. Anything ambiguous falls back to manual review.
 
+RAMS capability metadata is repository-local under `config/skills` and uses stable `RAMS-skNNN` identifiers. It describes native code only; there is no shared skills bucket, external descriptor fetch or runtime skill installer. See `RAMS_LOCAL_CAPABILITIES.md`.
+
 ## Main endpoints
 
 | Endpoint | Auth | Purpose |
