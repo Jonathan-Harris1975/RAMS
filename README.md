@@ -47,13 +47,24 @@ All non-secret production values are version-controlled in `Dockerfile` (with ap
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev]'
+pip install -c requirements.lock -e '.[dev]'
 python -m compileall -q repo_mgmt tests scripts/emicro_benchmark.py
 python -m pytest tests/ -q --tb=short
 python -m ruff check .
 python -m mypy repo_mgmt/ --no-incremental --show-error-codes
 python scripts/emicro_benchmark.py --label candidate
 ```
+
+## Dependency architecture
+
+`pyproject.toml` is the single dependency declaration source for RAMS. Production dependencies are exact-version pinned there; `requirements.lock` is the resolved transitive lock consumed by CI and Docker and is not a second declaration manifest. Regenerate it only after an intentional dependency change:
+
+```bash
+python -m piptools compile --output-file=requirements.lock pyproject.toml
+python scripts/verify_dependency_lock.py
+```
+
+Do not add `requirements.in` or `requirements.txt`; duplicate declaration manifests make dependency ownership ambiguous and are rejected by the dependency-lock verification gate.
 
 ## Production evidence and roadmap status
 
