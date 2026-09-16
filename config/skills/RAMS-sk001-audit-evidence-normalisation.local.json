@@ -1,0 +1,20 @@
+{
+  "schema_version": "2026-09-15.repository-skill.v1",
+  "id": "RAMS-sk001",
+  "slug": "audit-evidence-normalisation",
+  "title": "Audit evidence normalisation",
+  "description": "Reads approved audit artefacts, preserves source traceability and converts grounded findings into the canonical RAMS issue shape.",
+  "risk": "low",
+  "requires_approval": false,
+  "pipelines": ["website", "seo-aeo-geo", "mobile-ux", "on-brand", "continuous-improvement"],
+  "tags": ["audit", "evidence", "normalisation", "traceability"],
+  "implementation_paths": [
+    "repo_mgmt/audit_reader.py",
+    "repo_mgmt/issue_normaliser.py",
+    "repo_mgmt/search_visibility_baseline.py"
+  ],
+  "origin": {
+    "type": "repository-native",
+    "external_skill_content_copied": false
+  }
+}

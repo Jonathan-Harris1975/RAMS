@@ -1,0 +1,21 @@
+{
+  "schema_version": "2026-09-15.repository-skill.v1",
+  "id": "RAMS-sk002",
+  "slug": "controlled-remediation",
+  "title": "Controlled remediation",
+  "description": "Ranks grounded issues and prepares narrowly scoped, schema-validated patches while respecting protected paths and approval boundaries.",
+  "risk": "high",
+  "requires_approval": true,
+  "pipelines": ["website", "seo-aeo-geo", "mobile-ux", "on-brand", "continuous-improvement"],
+  "tags": ["remediation", "patch", "planning", "protected-paths"],
+  "implementation_paths": [
+    "repo_mgmt/task_ranker.py",
+    "repo_mgmt/patch_planner.py",
+    "repo_mgmt/patch_protocol.py",
+    "repo_mgmt/patch_applier.py"
+  ],
+  "origin": {
+    "type": "repository-native",
+    "external_skill_content_copied": false
+  }
+}

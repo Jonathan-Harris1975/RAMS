@@ -1,0 +1,20 @@
+{
+  "schema_version": "2026-09-15.repository-skill.v1",
+  "id": "RAMS-sk004",
+  "slug": "repository-safety-rollback",
+  "title": "Repository safety and rollback",
+  "description": "Enforces clean-branch rules, captures recoverable repository state and restores bounded changes when validation or execution fails.",
+  "risk": "high",
+  "requires_approval": true,
+  "pipelines": ["website", "seo-aeo-geo", "mobile-ux", "on-brand", "continuous-improvement"],
+  "tags": ["git", "safety", "rollback", "recovery"],
+  "implementation_paths": [
+    "repo_mgmt/git_manager.py",
+    "repo_mgmt/git_ops.py",
+    "repo_mgmt/runtime_guard.py"
+  ],
+  "origin": {
+    "type": "repository-native",
+    "external_skill_content_copied": false
+  }
+}

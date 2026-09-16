@@ -1,0 +1,21 @@
+{
+  "schema_version": "2026-09-15.repository-skill.v1",
+  "id": "RAMS-sk003",
+  "slug": "verification-release-gating",
+  "title": "Verification and release gating",
+  "description": "Runs bounded validation, applies fail-closed automation gates and prepares an operator-reviewable release or pull-request handoff.",
+  "risk": "high",
+  "requires_approval": true,
+  "pipelines": ["website", "seo-aeo-geo", "mobile-ux", "on-brand", "continuous-improvement"],
+  "tags": ["verification", "validation", "release", "approval"],
+  "implementation_paths": [
+    "repo_mgmt/validation_runner.py",
+    "repo_mgmt/automation_gate.py",
+    "repo_mgmt/update_executor.py",
+    "repo_mgmt/github_pr.py"
+  ],
+  "origin": {
+    "type": "repository-native",
+    "external_skill_content_copied": false
+  }
+}
