@@ -3,9 +3,9 @@
 # Runtime includes Python, Git, Node.js 22.x, and npm for target validation.
 # ──────────────────────────────────────────────────────────────────────────
 
-FROM node:22.23.2-bookworm-slim AS node-runtime
+FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS node-runtime
 
-FROM python:3.14-slim AS builder
+FROM python:3.14.7-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f AS builder
 
 WORKDIR /build
 
@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
 
-FROM python:3.14-slim AS runtime
+FROM python:3.14.7-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f AS runtime
 
 WORKDIR /app
 
