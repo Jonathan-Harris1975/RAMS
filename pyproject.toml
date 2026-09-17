@@ -3,9 +3,9 @@ requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jh-ops-chat-backend"
+name = "repository-automation-management-service"
 version = "0.1.0"
-description = "Standalone Python OpenRouter ops chatbot backend"
+description = "Controlled repository-remediation service for the website and AIMS estate"
 requires-python = ">=3.11,<3.15"
 dynamic = ["dependencies"]
 
