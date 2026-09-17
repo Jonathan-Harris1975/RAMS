@@ -50,8 +50,8 @@ openpyxl==3.1.5
 opentelemetry-api==1.44.0
 packaging==26.3
 propcache==0.5.2
-psycopg==3.3.4
-psycopg-binary==3.3.4
+psycopg[binary]==3.3.5
+psycopg-binary==3.3.5
 pydantic==2.13.5
 pydantic-core==2.46.5
 pydantic-settings==2.14.2
@@ -81,7 +81,7 @@ typer==0.27.1
 typing-extensions==4.16.0
 typing-inspection==0.4.4
 urllib3==2.7.0
-uvicorn==0.50.2
+uvicorn[standard]==0.50.2
 uvloop==0.22.1
 watchfiles==1.2.0
 websockets==17.1
