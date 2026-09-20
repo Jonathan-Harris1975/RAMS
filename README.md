@@ -72,6 +72,22 @@ Live repository mutation requires dry-run disabled and live-write enabled. The c
 
 All non-secret production values are version-controlled in `Dockerfile` (with application-safe fallbacks in `repo_mgmt/config.py`). `RAMS-KOYEB-PRODUCTION-ENV.txt` contains only the required secret/sensitive Koyeb bindings.
 
+## CLI
+
+RAMS exposes the Typer-based `rms` console command after package installation. It is an operator/developer interface to the same governed pipeline layer used by the API; it does not bypass configuration, dry-run, repository, validation or publication controls.
+
+```bash
+rms --help
+rms dry-run on-brand
+rms dry-run website --audit-json-key audits/website/2026-07/SESSION_ID/website-audit.json
+rms run on-brand --dry-run
+rms run content --audit-json-key audits/content-master/2026-07/SESSION_ID/content-audit.json --dry-run
+```
+
+Supported pipeline IDs are `website`, `content`, `seo-aeo-geo`, `mobile-ux` and `on-brand`. `website` and `content` require an exact final audit object key. `dry-run` always disables writes/commits/pushes; `run` follows `RMS_DRY_RUN` unless `--dry-run` or `--no-dry-run` overrides it. Configuration-load failures exit with status 1, missing required audit keys exit with status 2, and Typer reports invalid command/argument usage with its normal non-zero CLI exit semantics.
+
+The CLI requires the same environment and secret configuration as the service for whichever dependencies the selected pipeline uses. Installing the project (`pip install -c requirements.txt -e '.[dev]'` for development) installs both `rms` and `rms-api` console entry points.
+
 ## Development and validation
 
 Create a clean environment and install against the compiled production lock:
