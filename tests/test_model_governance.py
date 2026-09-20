@@ -219,7 +219,7 @@ def test_expired_premium_justification_is_rejected(settings, mock_r2) -> None:
 
 def test_restore_drops_expired_premium_approval(settings, mock_r2) -> None:
     mock_r2.object_exists.return_value = True
-    mock_r2.get_object.return_value = json.dumps(
+    mock_r2.get_object_limited.return_value = json.dumps(
         {
             "schemaVersion": "rams-model-governance/v2",
             "sourceRunId": "old-council",
@@ -242,6 +242,11 @@ def test_restore_drops_expired_premium_approval(settings, mock_r2) -> None:
 
     result = restore_rams_model_governance(settings, mock_r2)
 
+    mock_r2.get_object_limited.assert_called_once_with(
+        settings.r2_bucket_audits,
+        "state/model-governance/rams.json",
+        settings.rms_report_max_bytes,
+    )
     assert result["restored"] is True
     assert settings.rms_engineering_council_expert_enabled is False
     assert settings.rms_engineering_council_expert_justification_id == ""
