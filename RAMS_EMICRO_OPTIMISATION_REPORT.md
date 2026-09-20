@@ -225,7 +225,7 @@ Remaining MAST limitation:
 7. Keep the initial deployment in dry-run mode.
 8. Call `/ops/warmup`, then `/readiness`.
 9. Run one manually triggered dry-run pipeline and inspect its R2/local report and AI usage.
-10. Historical rollout state kept branch push and pull-request creation disabled after live-write admission. **Superseded 26 July 2026:** validated `rms-qa/*` commits are now pushed automatically and RAMS creates/reuses one non-draft PR per run.
+10. Historical publication settings changed after this optimisation report. **Current production authority is the README/SECURITY/operations contract:** `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`, so validated live-write changes remain in the ephemeral checkout unless a future reviewed deployment profile explicitly enables publication.
 
 ## Rollback
 

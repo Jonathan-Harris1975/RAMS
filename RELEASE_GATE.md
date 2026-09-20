@@ -1,5 +1,5 @@
 > **Document status:** Production release gate  
-> **Last reviewed:** 26 July 2026  
+> **Last reviewed:** 20 September 2026  
 > **Operational authority:** README, SECURITY policy and operations guide.
 
 # RAMS production release gate
@@ -12,9 +12,14 @@ Run these before approving a deployment candidate:
 
 ```bash
 python -m compileall -q repo_mgmt tests scripts/emicro_benchmark.py
+python scripts/verify_dependency_lock.py --compile
+python scripts/secret_scan.py
 python -m pytest tests/ -q --tb=short
+python -m pytest --cov=repo_mgmt --cov-report=term-missing -q
 python -m ruff check .
 python -m mypy repo_mgmt/ --no-incremental --show-error-codes
+python -m bandit -q -r repo_mgmt -ll
+python -m pip_audit
 python scripts/emicro_benchmark.py --label candidate
 ```
 
@@ -108,4 +113,4 @@ curl -fsS -X POST \
   "$BASE_URL/rebuild/seo-aeo-geo/run"
 ```
 
-Do not run a live-write request until dry-run evidence, release-gate evidence and target-repository validation evidence are all clean. Once admitted, production is expected to push the validated QA branch and create the PR automatically.
+Do not run a live-write request until dry-run evidence, release-gate evidence and target-repository validation evidence are all clean. In the current production profile, admitted live-write work stops after validated mutation of the ephemeral checkout because `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`.

@@ -43,7 +43,7 @@ If governed publication is enabled in a future reviewed profile, branch safety s
 
 ## Operational hardening
 
-Responses include restrictive API security headers. Warm-up never launches audits, validation, R2 checks, model calls or repository mutation. R2 verification and HIVE Ops alerts are bounded and redacted. Report reads use constrained keys and size limits.
+Responses include restrictive API security headers. Warm-up never launches audits, validation, R2 checks, model calls or repository mutation. R2 verification and HIVE Ops alerts are bounded and redacted. R2 SDK failures are translated to credential-safe `R2Error` summaries that retain error type/code/status without echoing raw provider messages. Report/evidence reads use constrained keys and size limits, and R2 response streams are closed after reads.
 
 ## Dependency governance
 
