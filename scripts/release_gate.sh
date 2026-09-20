@@ -7,10 +7,14 @@ RMS_RELEASE_GATE_API_KEY="${RMS_API_KEY:-example-local-rams-key}"
 
 python -V
 python -m compileall -q repo_mgmt tests
-python scripts/verify_dependency_lock.py
+python scripts/verify_dependency_lock.py --compile
+python scripts/secret_scan.py
 python -m pytest tests/ -q --tb=short
+python -m pytest --cov=repo_mgmt --cov-report=term-missing -q
 python -m ruff check .
 python -m mypy repo_mgmt/ --no-incremental --show-error-codes
+python -m bandit -q -r repo_mgmt -ll
+python -m pip_audit
 
 clean_room_pattern=$(printf '%s|' \
   "aid""er" \
