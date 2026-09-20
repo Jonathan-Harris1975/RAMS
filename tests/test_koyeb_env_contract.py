@@ -189,3 +189,14 @@ def test_image_defaults_plus_sensitive_bindings_form_complete_production_config(
     assert cfg.openrouter_primary_model == "openai/gpt-5.6-sol"
     assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5"
     assert cfg.rms_engineering_council_expert_enabled is False
+
+
+def test_security_policy_matches_current_publication_defaults() -> None:
+    security_policy = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    assert (
+        "Current production intentionally keeps automated GitHub publication disabled"
+        in security_policy
+    )
+    assert "RMS_PUSH_ENABLED=false\nRMS_CREATE_PR=false" in security_policy
+    assert "Current production enables governed publication" not in security_policy
+
