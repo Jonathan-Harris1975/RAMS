@@ -22,6 +22,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _error_summary(exc: Exception) -> str:
+    """Return a credential-safe summary for an R2/botocore failure."""
+    if isinstance(exc, ClientError):
+        error = exc.response.get("Error", {})
+        metadata = exc.response.get("ResponseMetadata", {})
+        code = str(error.get("Code") or "ClientError")
+        status = metadata.get("HTTPStatusCode")
+        if isinstance(status, int):
+            return f"ClientError(code={code}, status={status})"
+        return f"ClientError(code={code})"
+    return type(exc).__name__
+
+
 class R2Error(Exception):
     """Raised when a Cloudflare R2 operation fails."""
 
@@ -69,7 +82,7 @@ class R2Client:
             self._client.head_bucket(Bucket=target_bucket)
             return True
         except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
-            logger.warning("r2_client: bucket readiness probe failed: %s", exc)
+            logger.warning("r2_client: bucket readiness probe failed: %s", _error_summary(exc))
             return False
 
     def get_object(self, bucket: str, key: str) -> bytes:
@@ -86,14 +99,20 @@ class R2Client:
         Raises:
             R2Error: If the boto3 call fails for any reason.
         """
+        body_stream: object | None = None
         try:
             response = self._client.get_object(Bucket=bucket, Key=key)
-            body: bytes = response["Body"].read()
+            body_stream = response["Body"]
+            body = bytes(getattr(body_stream, "read")())
             return body
-        except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
+        except (ClientError, EndpointConnectionError, BotoCoreError, OSError) as exc:
             raise R2Error(
-                f"R2 get_object failed for bucket={bucket!r} key={key!r}: {exc}"
+                f"R2 get_object failed for bucket={bucket!r} key={key!r}: {_error_summary(exc)}"
             ) from exc
+        finally:
+            close = getattr(body_stream, "close", None)
+            if callable(close):
+                close()
 
     def get_object_limited(self, bucket: str, key: str, max_bytes: int) -> bytes:
         """Retrieve at most ``max_bytes`` and reject oversized R2 objects."""
@@ -117,7 +136,7 @@ class R2Client:
             raise
         except (ClientError, EndpointConnectionError, BotoCoreError, OSError) as exc:
             raise R2Error(
-                f"R2 get_object failed for bucket={bucket!r} key={key!r}: {exc}"
+                f"R2 get_object failed for bucket={bucket!r} key={key!r}: {_error_summary(exc)}"
             ) from exc
         finally:
             close = getattr(body_stream, "close", None)
@@ -152,7 +171,7 @@ class R2Client:
             )
         except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
             raise R2Error(
-                f"R2 put_object failed for bucket={bucket!r} key={key!r}: {exc}"
+                f"R2 put_object failed for bucket={bucket!r} key={key!r}: {_error_summary(exc)}"
             ) from exc
 
     def list_objects(self, bucket: str, prefix: str, *, max_keys: int = 1000) -> list[str]:
@@ -181,7 +200,7 @@ class R2Client:
             )
         except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
             raise R2Error(
-                f"R2 list_objects failed for bucket={bucket!r} prefix={prefix!r}: {exc}"
+                f"R2 list_objects failed for bucket={bucket!r} prefix={prefix!r}: {_error_summary(exc)}"
             ) from exc
         contents = response.get("Contents", []) or []
         return [str(item["Key"]) for item in contents if "Key" in item]
@@ -205,9 +224,9 @@ class R2Client:
             if error_code in ("404", "NoSuchKey"):
                 return False
             raise R2Error(
-                f"R2 object_exists failed for bucket={bucket!r} key={key!r}: {exc}"
+                f"R2 object_exists failed for bucket={bucket!r} key={key!r}: {_error_summary(exc)}"
             ) from exc
         except (EndpointConnectionError, BotoCoreError) as exc:
             raise R2Error(
-                f"R2 object_exists failed for bucket={bucket!r} key={key!r}: {exc}"
+                f"R2 object_exists failed for bucket={bucket!r} key={key!r}: {_error_summary(exc)}"
             ) from exc

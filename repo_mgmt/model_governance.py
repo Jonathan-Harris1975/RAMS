@@ -615,7 +615,9 @@ def restore_rams_model_governance(cfg: Settings, r2: R2Client) -> dict[str, Any]
     try:
         if not r2.object_exists(cfg.r2_bucket_audits, _STATE_KEY):
             return {"ok": True, "restored": False, "reason": "no-persisted-model-governance"}
-        raw = r2.get_object(cfg.r2_bucket_audits, _STATE_KEY)
+        raw = r2.get_object_limited(
+            cfg.r2_bucket_audits, _STATE_KEY, cfg.rms_report_max_bytes
+        )
     except R2Error as exc:
         text = str(exc)
         logger.warning("model_governance: restore failed: %s", exc)
