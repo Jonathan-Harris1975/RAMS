@@ -1,7 +1,7 @@
 # RAMS Koyeb production deployment checklist
 
 **Status:** Operator checklist  
-**Last reviewed:** 27 August 2026
+**Last reviewed:** 20 September 2026
 
 ## Koyeb service
 
@@ -54,8 +54,8 @@ curl -fsS -H "Authorization: Bearer $RMS_API_KEY" "$BASE_URL/ops/excellence"
 
 Expected shapes:
 
-- `/health` and `/livez`: `status=ok` and all four pipeline IDs (`website`, `seo-aeo-geo`, `mobile-ux`, `on-brand`) listed as `idle` or `running`.
-- `/readiness` and `/readyz`: `status=ready` when dependencies are available, otherwise `status=degraded` with dependency detail.
+- `/health` and `/livez`: `status=ok` and all five pipeline IDs (`website`, `content`, `seo-aeo-geo`, `mobile-ux`, `on-brand`) listed as `idle` or `running`.
+- `/readiness` and `/readyz`: `status=ready` when dependencies are available, otherwise `status=degraded` with dependency detail. R2 readiness is a live `HeadBucket` check; storage failure must not make `/health` fail.
 - `/ops/warmup`: `status=warm`, `warmupScope` lists local warm-up, `excludedWork` includes OpenRouter requests, R2, repositories, audits and validation.
 - `/ops/excellence`: `status=healthy` when the audits bucket verifies, otherwise `status=degraded`; includes `liveWriteControls`, `deploymentContract`, `modelProviderPolicy` and `auditStorage`. Confirm `pushEnabled=false`, `createPr=false`, and `maxIssuesPerRun=1`.
 

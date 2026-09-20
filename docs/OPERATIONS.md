@@ -1,7 +1,7 @@
 # RAMS production operations
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 13 September 2026
+**Last reviewed:** 20 September 2026
 
 RAMS runs as a single-worker FastAPI service on the paid Koyeb production instance. Use public `/livez` for process liveness and bearer-protected `/readyz`, `/readiness`, `/ops/warmup` and `/ops/excellence` for operational evidence.
 
@@ -15,6 +15,14 @@ RAMS runs as a single-worker FastAPI service on the paid Koyeb production instan
 - Repository checkouts materialised on demand beneath `/tmp/rams-repos`.
 - Reports and live evidence are read/written in the governed `audits` bucket through authenticated R2/S3 access; RAMS does not require `R2_PUBLIC_BASE_URL_AUDITS`.
 - RAMS capability metadata is bundled under `config/skills`; no shared skills bucket or external descriptor service is required.
+
+## R2 readiness, reads and recovery
+
+R2 uses the S3-compatible endpoint and governed `audits` bucket configured by `R2_ENDPOINT`, `R2_REGION` and `R2_BUCKET_AUDITS`; access-key and secret-key values must come from Koyeb Secrets. Never paste live credential values into operator commands, tickets or logs.
+
+`R2Client` construction does not prove storage availability. Authenticated `/readiness`, `/readyz` and `/ops/excellence` use a live `HeadBucket` probe. Endpoint, network, credentials, permission and missing-bucket failures degrade readiness while `/health` and `/livez` remain available for process diagnosis. The client uses short timeouts and botocore standard retries with one retry after the initial attempt.
+
+Storage SDK/transport failures are converted to `R2Error`. Diagnostics retain the operation, bucket/key context and safe error code/status but do not echo raw provider messages. Report/evidence paths use bounded reads where configured and reject objects over their byte ceilings. Operators should treat an R2 failure as a storage/configuration incident, repair the endpoint/bucket/credential binding, re-check authenticated readiness, then run a dry-run before resuming live-write work.
 
 ## Production gate meaning
 
