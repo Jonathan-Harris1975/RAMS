@@ -8,6 +8,7 @@ RMS_RELEASE_GATE_API_KEY="${RMS_API_KEY:-example-local-rams-key}"
 python -V
 python -m compileall -q repo_mgmt tests
 python scripts/verify_dependency_lock.py --compile
+python scripts/verify_hash_enforcement.py
 python scripts/secret_scan.py
 python -m pytest tests/ -q --tb=short
 python -m pytest --cov=repo_mgmt --cov-report=term-missing -q
@@ -15,6 +16,7 @@ python -m ruff check .
 python -m mypy repo_mgmt/ --no-incremental --show-error-codes
 python -m bandit -q -r repo_mgmt -ll
 python -m pip_audit
+python scripts/disposable_live_branch_check.py
 
 clean_room_pattern=$(printf '%s|' \
   "aid""er" \
@@ -35,11 +37,13 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 docker build --target runtime -t "$IMAGE_NAME" .
+test "$(docker run --rm "$IMAGE_NAME" id -u)" != "0"
 docker run --rm "$IMAGE_NAME" python --version
 docker run --rm "$IMAGE_NAME" git --version
 docker run --rm "$IMAGE_NAME" node --version
 docker run --rm "$IMAGE_NAME" npm --version
 docker run --rm "$IMAGE_NAME" node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
+docker run --rm "$IMAGE_NAME" sh -ec 'test ! -w /app; touch /tmp/rams-write-check; python -m pip check; python -c "import repo_mgmt.api, repo_mgmt.pipeline"'
 
 docker rm -f rams-release-gate >/dev/null 2>&1 || true
 docker run -d --name rams-release-gate -p "$PORT:8000" --env-file .env.example-dry-run -e RMS_API_KEY="$RMS_RELEASE_GATE_API_KEY" "$IMAGE_NAME" >/dev/null
@@ -53,9 +57,28 @@ for _ in {1..30}; do
   sleep 1
 done
 
+container_healthy=false
+for _ in {1..75}; do
+  if test "$(docker inspect --format '{{.State.Health.Status}}' rams-release-gate)" = "healthy"; then
+    container_healthy=true
+    break
+  fi
+  sleep 1
+done
+test "$container_healthy" = "true"
+
 curl -fsS "http://127.0.0.1:${PORT}/health"
 printf '\n'
-curl -fsS -H "Authorization: Bearer ${RMS_RELEASE_GATE_API_KEY}" "http://127.0.0.1:${PORT}/readiness"
+readiness_status="$(curl -sS -o /tmp/rams-readiness.json -w '%{http_code}' -H "Authorization: Bearer ${RMS_RELEASE_GATE_API_KEY}" "http://127.0.0.1:${PORT}/readiness")"
+test "$readiness_status" = "200" || test "$readiness_status" = "503"
+cat /tmp/rams-readiness.json
 printf '\n'
 curl -fsS -H "Authorization: Bearer ${RMS_RELEASE_GATE_API_KEY}" "http://127.0.0.1:${PORT}/ops/warmup"
 printf '\n'
+
+docker stop --time 30 rams-release-gate >/dev/null
+docker logs rams-release-gate 2>&1 | grep -F "Application shutdown complete."
+container_exit_code="$(docker inspect --format '{{.State.ExitCode}}' rams-release-gate)"
+test "$container_exit_code" = "0" || test "$container_exit_code" = "143"
+docker rm rams-release-gate >/dev/null
+trap - EXIT
