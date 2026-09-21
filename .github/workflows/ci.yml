@@ -138,7 +138,7 @@ jobs:
           docker run --rm rams:ci node --version
           docker run --rm rams:ci npm --version
           docker run --rm rams:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
-          docker run --rm rams:ci sh -ec 'test ! -w /app; touch /tmp/rams-write-check; python -m pip check; python -c "import repo_mgmt.api, repo_mgmt.pipeline"'
+          docker run --rm rams:ci sh -ec 'test ! -w /app; touch /tmp/rams-write-check; ! python -m pip --version >/dev/null 2>&1; python -c "import repo_mgmt.api, repo_mgmt.pipeline"'
       - name: Boot API and probe health/readiness shape
         run: |
           ci_api_key="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
