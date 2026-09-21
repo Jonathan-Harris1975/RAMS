@@ -18,7 +18,7 @@ from repo_mgmt import (
     update_executor,
     validation_runner,
 )
-from repo_mgmt.config import PipelineId, Settings, configured_worker_count
+from repo_mgmt.config import PipelineId, Settings, process_local_idempotency_safe
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt.lane1_skills import build_lane1_skills_baseline
 from repo_mgmt.model_router import ModelRouter
@@ -261,9 +261,10 @@ def _publish_report(report: RunReport, cfg: Settings, r2: Any) -> None:
 
 def _preflight_live_repo(target_repo: Path, cfg: Settings) -> None:
     """Fail closed if deployment or repo state is unsafe for live mutation."""
-    if cfg.rms_single_worker_mode and configured_worker_count() != 1:
+    if not process_local_idempotency_safe(cfg):
         raise RuntimeError(
-            "live mode requires a single worker because RAMS uses in-process locks"
+            "live mode requires one worker and one deployment instance because "
+            "RAMS uses process-local locks and idempotency"
         )
     if not cfg.live_write_permitted:
         raise RuntimeError(

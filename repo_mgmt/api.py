@@ -33,6 +33,7 @@ from repo_mgmt.config import (
     Settings,
     configured_worker_count,
     load_settings,
+    process_local_idempotency_safe,
 )
 from repo_mgmt.git_manager import GitManager
 from repo_mgmt import lifecycle
@@ -486,6 +487,17 @@ def _dependency_details() -> dict[str, object]:
             and _usable_secret(cfg.rms_aims_repo_url)
             and cfg.rms_github_api_base.startswith("https://")
         )
+    single_worker_mode = bool(
+        cfg is not None
+        and cfg.rms_single_worker_mode
+        and configured_worker_count() == 1
+    )
+    single_instance_mode = bool(
+        cfg is not None and cfg.rms_deployment_instance_count == 1
+    )
+    idempotency_safe = bool(
+        cfg is not None and process_local_idempotency_safe(cfg)
+    )
     deps: dict[str, object] = {
         "config_loaded": cfg is not None,
         "r2_configured": _r2_configured(cfg),
@@ -501,7 +513,15 @@ def _dependency_details() -> dict[str, object]:
         "validation_runtime_ready": bool(validation_runtime["ready"]),
         "model_router_ready": _model_router_ready(cfg),
         "github_write_ready": github_write_ready,
-        "single_worker_mode": configured_worker_count() == 1,
+        "single_worker_mode": single_worker_mode,
+        "single_instance_mode": single_instance_mode,
+        "process_local_idempotency_safe": idempotency_safe,
+        "idempotency": {
+            "scope": "process-local",
+            "requiresSingleInstance": True,
+            "configuredInstances": cfg.rms_deployment_instance_count if cfg else None,
+            "cacheSize": cfg.rms_idempotency_cache_size if cfg else None,
+        },
         "runtime": validation_runtime,
     }
     errors: dict[str, str] = {}
@@ -700,11 +720,15 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
             "target repo is dirty",
             {"pipeline": pipeline_id, "dirty": True},
         )
-    if cfg.rms_single_worker_mode and configured_worker_count() != 1:
+    if not process_local_idempotency_safe(cfg):
         raise AdmissionError(
             409,
-            "single-worker deployment required",
-            {"configuredWorkerCount": configured_worker_count()},
+            "single-instance deployment required for process-local idempotency",
+            {
+                "idempotencyScope": "process-local",
+                "configuredWorkerCount": configured_worker_count(),
+                "configuredInstances": cfg.rms_deployment_instance_count,
+            },
         )
     return False
 
@@ -873,6 +897,12 @@ async def operational_excellence(
                 "webConcurrency": configured_worker_count(),
                 "uvicornWorkers": os.environ.get("UVICORN_WORKERS", "1"),
                 "singleWorkerMode": cfg.rms_single_worker_mode if cfg else None,
+                "configuredInstances": cfg.rms_deployment_instance_count if cfg else None,
+                "idempotencyScope": "process-local",
+                "horizontalScalingSupported": False,
+                "processLocalIdempotencySafe": (
+                    process_local_idempotency_safe(cfg) if cfg else False
+                ),
                 "maxConcurrentPipelines": cfg.rms_max_concurrent_pipelines if cfg else None,
                 "maxIssuesPerRun": cfg.rms_max_issues_per_run if cfg else None,
                 "websiteMaxIssuesPerRun": cfg.rms_website_max_issues_per_run if cfg else None,
@@ -1491,6 +1521,16 @@ async def trigger_run(
     if cfg is None:
         return JSONResponse(
             status_code=503, content={"error": "configuration unavailable"}
+        )
+    if not process_local_idempotency_safe(cfg):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "single-instance deployment required for process-local idempotency",
+                "idempotencyScope": "process-local",
+                "configuredWorkerCount": configured_worker_count(),
+                "configuredInstances": cfg.rms_deployment_instance_count,
+            },
         )
 
     audit_json_key: str | None = None

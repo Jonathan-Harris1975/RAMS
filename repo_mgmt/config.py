@@ -293,6 +293,7 @@ class Settings(BaseSettings):
 
     # ── Deployment guard ───────────────────────────────────────────────────
     rms_single_worker_mode: bool = True
+    rms_deployment_instance_count: int = Field(default=1, ge=1, le=64)
 
     # ── API server ─────────────────────────────────────────────────────────
     rms_host: str = "0.0.0.0"  # nosec B104 - container service must bind the pod interface
@@ -594,6 +595,15 @@ def configured_worker_count() -> int:
             return 2
         return max(parsed, 1)
     return 1
+
+
+def process_local_idempotency_safe(settings: Settings) -> bool:
+    """Return whether process-local admission/idempotency is deployment-safe."""
+    return (
+        settings.rms_single_worker_mode
+        and configured_worker_count() == 1
+        and settings.rms_deployment_instance_count == 1
+    )
 
 
 def load_settings() -> Settings:
