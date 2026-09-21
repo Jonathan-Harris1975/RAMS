@@ -5,6 +5,12 @@
 
 FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS node-runtime
 
+# Node 22.23.2 ships an older npm dependency tree containing multiple
+# fixable HIGH/CRITICAL advisories. Keep Node on the required 22.x line while
+# replacing npm with the patched 11.x release before copying it into runtime.
+RUN npm install --global --no-audit --no-fund npm@11.19.1 \
+    && npm --version | grep -Fx '11.19.1'
+
 FROM python:3.14.7-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f AS builder
 
 WORKDIR /build
@@ -32,11 +38,16 @@ WORKDIR /app
 
 # Git is required for GitPython/live branch operations. ca-certificates keeps
 # HTTPS checks and package validation commands from tripping over missing roots.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# msgpack/setuptools are bootstrap packages inherited from the Python base image,
+# not RAMS runtime dependencies; remove the stale copies after OS patching.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
         libatomic1 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y msgpack setuptools
 
 # Bring in Node.js 22.x and npm without relying on distro packages that may lag
 # below the required major version for the SEO/AEO/GEO validation command.
