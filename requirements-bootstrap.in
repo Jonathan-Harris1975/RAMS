@@ -1,0 +1,2 @@
+# Packaging bootstrap used before every other hashed installation.
+pip==26.2.1

@@ -1,0 +1,2 @@
+# PEP 517 build dependency used for the offline local-project installation.
+setuptools==84.0.0

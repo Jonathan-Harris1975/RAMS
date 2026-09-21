@@ -1,0 +1,89 @@
+{
+  "$schema": "hive.repository-intelligence/v1",
+  "canonicalId": "RAMS",
+  "displayName": "Repository Automation Management Service",
+  "category": "background_api",
+  "language": "Python",
+  "framework": "FastAPI",
+  "architecture": {
+    "serviceType": "single-process repository automation API",
+    "entryPoint": "rms-api",
+    "applicationPackage": "repo_mgmt",
+    "externalServices": [
+      "GitHub",
+      "Cloudflare R2",
+      "OpenRouter"
+    ]
+  },
+  "dependencies": {
+    "generator": "pip-tools==7.6.1",
+    "integrity": "sha256",
+    "runtime": {
+      "source": "requirements.in",
+      "lock": "requirements.txt"
+    },
+    "bootstrap": {
+      "source": "requirements-bootstrap.in",
+      "lock": "requirements-bootstrap.txt"
+    },
+    "build": {
+      "source": "requirements-build.in",
+      "lock": "requirements-build.txt"
+    },
+    "development": {
+      "source": "requirements-dev.in",
+      "lock": "requirements-dev.txt"
+    },
+    "supportedPython": [
+      "3.11",
+      "3.12",
+      "3.14"
+    ]
+  },
+  "deployment": {
+    "platform": "Koyeb",
+    "containerFile": "Dockerfile",
+    "digestPinnedBaseImages": true,
+    "runtimeUser": "rms",
+    "configuredWorkers": 1,
+    "configuredInstances": 1,
+    "idempotencyScope": "process-local",
+    "horizontalScalingSupported": false
+  },
+  "operations": {
+    "publicLivenessPaths": [
+      "/health",
+      "/livez"
+    ],
+    "authenticatedReadinessPaths": [
+      "/readiness",
+      "/readyz"
+    ],
+    "evidencePath": "/ops/excellence",
+    "releaseGate": "scripts/release_gate.sh",
+    "productionInstaller": "scripts/install_production.sh",
+    "dependencyVerifier": "scripts/verify_dependency_lock.py",
+    "negativeHashVerifier": "scripts/verify_hash_enforcement.py",
+    "operationsGuide": "docs/OPERATIONS.md",
+    "deploymentChecklist": "docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md"
+  },
+  "repositoryPaths": [
+    "Dockerfile",
+    "pyproject.toml",
+    "requirements.in",
+    "requirements.txt",
+    "requirements-bootstrap.in",
+    "requirements-bootstrap.txt",
+    "requirements-build.in",
+    "requirements-build.txt",
+    "requirements-dev.in",
+    "requirements-dev.txt",
+    "repo_mgmt",
+    "scripts/release_gate.sh",
+    "scripts/install_production.sh",
+    "scripts/verify_dependency_lock.py",
+    "scripts/verify_hash_enforcement.py",
+    "docs/OPERATIONS.md",
+    "docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md"
+  ]
+}

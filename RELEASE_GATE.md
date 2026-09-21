@@ -1,5 +1,5 @@
 > **Document status:** Production release gate  
-> **Last reviewed:** 20 September 2026  
+> **Last reviewed:** 21 September 2026  
 > **Operational authority:** README, SECURITY policy and operations guide.
 
 # RAMS production release gate
@@ -8,11 +8,23 @@ This gate protects the paid Koyeb production contract: one process, one Uvicorn 
 
 ## Required local checks
 
-Run these before approving a deployment candidate:
+Start from a new environment and use only the committed hashed manifests:
+
+```bash
+python -m venv .venv-release
+source .venv-release/bin/activate
+python -m pip install --require-hashes -r requirements-bootstrap.txt
+python -m pip install --require-hashes -r requirements-dev.txt
+python -m pip install --no-index --no-deps --no-build-isolation -e .
+python -m pip check
+```
+
+Then run these before approving a deployment candidate:
 
 ```bash
 python -m compileall -q repo_mgmt tests scripts/emicro_benchmark.py
 python scripts/verify_dependency_lock.py --compile
+python scripts/verify_hash_enforcement.py
 python scripts/secret_scan.py
 python -m pytest tests/ -q --tb=short
 python -m pytest --cov=repo_mgmt --cov-report=term-missing -q
@@ -20,6 +32,7 @@ python -m ruff check .
 python -m mypy repo_mgmt/ --no-incremental --show-error-codes
 python -m bandit -q -r repo_mgmt -ll
 python -m pip_audit
+python scripts/disposable_live_branch_check.py
 python scripts/emicro_benchmark.py --label candidate
 ```
 
@@ -31,6 +44,7 @@ A Linux runner with Docker must run:
 
 ```bash
 docker build --target runtime -t rams-production-check .
+docker run --rm rams-production-check id -u
 docker run --rm rams-production-check python --version
 docker run --rm rams-production-check git --version
 docker run --rm rams-production-check node --version
@@ -46,6 +60,9 @@ Then boot the image with `.env.example-dry-run` and verify:
 - `/ops/excellence` requires bearer auth and exposes live-write controls, model privacy policy, release identity and R2 verification state.
 - A second pipeline cannot start while any pipeline is active.
 - Replaying an idempotency key returns the original admission instead of a duplicate run.
+- The runtime user is non-root, `/app` is not writable, `/tmp` is writable, `pip check` passes and application imports succeed.
+- Docker reports the container `healthy`, and `docker stop --time 30` records `Application shutdown complete.` with exit status `0` or Uvicorn's expected post-shutdown `SIGTERM` status (`143`).
+- A pinned image scanner rejects fixable Critical or High OS/library vulnerabilities.
 
 `scripts/release_gate.sh` performs the local checks plus Docker boot probes when Docker is installed.
 
@@ -60,6 +77,7 @@ RMS_MAX_CONCURRENT_PIPELINES=1
 RMS_MAX_ISSUES_PER_RUN=1
 RMS_WEBSITE_MAX_ISSUES_PER_RUN=5
 RMS_SINGLE_WORKER_MODE=true
+RMS_DEPLOYMENT_INSTANCE_COUNT=1
 RMS_OPENROUTER_LOG_PROMPTS=false
 RMS_OPENROUTER_DATA_COLLECTION=deny
 RMS_MIN_FREE_DISK_MB=256

@@ -13,11 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml requirements.in requirements.txt .
+COPY pyproject.toml requirements.in requirements.txt requirements-build.txt .
 COPY repo_mgmt/ ./repo_mgmt/
 
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
-    && pip install --no-cache-dir --prefix=/install --no-deps .
+RUN pip install --disable-pip-version-check --no-cache-dir \
+        --require-hashes -r requirements-build.txt \
+    && pip install --disable-pip-version-check --no-cache-dir \
+        --require-hashes --prefix=/install -r requirements.txt \
+    && pip install --disable-pip-version-check --no-cache-dir \
+        --no-index --no-deps --no-build-isolation --prefix=/install .
 
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
@@ -46,7 +50,6 @@ COPY --from=builder /build/repo_mgmt ./repo_mgmt/
 
 # Non-root user for normal API operation.
 RUN useradd --create-home --shell /bin/bash rms \
-    && chown -R rms:rms /app \
     && python --version \
     && git --version \
     && node --version \
@@ -165,6 +168,7 @@ ENV RMS_DRY_RUN=false \
     RMS_VALIDATE_AFTER_EACH_TASK=true \
     RMS_REVERT_ON_VALIDATION_FAILURE=true \
     RMS_SINGLE_WORKER_MODE=true \
+    RMS_DEPLOYMENT_INSTANCE_COUNT=1 \
     RMS_ALLOW_UNAUTHENTICATED_DEV=false \
     RMS_HOST=0.0.0.0 \
     RMS_PORT=8000

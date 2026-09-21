@@ -1,4 +1,4 @@
-# Direct production dependencies. Update deliberately and regenerate requirements.txt.
+# Direct production dependencies. Update deliberately and regenerate the SHA-256 lock.
 fastapi==0.141.1
 # Direct pin keeps Starlette above all audited 2026 request/form parsing advisory floors.
 starlette==1.6.0
