@@ -38,16 +38,15 @@ WORKDIR /app
 
 # Git is required for GitPython/live branch operations. ca-certificates keeps
 # HTTPS checks and package validation commands from tripping over missing roots.
-# msgpack/setuptools are bootstrap packages inherited from the Python base image,
-# not RAMS runtime dependencies; remove the stale copies after OS patching.
+# Keep the runtime OS patched. Python packaging/bootstrap tooling is removed
+# later, after the application has been copied and dependency integrity checked.
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
         libatomic1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && python -m pip uninstall -y msgpack setuptools
+    && rm -rf /var/lib/apt/lists/*
 
 # Bring in Node.js 22.x and npm without relying on distro packages that may lag
 # below the required major version for the SEO/AEO/GEO validation command.
@@ -58,6 +57,19 @@ RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 COPY --from=builder /install /usr/local
 COPY --from=builder /build/repo_mgmt ./repo_mgmt/
+
+# Validate the assembled environment while pip is still available, then remove
+# runtime packaging/bootstrap tooling. RAMS does not install packages at runtime.
+# This also removes vendored/bootstrap package metadata that image scanners can
+# otherwise report as vulnerable even though those packages are not importable
+# application dependencies.
+RUN python -m pip check \
+    && rm -rf \
+        /usr/local/lib/python3.14/site-packages/pip \
+        /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+        /usr/local/lib/python3.14/site-packages/setuptools \
+        /usr/local/lib/python3.14/site-packages/setuptools-*.dist-info \
+        /usr/local/lib/python3.14/ensurepip
 
 # Non-root user for normal API operation.
 RUN useradd --create-home --shell /bin/bash rms \
