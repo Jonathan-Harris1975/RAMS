@@ -99,6 +99,7 @@ EXPECTED_IMAGE_DEFAULTS = {
     "RMS_SECONDARY_MAX_TOKENS": "3072",
     "RMS_SHUTDOWN_GRACE_SECONDS": "25",
     "RMS_SINGLE_WORKER_MODE": "true",
+    "RMS_DEPLOYMENT_INSTANCE_COUNT": "1",
     "RMS_TEMP_CLEANUP_ENABLED": "true",
     "RMS_TEMP_MAX_AGE_HOURS": "24",
     "RMS_TOP_P": "0.9",
@@ -199,4 +200,3 @@ def test_security_policy_matches_current_publication_defaults() -> None:
     )
     assert "RMS_PUSH_ENABLED=false\nRMS_CREATE_PR=false" in security_policy
     assert "Current production enables governed publication" not in security_policy
-

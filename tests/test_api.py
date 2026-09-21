@@ -201,6 +201,14 @@ def test_readiness_reports_dependency_readiness(
     assert deps["pipeline_repo_paths"]["on-brand"].endswith("aims")
     assert deps["validation_runtime_ready"] is True
     assert deps["single_worker_mode"] is True
+    assert deps["single_instance_mode"] is True
+    assert deps["process_local_idempotency_safe"] is True
+    assert deps["idempotency"] == {
+        "scope": "process-local",
+        "requiresSingleInstance": True,
+        "configuredInstances": 1,
+        "cacheSize": settings.rms_idempotency_cache_size,
+    }
     assert deps["runtime"]["node"].startswith("v")
 
 
@@ -536,6 +544,29 @@ def test_single_worker_limitation_visible_in_readiness(
         response = client.get("/readiness")
     assert response.json()["status"] == "degraded"
     assert response.json()["dependencies"]["single_worker_mode"] is False
+    assert response.json()["dependencies"]["process_local_idempotency_safe"] is False
+
+
+def test_multi_instance_deployment_degrades_and_rejects_all_runs(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs, RMS_DEPLOYMENT_INSTANCE_COUNT="2")
+    fake_pipeline = FakePipeline()
+    install_valid_api(monkeypatch, settings, fake_pipeline)
+    install_ready_validation_runtime(monkeypatch)
+
+    with TestClient(api_mod.app) as client:
+        readiness = client.get("/readiness")
+        response = client.post("/rebuild/on-brand/run", json={"dry_run": True})
+
+    assert readiness.status_code == 503
+    deps = readiness.json()["dependencies"]
+    assert deps["single_instance_mode"] is False
+    assert deps["process_local_idempotency_safe"] is False
+    assert response.status_code == 409
+    assert response.json()["idempotencyScope"] == "process-local"
+    assert response.json()["configuredInstances"] == 2
+    assert fake_pipeline.calls == []
 
 
 def test_ops_excellence_exposes_production_control_evidence(
@@ -561,6 +592,10 @@ def test_ops_excellence_exposes_production_control_evidence(
     assert payload["deploymentContract"]["healthCheckPath"] == "/health"
     assert payload["deploymentContract"]["maxConcurrentPipelines"] == 1
     assert payload["deploymentContract"]["warmupExternalWork"] is False
+    assert payload["deploymentContract"]["configuredInstances"] == 1
+    assert payload["deploymentContract"]["idempotencyScope"] == "process-local"
+    assert payload["deploymentContract"]["horizontalScalingSupported"] is False
+    assert payload["deploymentContract"]["processLocalIdempotencySafe"] is True
     controls = payload["liveWriteControls"]
     assert controls["dryRunDefault"] is False
     assert controls["liveWriteEnabled"] is True

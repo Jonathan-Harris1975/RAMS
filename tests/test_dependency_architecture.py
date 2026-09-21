@@ -11,17 +11,27 @@ VERIFY_SCRIPT = ROOT / "scripts" / "verify_dependency_lock.py"
 
 
 def _load_verify_module():
-    spec = importlib.util.spec_from_file_location("verify_dependency_lock", VERIFY_SCRIPT)
+    module_name = "verify_dependency_lock_under_test"
+    spec = importlib.util.spec_from_file_location(module_name, VERIFY_SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
 def test_dependabot_visible_dependency_architecture(monkeypatch) -> None:
-    assert (ROOT / "pyproject.toml").is_file()
-    assert (ROOT / "requirements.in").is_file()
-    assert (ROOT / "requirements.txt").is_file()
+    expected = {
+        "requirements.in",
+        "requirements.txt",
+        "requirements-bootstrap.in",
+        "requirements-bootstrap.txt",
+        "requirements-build.in",
+        "requirements-build.txt",
+        "requirements-dev.in",
+        "requirements-dev.txt",
+    }
+    assert all((ROOT / path).is_file() for path in expected)
     assert not (ROOT / "requirements.lock").exists()
 
     verifier = _load_verify_module()
@@ -29,29 +39,22 @@ def test_dependabot_visible_dependency_architecture(monkeypatch) -> None:
     verifier.main()
 
 
-def test_dependency_verifier_rejects_stale_compiled_requirements(tmp_path, monkeypatch) -> None:
+def test_dependency_verifier_rejects_stale_compiled_requirement(tmp_path) -> None:
     verifier = _load_verify_module()
-    monkeypatch.setattr(sys, "argv", [str(VERIFY_SCRIPT)])
-    monkeypatch.setattr(verifier, "ROOT", tmp_path)
-    (tmp_path / "pyproject.toml").write_text(
-        """[project]
-name = "test"
-version = "0.0.0"
-dynamic = ["dependencies"]
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.in"]}
-""",
+    source = tmp_path / "requirements.in"
+    lock = tmp_path / "requirements.txt"
+    source.write_text("fastapi==0.141.1\n", encoding="utf-8")
+    lock.write_text(
+        "fastapi==0.140.0 --hash=sha256:" + "a" * 64 + "\n",
         encoding="utf-8",
     )
-    (tmp_path / "requirements.in").write_text("fastapi==0.141.1\n", encoding="utf-8")
-    (tmp_path / "requirements.txt").write_text("fastapi==0.140.0\n", encoding="utf-8")
-    (tmp_path / "Dockerfile").write_text(
-        "COPY pyproject.toml requirements.in requirements.txt .\n"
-        "RUN pip install -r requirements.txt && pip install --no-deps .\n",
-        encoding="utf-8",
-    )
-    workflow = tmp_path / ".github" / "workflows"
-    workflow.mkdir(parents=True)
-    (workflow / "ci.yml").write_text("pip install -c requirements.txt -e .\n", encoding="utf-8")
-    with pytest.raises(AssertionError, match="requirements.txt does not match direct production pins"):
-        verifier.main()
+    with pytest.raises(AssertionError, match="does not match"):
+        verifier.verify_lock(source, lock)
+
+
+def test_dependency_verifier_rejects_missing_hash(tmp_path) -> None:
+    verifier = _load_verify_module()
+    lock = tmp_path / "requirements.txt"
+    lock.write_text("fastapi==0.141.1\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="has no SHA-256 hashes"):
+        verifier.read_hashed_lock(lock)
