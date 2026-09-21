@@ -1,20 +1,28 @@
 # RAMS production operations
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 20 September 2026
+**Last reviewed:** 21 September 2026
 
-RAMS runs as a single-worker FastAPI service on the paid Koyeb production instance. Use public `/livez` for process liveness and bearer-protected `/readyz`, `/readiness`, `/ops/warmup` and `/ops/excellence` for operational evidence.
+RAMS runs as a single-worker, single-instance FastAPI service on the paid Koyeb production instance. Use public `/livez` for process liveness and bearer-protected `/readyz`, `/readiness`, `/ops/warmup` and `/ops/excellence` for operational evidence.
 
 ## Normal operating contract
 
 - Koyeb health check path: `/health`.
-- One process and one Uvicorn worker.
+- Exactly one deployment instance, one process and one Uvicorn worker.
 - One heavyweight pipeline at a time across primary `website`, independent `on-brand`, and the retained legacy compatibility lanes `seo-aeo-geo` / `mobile-ux`.
 - Website repository target for `website` and the legacy `seo-aeo-geo` / `mobile-ux` lanes.
 - AIMS repository target for `on-brand`.
 - Repository checkouts materialised on demand beneath `/tmp/rams-repos`.
 - Reports and live evidence are read/written in the governed `audits` bucket through authenticated R2/S3 access; RAMS does not require `R2_PUBLIC_BASE_URL_AUDITS`.
 - RAMS capability metadata is bundled under `config/skills`; no shared skills bucket or external descriptor service is required.
+
+## Dependency integrity
+
+Runtime, bootstrap, build and development dependencies have separate source files and pip-tools-generated SHA-256 locks. Docker, CI and the canonical `scripts/install_production.sh` path use `pip install --require-hashes`; the local RAMS package is installed offline without dependency resolution or build isolation. Run `python scripts/verify_dependency_lock.py --compile` and `python scripts/verify_hash_enforcement.py` before release.
+
+## Scale and idempotency contract
+
+The admission lock and idempotency replay cache are process-local. `RMS_SINGLE_WORKER_MODE=true`, worker count `1` and `RMS_DEPLOYMENT_INSTANCE_COUNT=1` are therefore correctness requirements, not tuning hints. `/readiness` exposes `single_worker_mode`, `single_instance_mode`, `process_local_idempotency_safe` and idempotency metadata. `/ops/excellence` declares `horizontalScalingSupported=false`. RAMS rejects dry-run and live-run admission with HTTP 409 when the contract is unsafe. Add a shared durable admission/idempotency store before any horizontal scale-out.
 
 ## R2 readiness, reads and recovery
 
@@ -51,7 +59,8 @@ Each run remains bounded to one issue. RAMS can make and validate governed chang
 4. Repair missing R2, GitHub, OpenRouter or repository-bootstrap configuration without printing secrets.
 5. Run authenticated `/ops/warmup` to prepare local clients only.
 6. Run one safe dry-run pipeline before resuming any live-write work.
-7. Resume live writes only after clean release-gate evidence and clean target-repository validation evidence; the current production profile keeps GitHub push and PR creation disabled.
+7. Exercise `python scripts/disposable_live_branch_check.py` (or the equivalent isolated staging branch recovery) and retain the result.
+8. Resume live writes only after clean release-gate evidence and clean target-repository validation evidence; the current production profile keeps GitHub push and PR creation disabled.
 
 ## Operator commands
 
