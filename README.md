@@ -149,6 +149,8 @@ Canonical runtime/deployment guidance is in `docs/OPERATIONS.md`, `docs/PRODUCTI
 
 Logs and operational events must remain redacted. Secret scanning, dependency-lock verification, dependency vulnerability auditing, Bandit, linting, typing, tests/coverage and Docker/API smoke checks are release gates.
 
+The automatic post-CI production watcher also fails closed: GitHub Actions must provide `KOYEB_TOKEN` and `KOYEB_SERVICE`, the bounded Koyeb watch must observe the expected source SHA, and only then may the workflow retain a production deployment attestation and dispatch the required ecosystem smoke. Missing watcher configuration is a release-verification failure, not an optional skip. The credential-free contract is covered by `tests/test_deployment_watch_workflow.py` and runs with the normal pytest suite.
+
 ## Production evidence and roadmap status
 
 The repository contract for the final professional content-system audit and RAMS content hand-off is complete. Natural-run content evidence remains an operational monitoring activity in the separate content-production roadmap rows; it is not a missing RAMS implementation dependency.
