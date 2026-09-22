@@ -1,7 +1,7 @@
 # RAMS Koyeb production deployment checklist
 
 **Status:** Operator checklist  
-**Last reviewed:** 21 September 2026
+**Last reviewed:** 22 September 2026
 
 ## Koyeb service
 
@@ -46,6 +46,14 @@ UVICORN_WORKERS=1
 RAMS may mutate and validate its ephemeral checkout, but it does not push branches or create GitHub pull requests in this production profile. The GitHub token is retained for authenticated cloning/refresh of private target repositories.
 
 ## Verification commands
+
+Before runtime probes, confirm the automatic GitHub production watcher has `KOYEB_TOKEN` and `KOYEB_SERVICE`. Missing configuration fails the watcher. A release is production-attested only after the bounded Koyeb watch observes the expected source SHA, the exact-SHA JSON evidence is retained, and the governed ecosystem-smoke dispatch succeeds.
+
+The deterministic source contract can be checked without provider credentials:
+
+```bash
+python -m pytest tests/test_deployment_watch_workflow.py -q
+```
 
 ```bash
 curl -fsS "$BASE_URL/health"

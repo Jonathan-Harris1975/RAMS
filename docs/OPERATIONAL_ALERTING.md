@@ -1,7 +1,7 @@
 # RAMS professional operations and alerting
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 21 June 2026
+**Last reviewed:** 22 September 2026
 
 RAMS exposes authenticated operational evidence through `GET /ops/excellence`. The response includes release identity, periodic audits-bucket verification, retention metadata, repository-bootstrap state, Koyeb deployment contract, live-write controls and model-provider privacy policy.
 
@@ -41,3 +41,7 @@ OPS_ALERT_WEBHOOK_TOKEN
 ```
 
 CI failures and failed paid-production deployments are sent to HIVE-UI Ops independently of provider email. Event delivery is bounded, redacted and non-blocking.
+
+`KOYEB_TOKEN` and `KOYEB_SERVICE` are mandatory for the automatic `main` production watcher. If either is absent, the workflow lists only the missing variable name and exits non-zero; it cannot skip to a green result. The bounded watch must observe the expected workflow source SHA before `deployment-attestation.json` is written and retained for 90 days. The required ecosystem-smoke dispatch follows that evidence and is not a substitute for it.
+
+Run `python -m pytest tests/test_deployment_watch_workflow.py -q` for deterministic workflow checks without live Koyeb credentials. For a watcher failure, confirm the two required secret names, the service identifier, token scope and expected SHA, then rerun the same post-CI workflow. Alert-delivery failure remains non-blocking inside the watcher and never changes the underlying verification result.
