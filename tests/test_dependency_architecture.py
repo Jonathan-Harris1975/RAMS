@@ -23,7 +23,7 @@ def _load_verify_module():
 def test_dependabot_visible_dependency_architecture(monkeypatch) -> None:
     expected = {
         "requirements.in",
-        "requirements.txt",
+        "requirements-runtime.lock",
         "requirements-bootstrap.in",
         "requirements-bootstrap.txt",
         "requirements-build.in",
@@ -32,7 +32,7 @@ def test_dependabot_visible_dependency_architecture(monkeypatch) -> None:
         "requirements-dev.txt",
     }
     assert all((ROOT / path).is_file() for path in expected)
-    assert not (ROOT / "requirements.lock").exists()
+    assert not (ROOT / "requirements.txt").exists()
 
     verifier = _load_verify_module()
     monkeypatch.setattr(sys, "argv", [str(VERIFY_SCRIPT)])
@@ -42,7 +42,7 @@ def test_dependabot_visible_dependency_architecture(monkeypatch) -> None:
 def test_dependency_verifier_rejects_stale_compiled_requirement(tmp_path) -> None:
     verifier = _load_verify_module()
     source = tmp_path / "requirements.in"
-    lock = tmp_path / "requirements.txt"
+    lock = tmp_path / "requirements-runtime.lock"
     source.write_text("fastapi==0.141.1\n", encoding="utf-8")
     lock.write_text(
         "fastapi==0.140.0 --hash=sha256:" + "a" * 64 + "\n",
@@ -54,7 +54,7 @@ def test_dependency_verifier_rejects_stale_compiled_requirement(tmp_path) -> Non
 
 def test_dependency_verifier_rejects_missing_hash(tmp_path) -> None:
     verifier = _load_verify_module()
-    lock = tmp_path / "requirements.txt"
+    lock = tmp_path / "requirements-runtime.lock"
     lock.write_text("fastapi==0.141.1\n", encoding="utf-8")
     with pytest.raises(AssertionError, match="has no SHA-256 hashes"):
         verifier.read_hashed_lock(lock)
