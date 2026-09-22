@@ -22,14 +22,14 @@ def _different_hash(value: str) -> str:
 
 
 def main() -> None:
-    lock = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    lock = (ROOT / "requirements-runtime.lock").read_text(encoding="utf-8")
     match = SIX_BLOCK_RE.search(lock)
     if match is None:
-        raise SystemExit("requirements.txt does not contain the six dependency")
+        raise SystemExit("requirements-runtime.lock does not contain the six dependency")
     version = match.group("version")
     expected_hashes = set(HASH_RE.findall(match.group(0)))
     if not expected_hashes:
-        raise SystemExit("six has no SHA-256 hashes in requirements.txt")
+        raise SystemExit("six has no SHA-256 hashes in requirements-runtime.lock")
 
     with tempfile.TemporaryDirectory(prefix="rams-negative-hash-") as tmp:
         root = Path(tmp)

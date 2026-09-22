@@ -33,7 +33,7 @@ class LockSpec:
 
 
 LOCK_SPECS = (
-    LockSpec("runtime", "requirements.in", "requirements.txt"),
+    LockSpec("runtime", "requirements.in", "requirements-runtime.lock"),
     LockSpec("bootstrap", "requirements-bootstrap.in", "requirements-bootstrap.txt"),
     LockSpec("build", "requirements-build.in", "requirements-build.txt"),
     LockSpec("development", "requirements-dev.in", "requirements-dev.txt"),
@@ -149,8 +149,11 @@ def _require_all(text: str, expected: tuple[str, ...], label: str) -> None:
 
 
 def verify_sources() -> None:
-    if (ROOT / "requirements.lock").exists():
-        raise AssertionError("requirements.lock must not be reintroduced; use requirements.txt")
+    if (ROOT / "requirements.txt").exists():
+        raise AssertionError(
+            "requirements.txt must not be reintroduced; use requirements-runtime.lock "
+            "to keep the pyproject packaging manifest distinct from the generated runtime lock"
+        )
     for spec in LOCK_SPECS:
         verify_lock(ROOT / spec.source, ROOT / spec.lock)
 
@@ -186,7 +189,7 @@ def verify_sources() -> None:
         dockerfile,
         (
             "requirements-build.txt",
-            "requirements.txt",
+            "requirements-runtime.lock",
             "--require-hashes",
             "--no-index --no-deps --no-build-isolation",
         ),
@@ -211,7 +214,7 @@ def verify_sources() -> None:
         production_install,
         (
             "requirements-build.txt",
-            "requirements.txt",
+            "requirements-runtime.lock",
             "--require-hashes",
             "--no-index --no-deps --no-build-isolation",
             "pip check",
