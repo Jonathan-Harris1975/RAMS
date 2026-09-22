@@ -19,13 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml requirements.in requirements.txt requirements-build.txt .
+COPY pyproject.toml requirements.in requirements-runtime.lock requirements-build.txt .
 COPY repo_mgmt/ ./repo_mgmt/
 
 RUN pip install --disable-pip-version-check --no-cache-dir \
         --require-hashes -r requirements-build.txt \
     && pip install --disable-pip-version-check --no-cache-dir \
-        --require-hashes --prefix=/install -r requirements.txt \
+        --require-hashes --prefix=/install -r requirements-runtime.lock \
     && pip install --disable-pip-version-check --no-cache-dir \
         --no-index --no-deps --no-build-isolation --prefix=/install .
 

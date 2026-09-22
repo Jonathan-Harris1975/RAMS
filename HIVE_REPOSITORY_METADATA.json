@@ -20,7 +20,7 @@
     "integrity": "sha256",
     "runtime": {
       "source": "requirements.in",
-      "lock": "requirements.txt"
+      "lock": "requirements-runtime.lock"
     },
     "bootstrap": {
       "source": "requirements-bootstrap.in",
@@ -71,7 +71,7 @@
     "Dockerfile",
     "pyproject.toml",
     "requirements.in",
-    "requirements.txt",
+    "requirements-runtime.lock",
     "requirements-bootstrap.in",
     "requirements-bootstrap.txt",
     "requirements-build.in",
