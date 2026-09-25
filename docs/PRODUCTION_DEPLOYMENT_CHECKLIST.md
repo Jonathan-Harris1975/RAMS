@@ -35,8 +35,8 @@ The current production write gates are:
 ```env
 RMS_DRY_RUN=false
 RMS_LIVE_WRITE_ENABLED=true
-RMS_PUSH_ENABLED=false
-RMS_CREATE_PR=false
+RMS_PUSH_ENABLED=true
+RMS_CREATE_PR=true
 RMS_SINGLE_WORKER_MODE=true
 RMS_DEPLOYMENT_INSTANCE_COUNT=1
 WEB_CONCURRENCY=1
@@ -69,7 +69,7 @@ Expected shapes:
 - `/health` and `/livez`: `status=ok` and all five pipeline IDs (`website`, `content`, `seo-aeo-geo`, `mobile-ux`, `on-brand`) listed as `idle` or `running`.
 - `/readiness` and `/readyz`: `status=ready` when dependencies are available, otherwise `status=degraded` with dependency detail. Confirm `single_worker_mode=true`, `single_instance_mode=true`, `process_local_idempotency_safe=true` and `idempotency.scope=process-local`. R2 readiness is a live `HeadBucket` check; storage failure must not make `/health` fail.
 - `/ops/warmup`: `status=warm`, `warmupScope` lists local warm-up, `excludedWork` includes OpenRouter requests, R2, repositories, audits and validation.
-- `/ops/excellence`: `status=healthy` when the audits bucket verifies, otherwise `status=degraded`; includes `liveWriteControls`, `deploymentContract`, `modelProviderPolicy` and `auditStorage`. Confirm `pushEnabled=false`, `createPr=false`, `maxIssuesPerRun=1`, `configuredInstances=1`, `idempotencyScope=process-local` and `horizontalScalingSupported=false`.
+- `/ops/excellence`: `status=healthy` when the audits bucket verifies, otherwise `status=degraded`; includes `liveWriteControls`, `deploymentContract`, `modelProviderPolicy` and `auditStorage`. Confirm `pushEnabled=true`, `createPr=true`, `maxIssuesPerRun=1`, `configuredInstances=1`, `idempotencyScope=process-local` and `horizontalScalingSupported=false`.
 
 Safe dry-run smoke:
 

@@ -44,8 +44,8 @@ RMS_LIVE_WRITE_ENABLED=true
 The current production publication contract is:
 
 ```env
-RMS_PUSH_ENABLED=false
-RMS_CREATE_PR=false
+RMS_PUSH_ENABLED=true
+RMS_CREATE_PR=true
 RMS_MAX_ISSUES_PER_RUN=1
 ```
 
@@ -60,7 +60,7 @@ Each run remains bounded to one issue. RAMS can make and validate governed chang
 5. Run authenticated `/ops/warmup` to prepare local clients only.
 6. Run one safe dry-run pipeline before resuming any live-write work.
 7. Exercise `python scripts/disposable_live_branch_check.py` (or the equivalent isolated staging branch recovery) and retain the result.
-8. Resume live writes only after clean release-gate evidence and clean target-repository validation evidence; the current production profile keeps GitHub push and PR creation disabled.
+8. Resume live writes only after clean release-gate evidence and clean target-repository validation evidence; the current production profile enables governed GitHub push and non-draft PR creation.
 
 ## Operator commands
 
@@ -115,6 +115,6 @@ The `RMS_GITHUB_TOKEN` / `GITHUB_TOKEN` used by production must be a fine-graine
 - **Contents: Read** for authenticated clone/fetch of the private target repositories.
 - Repository metadata read access (implicit/default for fine-grained repository tokens).
 
-Write and pull-request permissions are not required while `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`.
+With `RMS_PUSH_ENABLED=true` and `RMS_CREATE_PR=true`, the GitHub token requires repository **Contents: Read and write** and **Pull requests: Read and write** permissions for the approved target repositories.
 
 RAMS sends Git credentials through an ephemeral Git HTTP extra-header and never stores the token in `origin`. GitHub REST authentication is sent only in the HTTPS Authorization header.
