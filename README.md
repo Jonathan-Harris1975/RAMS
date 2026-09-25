@@ -28,7 +28,7 @@ The `content` lane is a first-class pipeline across configuration, schemas, API,
 
 RAMS reads governed audit evidence from R2, normalises only eligible findings, plans bounded changes and validates them before any live repository mutation. RAMS never writes directly to `main`/`master`.
 
-The current production profile permits governed changes only inside the ephemeral checkout and intentionally disables GitHub publication with `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`. If a future reviewed deployment enables publication, RAMS is restricted to its configured `rms-qa/*` branch and non-draft pull requests; it never auto-merges.
+The current production profile permits governed changes only inside the ephemeral checkout and enables governed GitHub publication with `RMS_PUSH_ENABLED=true` and `RMS_CREATE_PR=true`. RAMS is restricted to its configured `rms-qa/*` branch and non-draft pull requests; it never auto-merges.
 
 For the `content` lane, autonomous work is restricted to confirmed findings with exact existing affected paths and approved fix classes such as content-prompt, validator, council, retry, metadata, scheduler-related configuration and link fixes. “Scheduler” findings are remediation categories; they do not re-enable the retired RAMS in-process scheduler. Anything ambiguous falls back to manual review.
 
@@ -68,7 +68,7 @@ Website/content exact-key runs validate the supplied AIMS R2 key shape before wo
 
 ## Production controls
 
-Live repository mutation requires dry-run disabled and live-write enabled. The current production profile intentionally keeps GitHub push and PR creation disabled, so validated changes stay inside the ephemeral checkout. RAMS idempotency and admission state are process-local, so production must keep exactly one worker and one deployment instance. Readiness degrades and all runs are rejected if that contract is violated; horizontal scale-out requires a shared idempotency/admission store first.
+Live repository mutation requires dry-run disabled and live-write enabled. The current production profile enables governed GitHub push and PR creation, so validated changes are published only to `rms-qa/*` branches and opened as non-draft pull requests. RAMS idempotency and admission state are process-local, so production must keep exactly one worker and one deployment instance. Readiness degrades and all runs are rejected if that contract is violated; horizontal scale-out requires a shared idempotency/admission store first.
 
 All non-secret production values are version-controlled in `Dockerfile` (with application-safe fallbacks in `repo_mgmt/config.py`). `RAMS-KOYEB-PRODUCTION-ENV.txt` contains only the required secret/sensitive Koyeb bindings.
 

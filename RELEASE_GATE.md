@@ -101,11 +101,11 @@ Paid production live-write permission:
 ```env
 RMS_DRY_RUN=false
 RMS_LIVE_WRITE_ENABLED=true
-RMS_PUSH_ENABLED=false
-RMS_CREATE_PR=false
+RMS_PUSH_ENABLED=true
+RMS_CREATE_PR=true
 ```
 
-A production candidate is not release-ready unless it can authenticate to and refresh the private target repositories, apply a bounded change in the ephemeral checkout, and complete the configured validation. This profile deliberately stops before GitHub push or pull-request creation.
+A production candidate is not release-ready unless it can authenticate to and refresh the private target repositories, apply a bounded change in the ephemeral checkout, and complete the configured validation. The production profile publishes only validated changes to governed `rms-qa/*` branches and creates non-draft pull requests; it never writes directly to or auto-merges the protected base branch.
 
 ## Manual Koyeb verification
 
@@ -131,4 +131,4 @@ curl -fsS -X POST \
   "$BASE_URL/rebuild/seo-aeo-geo/run"
 ```
 
-Do not run a live-write request until dry-run evidence, release-gate evidence and target-repository validation evidence are all clean. In the current production profile, admitted live-write work stops after validated mutation of the ephemeral checkout because `RMS_PUSH_ENABLED=false` and `RMS_CREATE_PR=false`.
+Do not run a live-write request until dry-run evidence, release-gate evidence and target-repository validation evidence are all clean. In the current production profile, admitted live-write work may publish validated commits to the governed `rms-qa/*` branch and create a non-draft pull request because `RMS_PUSH_ENABLED=true` and `RMS_CREATE_PR=true`.

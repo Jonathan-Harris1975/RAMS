@@ -32,14 +32,14 @@ Live writes require all of the following:
 - Validation after each task.
 - Task-scoped rollback on validation failure.
 
-Current production intentionally keeps automated GitHub publication disabled. Validated changes remain inside the ephemeral checkout unless a separate engineering review explicitly changes this contract:
+Current production enables governed GitHub publication. Validated changes are pushed only to the configured `rms-qa/*` branch and RAMS creates a non-draft pull request targeting the protected base branch:
 
 ```env
-RMS_PUSH_ENABLED=false
-RMS_CREATE_PR=false
+RMS_PUSH_ENABLED=true
+RMS_CREATE_PR=true
 ```
 
-If governed publication is enabled in a future reviewed profile, branch safety still applies: RAMS may push only its configured `rms-qa/*` branch and any pull request must target the configured protected base branch. `main`/`master` writes remain blocked. Enabling `RMS_CREATE_PR=true` requires `RMS_PUSH_ENABLED=true`, exact GitHub repository URLs, and a usable GitHub token. The token must be fine-grained to approved repositories with **Contents: Read and write** and **Pull requests: Read and write**. RAMS creates a non-draft PR but never auto-merges it.
+With governed publication enabled, branch safety still applies: RAMS may push only its configured `rms-qa/*` branch and any pull request must target the configured protected base branch. `main`/`master` writes remain blocked. Enabling `RMS_CREATE_PR=true` requires `RMS_PUSH_ENABLED=true`, exact GitHub repository URLs, and a usable GitHub token. The token must be fine-grained to approved repositories with **Contents: Read and write** and **Pull requests: Read and write**. RAMS creates a non-draft PR but never auto-merges it.
 
 ## Operational hardening
 
