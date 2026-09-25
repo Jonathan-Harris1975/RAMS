@@ -12,6 +12,6 @@ python-docx==1.2.0
 openpyxl==3.1.5
 beautifulsoup4==4.15.0
 headroom-ai==0.38.0
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.6
 # Required directly by repo_mgmt.cli; do not rely on another package to install it.
 typer==0.27.2
