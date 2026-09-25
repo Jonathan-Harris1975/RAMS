@@ -40,7 +40,7 @@ EXPECTED_IMAGE_DEFAULTS = {
     "RMS_AIMS_VALIDATION_COMMANDS": "npm test && npm run build",
     "RMS_ALLOW_UNAUTHENTICATED_DEV": "false",
     "RMS_BUSY_RETRY_AFTER_SECONDS": "60",
-    "RMS_CREATE_PR": "false",
+    "RMS_CREATE_PR": "true",
     "RMS_DRY_RUN": "false",
     "RMS_GITHUB_API_BASE": "https://api.github.com",
     "RMS_GITHUB_API_MAX_RETRIES": "2",
@@ -87,7 +87,7 @@ EXPECTED_IMAGE_DEFAULTS = {
     "RMS_PORT": "8000",
     "RMS_PRIMARY_MAX_TOKENS": "6144",
     "RMS_PRIMARY_TEMPERATURE": "0",
-    "RMS_PUSH_ENABLED": "false",
+    "RMS_PUSH_ENABLED": "true",
     "RMS_QA_BRANCH_PREFIX": "rms-qa/",
     "RMS_READINESS_CACHE_SECONDS": "60",
     "RMS_REPORT_DIR": "/tmp/rams-reports",
@@ -184,8 +184,8 @@ def test_image_defaults_plus_sensitive_bindings_form_complete_production_config(
 
     assert cfg.rms_environment == "production"
     assert cfg.live_write_permitted is True
-    assert cfg.rms_push_enabled is False
-    assert cfg.rms_create_pr is False
+    assert cfg.rms_push_enabled is True
+    assert cfg.rms_create_pr is True
     assert cfg.rms_max_issues_per_run == 1
     assert cfg.openrouter_primary_model == "openai/gpt-5.6-sol"
     assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5"
@@ -195,8 +195,8 @@ def test_image_defaults_plus_sensitive_bindings_form_complete_production_config(
 def test_security_policy_matches_current_publication_defaults() -> None:
     security_policy = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
     assert (
-        "Current production intentionally keeps automated GitHub publication disabled"
+        "Current production enables governed GitHub publication"
         in security_policy
     )
-    assert "RMS_PUSH_ENABLED=false\nRMS_CREATE_PR=false" in security_policy
-    assert "Current production enables governed publication" not in security_policy
+    assert "RMS_PUSH_ENABLED=true\nRMS_CREATE_PR=true" in security_policy
+    assert "Current production intentionally keeps automated GitHub publication disabled" not in security_policy
