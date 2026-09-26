@@ -14,7 +14,7 @@
     "schedule": [
       "after 7am and before 8am on sunday"
     ],
-    "automerge": false
+    "automerge": true
   },
   "packageRules": [
     {
@@ -22,21 +22,21 @@
       "matchManagers": [
         "pip_requirements"
       ],
-      "automerge": false
+      "automerge": true
     },
     {
       "description": "Docker base image updates require manual approval",
       "matchManagers": [
         "dockerfile"
       ],
-      "automerge": false
+      "automerge": true
     },
     {
       "description": "GitHub Actions updates require manual approval",
       "matchManagers": [
         "github-actions"
       ],
-      "automerge": false
+      "automerge": true
     }
   ]
 }
