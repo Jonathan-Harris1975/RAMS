@@ -20,7 +20,7 @@ def _load_verify_module():
     return module
 
 
-def test_dependabot_visible_dependency_architecture(monkeypatch) -> None:
+def test_renovate_visible_dependency_architecture(monkeypatch) -> None:
     expected = {
         "requirements.in",
         "requirements-runtime.lock",
