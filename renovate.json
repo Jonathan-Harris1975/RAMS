@@ -2,5 +2,41 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "dependencyDashboard": true,
+  "timezone": "Europe/London",
+  "schedule": [
+    "after 7am and before 8am on sunday"
+  ],
+  "rangeStrategy": "replace",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "after 7am and before 8am on sunday"
+    ],
+    "automerge": false
+  },
+  "packageRules": [
+    {
+      "description": "Python dependency updates require manual approval",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Docker base image updates require manual approval",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "GitHub Actions updates require manual approval",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "automerge": false
+    }
   ]
 }

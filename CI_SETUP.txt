@@ -1,0 +1,20 @@
+RAMS CI setup
+
+Schedule
+- Weekly security/quality scan: Sunday 07:00 UTC via GitHub Actions cron.
+- CodeQL Advanced: Sunday 07:00 UTC, plus push/pull request.
+- Renovate dependency window: Sunday 07:00-08:00 Europe/London.
+
+CI-specific secrets
+- None required for CodeQL, Trivy, Gitleaks, actionlint, Hadolint, ShellCheck, Lychee or OpenSSF Scorecard. GitHub-provided GITHUB_TOKEN is used where required.
+
+Existing deployment/operations configuration (not introduced by this CI work)
+- KOYEB_TOKEN and KOYEB_SERVICE are required by the production deployment watcher.
+- ECOSYSTEM_SMOKE_DISPATCH_TOKEN and ECOSYSTEM_SMOKE_REPOSITORY support the central ecosystem smoke dispatch.
+- OPS_ALERT_WEBHOOK_URL and OPS_ALERT_WEBHOOK_TOKEN support failure notifications.
+
+Dependency management
+- Mend Renovate is the active dependency updater.
+- Dependabot remains configured with open-pull-requests-limit: 0 so GitHub/Scorecard can see the dependency-update configuration without competing PRs.
+- Renovate PRs remain manually approved.
+- renovate-lock-sync.yml automatically regenerates requirements-runtime.lock, requirements-bootstrap.txt, requirements-build.txt and requirements-dev.txt whenever a Renovate PR changes dependency inputs, preventing deployment/build drift.
