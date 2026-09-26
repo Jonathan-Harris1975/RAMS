@@ -18,3 +18,11 @@ Dependency management
 - Dependabot remains configured with open-pull-requests-limit: 0 so GitHub/Scorecard can see the dependency-update configuration without competing PRs.
 - Renovate PRs remain manually approved.
 - renovate-lock-sync.yml automatically regenerates requirements-runtime.lock, requirements-bootstrap.txt, requirements-build.txt and requirements-dev.txt whenever a Renovate PR changes dependency inputs, preventing deployment/build drift.
+
+RAMS Docker/Hadolint baseline
+- Docker RUN commands use bash with pipefail so failures inside pipelines propagate.
+- DL3008 is suppressed only on the two apt-get installation instructions. Debian package
+  versions are intentionally resolved from the digest-pinned Bookworm base image so routine
+  OS security updates are not frozen by hard-coded package versions.
+- Trivy remains the vulnerability/misconfiguration security gate for the resulting image.
+

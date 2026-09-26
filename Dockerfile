@@ -4,6 +4,7 @@
 # ──────────────────────────────────────────────────────────────────────────
 
 FROM node:22.23.2-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS node-runtime
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Node 22.23.2 ships an older npm dependency tree containing multiple
 # fixable HIGH/CRITICAL advisories. Keep Node on the required 22.x line while
@@ -15,6 +16,7 @@ FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33
 
 WORKDIR /build
 
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
@@ -40,6 +42,7 @@ WORKDIR /app
 # HTTPS checks and package validation commands from tripping over missing roots.
 # Keep the runtime OS patched. Python packaging/bootstrap tooling is removed
 # later, after the application has been copied and dependency integrity checked.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
