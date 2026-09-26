@@ -121,15 +121,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build Docker image
         run: docker build --target runtime -t rams:ci .
+      - name: Install pinned Trivy CLI
+        run: python scripts/install_ci_tools.py trivy
       - name: Scan production image for fixable high-severity vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: rams:ci
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: os,library
-          severity: CRITICAL,HIGH
+        run: >-
+          .ci-tools/bin/trivy image rams:ci
+          --format table
+          --exit-code 1
+          --ignore-unfixed
+          --pkg-types os,library
+          --severity CRITICAL,HIGH
+          --no-progress
       - name: Verify runtime binaries
         run: |
           test "$(docker run --rm rams:ci id -u)" != "0"
@@ -162,7 +164,7 @@ jobs:
             rams:ci
           trap 'docker logs rams-ci-api || true; docker rm -f rams-ci-api || true' EXIT
           api_started=false
-          for i in {1..30}; do
+          for _ in {1..30}; do
             if curl -fsS http://127.0.0.1:8000/health >/tmp/startup-health.json; then
               api_started=true
               break
@@ -172,7 +174,7 @@ jobs:
           test "$api_started" = "true"
 
           container_healthy=false
-          for i in {1..75}; do
+          for _ in {1..75}; do
             if test "$(docker inspect --format '{{.State.Health.Status}}' rams-ci-api)" = "healthy"; then
               container_healthy=true
               break
