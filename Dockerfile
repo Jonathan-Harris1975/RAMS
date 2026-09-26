@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml requirements.in requirements-runtime.lock requirements-build.txt .
+COPY pyproject.toml requirements.in requirements-runtime.lock requirements-build.txt ./
 COPY repo_mgmt/ ./repo_mgmt/
 
 RUN pip install --disable-pip-version-check --no-cache-dir \
