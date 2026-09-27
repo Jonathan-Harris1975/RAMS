@@ -10,7 +10,7 @@ permissions:
 jobs:
   sync-locks:
     name: Regenerate hashed dependency locks
-    if: ${{ github.event.pull_request.user.login == 'renovate[bot]' }}
+    if: ${{ github.event.pull_request.user.login == 'renovate[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the Renovate branch
