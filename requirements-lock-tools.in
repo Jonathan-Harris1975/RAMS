@@ -1,0 +1,11 @@
+# Minimal tooling used to regenerate hashed dependency locks.
+# Keep this independent from requirements-dev.txt so a broken application/dev lock
+# cannot prevent the lock-regeneration workflow from repairing itself.
+build==1.6.1
+click==8.5.0
+packaging==26.3
+pip==26.2.1
+pip-tools==7.6.1
+pyproject-hooks==1.3.3
+setuptools==84.0.0
+wheel==0.48.0

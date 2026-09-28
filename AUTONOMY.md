@@ -29,5 +29,13 @@ The marker must be removed only after the underlying defect is fixed. This preve
 
 Minor/digest/patch dependency automation remains owned by the committed Renovate policy. Kilo is the repair path for repository/code/configuration defects exposed by CI; it does not replace the independent CI/security gates.
 
-GitHub repository setting **Allow GitHub Actions to create and approve pull requests** must permit PR creation for this workflow. Branch/ruleset protections and required checks remain authoritative.
+Autonomous repair PRs are created with the dedicated Autonomy Repair GitHub App installation token. Configure the repository variable `AUTONOMY_REPAIR_APP_ID` and the private-key secret referenced by `.github/workflows/autonomous-repair.yml`. Branch/ruleset protections and required checks remain authoritative.
+
+## Trusted PR creator
+
+The autonomous repair workflow must use the dedicated Autonomy Repair GitHub App installation token rather than `GITHUB_TOKEN`. GitHub deliberately requires manual approval for pull-request workflows created or updated by `GITHUB_TOKEN`; App-created PRs avoid that manual approval path while retaining the repository's normal checks.
+
+The repair App receives only the repository permissions needed to create repair branches/PRs and lifecycle labels. It does not receive direct merge or deployment authority.
+
+Successful default-branch reruns automatically mark open repair PRs for the same workflow as `autonomy:obsolete` (unless they are on human hold), allowing Mergify to close stale repair carriers safely. This prevents a Kilo-created replacement PR or a manual correction from leaving the original repair PR behind.
 

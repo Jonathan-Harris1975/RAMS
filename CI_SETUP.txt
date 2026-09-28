@@ -1,9 +1,9 @@
 RAMS CI setup
 
 Schedule
-- Weekly security/quality scan: Sunday 07:00 UTC via GitHub Actions cron.
-- CodeQL Advanced: Sunday 07:00 UTC, plus push/pull request.
-- Renovate dependency window: Sunday 07:00-08:00 Europe/London.
+- Weekly security/quality scan: Sunday 05:00 UTC via GitHub Actions cron.
+- CodeQL Advanced: Sunday 05:00 UTC, plus push/pull request.
+- Renovate dependency window: Sunday 05:00-07:30 Europe/London.
 
 CI-specific secrets
 - None required for CodeQL, Trivy, Gitleaks, actionlint, Hadolint, ShellCheck, Lychee or OpenSSF Scorecard. GitHub-provided GITHUB_TOKEN is used where required.
@@ -39,3 +39,21 @@ AUTONOMOUS PROVING-GROUP SETUP
 - GitHub Actions must be allowed to create pull requests in repository Actions settings for the autonomous repair-PR workflow.
 - Enable Kilo Code Reviews for this repository and enable REVIEW.md guidance in the Kilo Code Reviews configuration.
 - Kilo Code Reviewer is review-only; the repair PR also invokes @kilocode-bot in PR context for implementation. Bot-generated PR review behaviour must be verified in Kilo settings because Kilo documents bot-created PRs as ignored by default by automatic Code Reviews.
+
+AUTONOMOUS REPAIR AUTHENTICATION
+- Required repository variable: AUTONOMY_REPAIR_APP_ID
+- Required repository secret: the GitHub App private-key secret referenced by `.github/workflows/autonomous-repair.yml`
+- The installed Autonomy Repair GitHub App needs Contents read/write, Pull requests read/write and Issues read/write for this repository.
+- Repair PRs are created with the GitHub App installation token, not GITHUB_TOKEN, so pull_request workflows start without the manual approval loop applied to workflow-created GITHUB_TOKEN PRs.
+- Mergify auto-merges an autonomy:repair PR only after the Autonomous repair marker gate succeeds and no active checks remain failed or pending. Kilo Code Review remains useful when it runs, but is not a mandatory named check because bot-generated PR review behaviour can vary. GitHub branch protection/rulesets remain authoritative.
+- The old Renovate-specific deployment-revert PR path has been removed where present so a failed deployment produces one repair path rather than competing recovery PRs.
+
+AUTONOMOUS MERGE SETTINGS
+- Kilo Code Review should remain enabled for repository pull requests with REVIEW.md guidance, but autonomous merging does not depend on that named check being present.
+- Mergify must have repository access. `.mergify.yml` auto-merges only validated `autonomy:repair` PRs after the repair-marker gate succeeds and all active checks are clear.
+- Protect `main` with the repository's normal required checks. At minimum, the aggregate release/CI gate, the Autonomous repair marker gate, the repository security checks, and Kilo/Socket checks that are configured as merge gates should be required.
+- Keep GitHub's workflow-approval security policy enabled; App-created repair PRs no longer depend on the workflow `GITHUB_TOKEN`.
+- Enable GitHub's automatic deletion of head branches after merge to keep autonomous repair branches tidy.
+
+- RAMS lock regeneration now bootstraps from `requirements-lock-tools.txt` instead of `requirements-dev.txt`, so a broken Renovate-generated development lock cannot deadlock the repair workflow.
+- `requirements-dev.txt` has been realigned so pydantic 2.13.5 uses its required pydantic-core 2.46.5.
