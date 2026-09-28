@@ -30,6 +30,8 @@ def test_renovate_visible_dependency_architecture(monkeypatch) -> None:
         "requirements-build.txt",
         "requirements-dev.in",
         "requirements-dev.txt",
+        "requirements-lock-tools.in",
+        "requirements-lock-tools.txt",
     }
     assert all((ROOT / path).is_file() for path in expected)
     assert not (ROOT / "requirements.txt").exists()
