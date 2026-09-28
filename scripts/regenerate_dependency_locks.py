@@ -12,6 +12,7 @@ LOCKS = (
     ("requirements-bootstrap.in", "requirements-bootstrap.txt"),
     ("requirements-build.in", "requirements-build.txt"),
     ("requirements-dev.in", "requirements-dev.txt"),
+    ("requirements-lock-tools.in", "requirements-lock-tools.txt"),
 )
 
 

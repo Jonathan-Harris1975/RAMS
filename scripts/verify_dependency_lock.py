@@ -37,6 +37,7 @@ LOCK_SPECS = (
     LockSpec("bootstrap", "requirements-bootstrap.in", "requirements-bootstrap.txt"),
     LockSpec("build", "requirements-build.in", "requirements-build.txt"),
     LockSpec("development", "requirements-dev.in", "requirements-dev.txt"),
+    LockSpec("lock-tools", "requirements-lock-tools.in", "requirements-lock-tools.txt"),
 )
 
 
