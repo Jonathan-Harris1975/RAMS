@@ -157,7 +157,7 @@ jobs:
           git commit --quiet -m "chore: open autonomous repair request for run $RUN_ID"
           git push --quiet origin "$branch"
 
-          printf -v body '%s\n\nFailed workflow: **%s**\nFailed commit: `%s`\nFailed run: %s\n\n%s `.autonomy/repair-requests/%s.md` %s\n' \
+          printf -v body "%s\n\nFailed workflow: **%s**\nFailed commit: \`%s\`\nFailed run: %s\n\n%s \`.autonomy/repair-requests/%s.md\` %s\n" \
             'Main-branch CI/deployment verification failed.' \
             "$RUN_NAME" "$HEAD_SHA" "$RUN_URL" \
             'This PR is deliberately blocked by the **Autonomous repair marker gate** until the underlying defect is fixed and' \
