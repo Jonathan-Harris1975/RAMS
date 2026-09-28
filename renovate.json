@@ -9,6 +9,15 @@
     "after 7am and before 8am on sunday"
   ],
   "rangeStrategy": "replace",
+  "platformAutomerge": true,
+  "minimumReleaseAge": "3 days",
+  "vulnerabilityAlerts": {
+    "automerge": true,
+    "minimumReleaseAge": "0 days",
+    "labels": [
+      "security"
+    ]
+  },
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": [
@@ -18,23 +27,18 @@
   },
   "packageRules": [
     {
-      "description": "Python dependency updates require manual approval",
-      "matchManagers": [
-        "pip_requirements"
+      "description": "Automerge patch, minor and digest updates (Python, Docker, GitHub Actions) once the stability window and required checks pass",
+      "matchUpdateTypes": [
+        "patch",
+        "minor",
+        "digest"
       ],
-      "automerge": false
+      "automerge": true
     },
     {
-      "description": "Docker base image updates require manual approval",
-      "matchManagers": [
-        "dockerfile"
-      ],
-      "automerge": false
-    },
-    {
-      "description": "GitHub Actions updates require manual approval",
-      "matchManagers": [
-        "github-actions"
+      "description": "Keep major updates under manual review",
+      "matchUpdateTypes": [
+        "major"
       ],
       "automerge": false
     }
