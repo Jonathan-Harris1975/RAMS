@@ -282,3 +282,18 @@ jobs:
           name: release-attestation-${{ github.sha }}
           path: release-attestation.json
           retention-days: 90
+
+  autonomous_repair_guard:
+    name: Autonomous repair marker gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Require autonomous repair request to be resolved
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d .autonomy/repair-requests ] && find .autonomy/repair-requests -type f -name '*.md' -print -quit | grep -q .; then
+            echo "::error::This PR still contains an unresolved autonomous repair request. Fix the underlying failure, then remove the repair-request marker."
+            find .autonomy/repair-requests -type f -name '*.md' -print
+            exit 1
+          fi
