@@ -14,7 +14,7 @@ beautifulsoup4==4.15.0
 headroom-ai==0.38.0
 # Tokenizers 0.23.2 requires huggingface-hub<2; keep the transitive hub
 # dependency pinned so lock regeneration cannot select an incompatible major.
-huggingface-hub==1.31.0
+huggingface-hub==1.33.0
 psycopg[binary]==3.3.6
 # Required directly by repo_mgmt.cli; do not rely on another package to install it.
 typer==0.27.2
