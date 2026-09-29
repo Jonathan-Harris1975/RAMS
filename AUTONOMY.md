@@ -35,7 +35,7 @@ Autonomous repair PRs are created with the dedicated Autonomy Repair GitHub App 
 
 The autonomous repair workflow must use the dedicated Autonomy Repair GitHub App installation token rather than `GITHUB_TOKEN`. GitHub deliberately requires manual approval for pull-request workflows created or updated by `GITHUB_TOKEN`; App-created PRs avoid that manual approval path while retaining the repository's normal checks.
 
-The repair App receives only the repository permissions needed to create repair branches/PRs and lifecycle labels. It does not receive direct merge or deployment authority.
+The repair App receives the repository permissions needed for repair branches/PRs/lifecycle labels plus Actions read/write for trusted workflow admission. It may request native auto-merge after exact-head gates pass, but it cannot bypass GitHub branch/ruleset protections and receives no deployment, secrets, administration or security-event write authority.
 
 Successful default-branch reruns automatically mark open repair PRs for the same workflow as `autonomy:obsolete` (unless they are on human hold), allowing Mergify to close stale repair carriers safely. This prevents a Kilo-created replacement PR or a manual correction from leaving the original repair PR behind.
 ## CodeQL and security handoff
@@ -45,3 +45,12 @@ Successful default-branch reruns automatically mark open repair PRs for the same
 - If CodeQL/security fails on a trusted autonomous carrier or Kilo implementation PR, the workflow re-invokes `@kilocode-bot` from that PR context. Kilo may update the current branch when its integration supports that, or create one linked replacement implementation PR; repeated unbounded PR chains are not acceptable.
 - Kilo may repair code/configuration, but it must not dismiss CodeQL alerts, weaken queries/tests, broaden suppressions, change secret allowlists or make security-policy decisions. If no safe repository code change is justified, the carrier marker stays and the work moves to `autonomy:human-hold`.
 
+## Trusted automation admission and native merge
+
+`.github/workflows/trusted-automation.yml` is a default-branch control plane for verified automation PRs. It never checks out or executes PR code. The installed Autonomous Repair Bot GitHub App therefore also requires **Actions: Read and write** so it can approve an `action_required` workflow run, or safely re-request the same run when GitHub requires that path. Contents, Pull requests and Issues remain read/write; Metadata is read-only.
+
+Admission is fail-closed. Exact same-repository Mend Renovate PRs are recognised from the `renovate[bot]` identity and Renovate body marker. Kilo implementation PRs are recognised only after the exact `kilo-code-bot[bot]` PR URL is linked from an autonomous repair carrier. Unknown/unlinked bot PRs are not admitted. Fork secrets and fork write tokens remain disabled.
+
+Renovate's committed policy remains authoritative: PRs can run CI automatically, but native auto-approval/auto-merge is requested only when the PR itself reports `Automerge: Enabled.`. Major/manual updates remain human decisions. A linked Kilo implementation PR can progress only when the current head SHA has successful repository CI, CodeQL, repository-security checks and no pending/failing current checks. Sensitive governance/security-path changes are labelled `autonomy:human-hold`.
+
+Mergify performs lifecycle housekeeping only. Native GitHub auto-merge / Merge Queue is the final merge authority, and the trusted workflow merely requests that native path after all repository gates are green.
