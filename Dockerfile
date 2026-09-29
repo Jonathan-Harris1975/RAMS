@@ -1,14 +1,13 @@
 # ──────────────────────────────────────────────────────────────────────────
 # Repository Automation Management Service — production Docker image
-# Runtime includes Python, Git, Node.js 22.x, and npm for target validation.
+# Runtime includes Python, Git, Node.js 24.x, and npm for target validation.
 # ──────────────────────────────────────────────────────────────────────────
 
 FROM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS node-runtime
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Node 22.23.2 ships an older npm dependency tree containing multiple
-# fixable HIGH/CRITICAL advisories. Keep Node on the required 22.x line while
-# replacing npm with the patched 11.x release before copying it into runtime.
+# Keep the pinned Node 24 runtime and patched npm release together so the
+# production image passes the vulnerability gate and runtime checks.
 RUN npm install --global --no-audit --no-fund npm@11.19.1 \
     && npm --version | grep -Fx '11.19.1'
 
@@ -51,7 +50,7 @@ RUN apt-get update \
         libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Bring in Node.js 22.x and npm without relying on distro packages that may lag
+# Bring in Node.js 24.x and npm without relying on distro packages that may lag
 # below the required major version for the SEO/AEO/GEO validation command.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -80,7 +79,7 @@ RUN useradd --create-home --shell /bin/bash rms \
     && git --version \
     && node --version \
     && npm --version \
-    && node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
+    && node -e "process.exit(Number(process.versions.node.split('.')[0]) === 24 ? 0 : 1)"
 
 USER rms
 

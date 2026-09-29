@@ -42,7 +42,7 @@ docker run --rm "$IMAGE_NAME" python --version
 docker run --rm "$IMAGE_NAME" git --version
 docker run --rm "$IMAGE_NAME" node --version
 docker run --rm "$IMAGE_NAME" npm --version
-docker run --rm "$IMAGE_NAME" node -e "process.exit(Number(process.versions.node.split('.')[0]) === 22 ? 0 : 1)"
+docker run --rm "$IMAGE_NAME" node -e "process.exit(Number(process.versions.node.split('.')[0]) === 24 ? 0 : 1)"
 docker run --rm "$IMAGE_NAME" sh -ec 'test ! -w /app; touch /tmp/rams-write-check; python -m pip check; python -c "import repo_mgmt.api, repo_mgmt.pipeline"'
 
 docker rm -f rams-release-gate >/dev/null 2>&1 || true
