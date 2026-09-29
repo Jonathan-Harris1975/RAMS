@@ -9,3 +9,5 @@ For PRs labelled `autonomy:repair`, the file under `.autonomy/repair-requests/` 
 Never recommend weakening CodeQL, Trivy, Gitleaks, tests, required checks, branch/ruleset protections, workflow permissions, secret handling or security policy merely to obtain a green result. Do not recommend broad suppressions or allowlists for unexplained findings.
 
 The target repository's CI/security/deployment checks are authoritative regardless of whether the change originated from Kilo, Renovate, RAMS, another bot or a human.
+
+Describe each actionable finding with a named file, line or package and the concrete failure. The PR repair router uses those details to distinguish a repairable issue from general review commentary.
