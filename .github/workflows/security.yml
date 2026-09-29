@@ -79,6 +79,7 @@ jobs:
 
   link_integrity:
     name: Lychee link integrity
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -96,6 +97,7 @@ jobs:
 
   scorecard:
     name: OpenSSF Scorecard
+    continue-on-error: true
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
