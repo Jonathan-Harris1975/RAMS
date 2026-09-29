@@ -57,3 +57,10 @@ AUTONOMOUS MERGE SETTINGS
 
 - RAMS lock regeneration now bootstraps from `requirements-lock-tools.txt` instead of `requirements-dev.txt`, so a broken Renovate-generated development lock cannot deadlock the repair workflow.
 - `requirements-dev.txt` has been realigned so pydantic 2.13.5 uses its required pydantic-core 2.46.5.
+CODEQL / TRUSTED PR AUTOMATION
+- CodeQL open alerts are enforced by the CodeQL workflow and feed the autonomous repair/Kilo loop.
+- The Autonomy Repair App creates the carrier PR with an installation token. GitHub documents that App-token-created automation PRs start normal pull_request workflows without the manual approval loop associated with workflow GITHUB_TOKEN-created PRs.
+- Kilo implementation mode may update the carrier or open one linked implementation PR. Prefer a same-repository branch when supported; a separate Kilo PR must still pass every repository check and must link back to the carrier evidence.
+- For public-fork workflow approval, use Repository Settings -> Actions -> General -> Approval for running fork pull request workflows from contributors. To remove the first-time-contributor prompt for the established Kilo bot without sending secrets/write tokens to forks, use the narrowest policy that fits: require approval only for first-time contributors who are new to GitHub. Keep fork secrets and write tokens disabled.
+- If a new App-created carrier PR still asks for approval, stop and treat it as a configuration defect. If only a Kilo implementation fork asks, record it in the Sunday automation evidence rather than weakening fork security controls.
+
