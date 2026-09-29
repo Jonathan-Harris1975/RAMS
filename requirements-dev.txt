@@ -245,9 +245,9 @@ boto3==1.43.99 \
     # via
     #   -r requirements.in
     #   litellm
-botocore==1.43.103 \
-    --hash=sha256:6a6a561a6de43845ae42bc7ff7e2c798742bfa277f5215398f9c15ed9b1bd67c \
-    --hash=sha256:8c7f220e09f3b7ec99c59c716aa66cf6f5b2b57fd8731544054f3778aa744c6a
+botocore==1.43.104 \
+    --hash=sha256:099f84876df9f6dc23a24b4d8c02da2d73c6949249761dd85585f735b825c182 \
+    --hash=sha256:a447978a815f8ac7ef2f4ba103b6a0c310e56536386974df769edb1326f3b208
     # via
     #   boto3
     #   s3transfer
