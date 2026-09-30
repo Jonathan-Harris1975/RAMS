@@ -7,9 +7,28 @@ FROM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea41952009
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Keep the pinned Node 24 runtime and patched npm release together so the
-# production image passes the vulnerability gate and runtime checks.
-RUN npm install --global --no-audit --no-fund npm@11.19.1 \
-    && npm --version | grep -Fx '11.19.1'
+# production image passes the vulnerability gate and runtime checks. npm
+# 11.19.1 still bundles brace-expansion 5.0.9 and undici 6.28.0, which carry
+# fixable HIGH advisories, so overlay the patched releases without leaving the
+# major ranges npm already declares (minimatch -> brace-expansion ^5,
+# node-gyp -> undici ^6), then prove the remediated modules load and npm runs.
+RUN set -eux; \
+    npm install --global --no-audit --no-fund npm@11.19.1; \
+    test "$(npm --version)" = '11.19.1'; \
+    npm_root="$(npm root -g)/npm/node_modules"; \
+    for spec in 'brace-expansion@5.0.12' 'undici@6.28.1'; do \
+        pkg="${spec%@*}"; \
+        work="$(mktemp -d)"; \
+        npm pack --silent --pack-destination "$work" "$spec" >/dev/null; \
+        tar -xzf "$work"/*.tgz -C "$work"; \
+        rm -rf "${npm_root:?}/${pkg:?}"; \
+        mv "$work/package" "$npm_root/$pkg"; \
+        rm -rf "${work:?}"; \
+    done; \
+    test "$(node -p "require('$npm_root/brace-expansion/package.json').version")" = '5.0.12'; \
+    test "$(node -p "require('$npm_root/undici/package.json').version")" = '6.28.1'; \
+    node -e "require('$npm_root/brace-expansion'); require('$npm_root/undici')"; \
+    npm --version | grep -Fx '11.19.1'
 
 FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS builder
 
