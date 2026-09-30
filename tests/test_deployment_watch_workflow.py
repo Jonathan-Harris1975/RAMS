@@ -61,7 +61,9 @@ def test_smoke_dispatch_is_not_a_substitute_for_attestation() -> None:
     dispatch = _step(text, "Trigger central ecosystem smoke")
 
     assert "deployment-attestation.json" in evidence
-    assert "ECOSYSTEM_SMOKE_DISPATCH_TOKEN is required" in dispatch
+    assert 'if [ -z "${ECOSYSTEM_SMOKE_DISPATCH_TOKEN:-}" ]; then' in dispatch
+    assert "::notice::Optional MAST ecosystem smoke dispatch is not configured" in dispatch
+    assert "::warning::Optional MAST ecosystem smoke dispatch failed" in dispatch
     assert text.index("Retain production deployment evidence") < text.index(
         "Trigger central ecosystem smoke"
     )
