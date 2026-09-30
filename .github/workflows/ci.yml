@@ -289,12 +289,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
       - name: Require autonomous repair request to be resolved
         shell: bash
         run: |
           set -euo pipefail
-          if [ -d .autonomy/repair-requests ] && find .autonomy/repair-requests -type f -name '*.md' -print -quit | grep -q .; then
-            echo "::error::This PR still contains an unresolved autonomous repair request. Fix the underlying failure, then remove the repair-request marker."
-            find .autonomy/repair-requests -type f -name '*.md' -print
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          # Fork PR commits may be absent even with a full checkout.
+          for sha in "$base_sha" "$head_sha"; do
+            git cat-file -e "${sha}^{commit}" 2>/dev/null || git fetch --no-tags origin "$sha"
+          done
+          merge_base="$(git merge-base "$base_sha" "$head_sha")"
+          changed_markers="$(git diff --name-only --diff-filter=AMR "$merge_base" "$head_sha" -- '.autonomy/repair-requests/*.md')"
+          if [ -n "$changed_markers" ]; then
+            echo "::error::This PR introduces an unresolved autonomous repair request. Fix the underlying failure, then remove the repair-request marker."
+            printf '%s\n' "$changed_markers"
             exit 1
           fi
