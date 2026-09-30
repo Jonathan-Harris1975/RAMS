@@ -7,9 +7,19 @@ FROM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea41952009
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Keep the pinned Node 24 runtime and patched npm release together so the
-# production image passes the vulnerability gate and runtime checks.
+# production image passes the vulnerability gate and runtime checks. The pinned
+# npm release still bundles brace-expansion 5.0.9 and undici 6.28.0, so overlay
+# the fixed patch releases npm has not yet shipped until it refreshes them.
 RUN npm install --global --no-audit --no-fund npm@11.19.1 \
-    && npm --version | grep -Fx '11.19.1'
+    && npm --version | grep -Fx '11.19.1' \
+    && npm install --prefix /tmp/npm-patch --no-audit --no-fund \
+        --no-package-lock --no-save brace-expansion@5.0.11 undici@6.28.1 \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+              /usr/local/lib/node_modules/npm/node_modules/undici \
+    && cp -R /tmp/npm-patch/node_modules/brace-expansion \
+             /tmp/npm-patch/node_modules/undici \
+             /usr/local/lib/node_modules/npm/node_modules/ \
+    && rm -rf /tmp/npm-patch
 
 FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS builder
 
