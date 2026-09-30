@@ -297,7 +297,10 @@ jobs:
           set -euo pipefail
           base_sha="${{ github.event.pull_request.base.sha }}"
           head_sha="${{ github.event.pull_request.head.sha }}"
-          git fetch --no-tags origin "$base_sha" "$head_sha"
+          # Fork PR commits may be absent even with a full checkout.
+          for sha in "$base_sha" "$head_sha"; do
+            git cat-file -e "${sha}^{commit}" 2>/dev/null || git fetch --no-tags origin "$sha"
+          done
           merge_base="$(git merge-base "$base_sha" "$head_sha")"
           changed_markers="$(git diff --name-only --diff-filter=AMR "$merge_base" "$head_sha" -- '.autonomy/repair-requests/*.md')"
           if [ -n "$changed_markers" ]; then
