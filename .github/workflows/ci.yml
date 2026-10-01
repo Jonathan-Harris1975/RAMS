@@ -14,6 +14,9 @@ permissions:
 
 jobs:
   test:
+    permissions:
+      contents: read
+      id-token: write
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
@@ -53,7 +56,16 @@ jobs:
           mkdir -p /tmp/fake-website /tmp/fake-aims
           python -V
           python -m compileall -q repo_mgmt tests
-          python -m pytest tests/ -q --tb=short
+          python -m pytest tests/ -q --tb=short --cov=repo_mgmt --cov-report=term-missing --cov-report=xml:coverage.xml
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.14.7'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          use_oidc: true
+          files: coverage.xml
+          flags: unit
+          fail_ci_if_error: false
 
   performance:
     name: Performance regression gate (Python 3.14)
@@ -316,7 +328,7 @@ jobs:
             git cat-file -e "${sha}^{commit}" 2>/dev/null || git fetch --no-tags origin "$sha"
           done
           merge_base="$(git merge-base "$base_sha" "$head_sha")"
-          changed_markers="$(git diff --name-only --diff-filter=AMR "$merge_base" "$head_sha" -- '.autonomy/repair-requests/*.md')"
+          changed_markers="$(git diff --name-only --diff-filter=AMR "$merge_base" "$head_sha" -- '.autonomy/repair-request-*.md')"
           if [ -n "$changed_markers" ]; then
             echo "::error::This PR introduces an unresolved autonomous repair request. Fix the underlying failure, then remove the repair-request marker."
             printf '%s\n' "$changed_markers"
