@@ -13,3 +13,13 @@ Never recommend weakening CodeQL, Trivy, Gitleaks, tests, required checks, branc
 The target repository's CI/security/deployment checks are authoritative regardless of whether the change originated from Kilo, Renovate, RAMS, another bot or a human.
 
 Describe each actionable finding with a named file, line or package and the concrete failure. The PR repair router uses those details to distinguish a repairable issue from general review commentary.
+## Renovate and version-control review
+
+Treat Mend Renovate PRs as first-class autonomous maintenance work, not as incidental bot noise. Verify that the proposed version is real, manifests and lockfiles agree, generated locks remain reproducible, repository-native build/test/security checks exercise the changed dependency, and the change does not weaken deployment or runtime contracts.
+
+Routine patch, minor, digest, vulnerability and lock-maintenance updates may proceed through the normal autonomous admission path when all required checks pass. Do not require a human review merely because Renovate authored the PR. Do not bypass `ci-gate`, CodeQL, Trivy/Gitleaks/actionlint, repository-specific checks or Mergify admission.
+
+Major updates are intentionally excluded from Renovate routine automerge by the current root `renovate.json`. Review them as compatibility changes: identify breaking API/configuration/runtime changes, require any necessary migration and tests, and keep them out of the routine autonomous merge path until those changes are evidenced.
+
+Flag duplicate/stale Renovate PRs, unexplained lockfile churn, dependency downgrades, package-manager drift, disabled security checks, or changes that merely silence a failing dependency test.
+
