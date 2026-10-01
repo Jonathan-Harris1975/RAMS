@@ -9,7 +9,7 @@
     "after 5:00am and before 7:30am on sunday"
   ],
   "rangeStrategy": "replace",
-  "platformAutomerge": true,
+  "platformAutomerge": false,
   "minimumReleaseAge": "2 days",
   "vulnerabilityAlerts": {
     "automerge": true,
@@ -42,5 +42,7 @@
       ],
       "automerge": false
     }
-  ]
+  ],
+  "automergeType": "pr-comment",
+  "automergeComment": "@mergifyio queue"
 }

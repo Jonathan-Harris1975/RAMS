@@ -12,7 +12,7 @@ The expected chain is:
 2. Repository CI validates deterministic build/test/lockfile contracts.
 3. Security gates run independently: CodeQL, Trivy, Gitleaks, actionlint and repo-specific controls.
 4. Any actionable main-branch failure enters the `autonomy:repair` PR path. CodeQL/security repairs also carry `autonomy:security-repair`.
-5. Kilo receives the carrier PR context automatically and implements the smallest safe repair. It may update the carrier branch when supported or open exactly one linked implementation PR against the repository.
+5. Kilo receives the carrier PR context automatically and implements the smallest safe repair. It must open exactly one linked implementation PR against the default branch; the carrier is lifecycle evidence and never merges.
 6. If Kilo updates the carrier, its marker is removed only after the underlying defect is genuinely fixed. If Kilo opens a separate implementation PR, the carrier marker remains until the successful default-branch rerun makes the carrier obsolete.
 7. Every implementation PR reruns the repository checks; those checks remain authoritative.
 8. Merge/deployment occurs through the repository's configured authority.
@@ -53,3 +53,6 @@ Return a concise structured report with:
 - Confirm Koyeb exact-SHA deployment evidence is green or report the watcher/runtime discrepancy explicitly.
 - Do not claim a resolver recompile succeeded unless an actual network-backed compile/install completed.
 
+
+## Merge and retirement authority
+Mergify Merge Queue is the sole routine merge authority and uses squash merges. GitHub native Merge Queue is not used. Obsolete/superseded carriers are closed automatically and do not count as unresolved repair work; an active human hold remains a blocker. A successful trigger dispatch is not Council acceptance: acceptance requires the returned evidence-led disposition.

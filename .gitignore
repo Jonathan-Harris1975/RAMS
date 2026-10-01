@@ -9,3 +9,11 @@ __pycache__/
 /tmp/rams-reports/
 dry-run-*-report.json
 fallback-*-report.json
+
+.ci-tools/
+
+coverage/
+
+playwright-report/
+
+test-results/

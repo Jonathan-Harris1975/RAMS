@@ -30,6 +30,19 @@ RUN set -eux; \
     node -e "require('$npm_root/brace-expansion'); require('$npm_root/undici')"; \
     npm --version | grep -Fx '11.19.1'
 
+# Debian publishes the fixed source before all architecture binaries. Build the
+# signed Debian security source for this image's architecture; do not suppress
+# the six HIGH findings in libexpat1 2.5.0-1+deb12u3.
+FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS expat-security
+WORKDIR /security-build
+# hadolint ignore=DL3008,DL3009
+RUN printf '%s\n' 'deb-src [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://security.debian.org/debian-security bookworm-security main' > /etc/apt/sources.list.d/expat-security.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends build-essential dpkg-dev \
+    && apt-get build-dep -y --no-install-recommends expat \
+    && apt-get source --compile expat=2.5.0-1+deb12u4 \
+    && test "$(dpkg-deb --field libexpat1_*.deb Version)" = '2.5.0-1+deb12u4'
+
 FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS builder
 
 WORKDIR /build
@@ -68,6 +81,11 @@ RUN apt-get update \
         git \
         libatomic1 \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=expat-security /security-build/libexpat1_*.deb /tmp/libexpat1-security.deb
+RUN dpkg -i /tmp/libexpat1-security.deb \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libexpat1)" ge '2.5.0-1+deb12u4' \
+    && rm /tmp/libexpat1-security.deb
 
 # Bring in Node.js 24.x and npm without relying on distro packages that may lag
 # below the required major version for the SEO/AEO/GEO validation command.
