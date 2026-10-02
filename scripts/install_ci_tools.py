@@ -25,9 +25,9 @@ TOOLS = {
         "archive": "tar.gz",
     },
     "gitleaks": {
-        "version": "8.30.1",
-        "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
-        "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+        "version": "8.30.0",
+        "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz",
+        "sha256": "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e",
         "binary": "gitleaks",
         "archive": "tar.gz",
     },
