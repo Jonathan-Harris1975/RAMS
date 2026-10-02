@@ -1,5 +1,5 @@
 # Repository Automation Management Service 
-
+,
 RAMS is the controlled repository-remediation service for the website/AIMS estate. It is a Python/FastAPI application deployed on Koyeb with bounded model use, authenticated Cloudflare R2 evidence storage, branch-scoped repository mutation and fail-closed validation.
 
 RAMS accepts governed audit evidence, turns eligible findings into tightly bounded remediation work, materialises or refreshes the target repository, plans and validates changes, and publishes reports/evidence. It is deliberately not a general-purpose unattended code agent.
