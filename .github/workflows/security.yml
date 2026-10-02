@@ -40,6 +40,19 @@ jobs:
           --ignore-unfixed
           --exit-code 1
           --no-progress
+      - name: Verify Gitleaks detector is functional
+        shell: bash
+        run: |
+          set -euo pipefail
+          canary="ghp_$(printf 'rams-gitleaks-canary' | sha256sum | cut -c1-36)"
+          set +e
+          printf 'token = "%s"\n' "$canary" | .ci-tools/bin/gitleaks stdin --redact --no-banner --exit-code 42 >/dev/null 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 42 ]; then
+            echo "Gitleaks self-test failed: expected the synthetic canary to be detected (exit 42), got exit $status." >&2
+            exit 1
+          fi
       - name: Gitleaks full-history secret scan
         id: gitleaks
         continue-on-error: true
