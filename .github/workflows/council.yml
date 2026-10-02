@@ -1,15 +1,10 @@
 name: Repository Council
 
 on:
-  # Dispatch only: release Council only after merge/deployment evidence has settled.
   workflow_dispatch:
     inputs:
       target_sha:
-        description: "Exact default-branch SHA to judge (blank = current default branch)"
-        required: false
-        type: string
-      pending_minimum_age:
-        description: "Renovate updates still waiting on minimumReleaseAge (from the dashboard)"
+        description: "Exact default-branch SHA to assess (blank = current default branch)"
         required: false
         type: string
 
@@ -17,134 +12,71 @@ permissions:
   actions: read
   contents: read
   pull-requests: read
+  security-events: read
 
 concurrency:
-  group: repository-council
+  group: repository-council-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
   council:
     runs-on: ubuntu-latest
+    timeout-minutes: 145
     steps:
-      - name: Check out trusted Council definition
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-
-      - name: Resolve and validate target SHA
+      - name: Resolve exact target SHA
         id: target
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REQUESTED_SHA: ${{ inputs.target_sha }}
-        shell: bash
+          REQUESTED_SHA: ${{ inputs.target_sha || '' }}
         run: |
           set -euo pipefail
-          default_sha="$(gh api "repos/${REPO}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
-          target="${REQUESTED_SHA:-$default_sha}"
-          resolved="$(gh api "repos/${REPO}/commits/${target}" --jq '.sha')"
-          if [ "$resolved" != "$default_sha" ]; then
-            echo "::error::Council only judges the current default-branch SHA. Requested/resolved ${resolved}; current ${default_sha}."
-            exit 1
-          fi
-          printf 'sha=%s\n' "$resolved" >> "$GITHUB_OUTPUT"
-
-      - name: Require current exact-SHA CI and security evidence
+          current="$(gh api "repos/${REPO}/commits/${DEFAULT_BRANCH}" --jq .sha)"
+          target="${REQUESTED_SHA:-$current}"
+          test "$target" = "$current" || { echo "::error::Council target must be the current default-branch SHA."; exit 1; }
+          echo "sha=$target" >> "$GITHUB_OUTPUT"
+      - name: Require exact-SHA CI/security evidence
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           REQUIRED_WORKFLOWS: "CI|CodeQL|Security and repository quality"
-        shell: bash
         run: |
           set -euo pipefail
           IFS='|' read -r -a required <<< "$REQUIRED_WORKFLOWS"
-          for _ in $(seq 1 60); do
-            runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" --jq 'map(.workflow_runs) | add')"
-            ready=true
-            for workflow in "${required[@]}"; do
-              result="$(jq -r --arg name "$workflow" --arg branch "$DEFAULT_BRANCH" --arg sha "$TARGET_SHA" \
-                '[.[] | select(.name == $name and .head_branch == $branch and .head_sha == $sha and .event != "pull_request")] | sort_by(.run_number, .run_attempt) | last | if .status == "completed" then .conclusion else "pending" end' <<< "$runs")"
-              case "$result" in
-                success) ;;
-                failure|cancelled|timed_out|action_required|skipped|neutral|stale)
-                  echo "::error::Required workflow $workflow returned $result for $TARGET_SHA."
-                  exit 1 ;;
-                *) ready=false ;;
-              esac
-            done
-            if [ "$ready" = true ]; then
-              exit 0
-            fi
-            sleep 5
+          runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" --jq 'map(.workflow_runs) | add')"
+          for workflow in "${required[@]}"; do
+            result="$(jq -r --arg name "$workflow" '[.[] | select(.name == $name and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
+            test "$result" = success || { echo "::error::$workflow exact-SHA evidence is $result"; exit 1; }
           done
-          echo "::error::Exact-SHA CI/security evidence did not become ready."
-          exit 1
-
-      - name: Refuse Council while autonomous repair is unresolved
+      - name: Refuse unresolved autonomy state
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        shell: bash
         run: |
           set -euo pipefail
-          blockers="$(gh pr list --repo "$REPO" --state open --limit 1000 \
-            --json number,title,labels,url \
-            --jq '[.[] | select(any(.labels[]?; .name == "autonomy:human-hold") or (any(.labels[]?; .name == "autonomy:repair") and (any(.labels[]?; .name == "autonomy:obsolete" or .name == "autonomy:superseded") | not)))]')"
-          count="$(jq 'length' <<< "$blockers")"
-          if [ "$count" -gt 0 ]; then
-            echo "::error::Council cannot start with ${count} unresolved autonomy repair/human-hold PR(s)."
-            jq -r '.[] | "#\(.number) \(.title) \(.url)"' <<< "$blockers"
-            exit 1
-          fi
-
+          blockers="$(gh pr list --state open --limit 1000 --json number,labels,url --jq '[.[] | select(any(.labels[]?; .name == "autonomy:human-hold") or (any(.labels[]?; .name == "autonomy:repair") and (any(.labels[]?; .name == "autonomy:obsolete" or .name == "autonomy:superseded") | not)))]')"
+          test "$(jq length <<< "$blockers")" -eq 0 || { jq . <<< "$blockers"; exit 1; }
       - name: Validate Kilo Council trigger
         env:
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
-        shell: bash
         run: |
-          set -euo pipefail
-          test -n "${KILO_REPAIR_TRIGGER_URL:-}" || { echo "::error::KILO_REPAIR_TRIGGER_URL is required."; exit 1; }
+          test -n "${KILO_REPAIR_TRIGGER_URL:-}"
           python3 .github/scripts/kilo_webhook_url.py
-
-      - name: Dispatch repository Council to Kilo
+      - name: Dispatch Council contract to Kilo
         env:
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
-          PENDING_MINIMUM_AGE: ${{ inputs.pending_minimum_age || 'unknown' }}
-          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
-        shell: bash
         run: |
           set -euo pipefail
           prompt="$(cat .council/council.md)"
-          test -n "${prompt//[[:space:]]/}" || { echo "::error::Council contract is empty."; exit 1; }
-          task="$(cat <<EOF
-          Run the repository Council defined below against exact SHA ${TARGET_SHA} in ${REPO}.
-          The checked-in .council/council.md is the authoritative Council contract.
-          Inspect live GitHub Actions, security, pull-request, merge, deployment and repository evidence tied to that SHA.
-          Do not infer missing evidence and do not weaken checks.
-          Renovate updates still waiting on minimumReleaseAge at this run: ${PENDING_MINIMUM_AGE}. Record them as PENDING_MINIMUM_AGE (not a failure).
-          If a safe repository change is required, make the smallest justified change on one branch and open one PR against the default branch. Do not merge or deploy it yourself.
-          If no code change is required, do not create a cosmetic PR.
-          Return the Council disposition and evidence in the Kilo task result.
-
-          ${prompt}
-          EOF
-          )"
-          payload="$(jq -n \
-            --arg repository "$REPO" \
-            --arg sha "$TARGET_SHA" \
-            --arg run "$RUN_URL" \
-            --arg task "$task" \
-            '{repository:$repository,target_sha:$sha,council_run:$run,kind:"repository-council",task:$task}')"
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 \
-            --request POST --header 'Content-Type: application/json' --data "$payload" "$KILO_REPAIR_TRIGGER_URL")"
-          if [[ "$status" != 2?? ]]; then
-            echo "::error::Kilo Council trigger returned HTTP ${status}."
-            exit 1
-          fi
-          echo "Council dispatched for ${REPO}@${TARGET_SHA}."
+          task="Run the checked-in Council contract for $REPO@$TARGET_SHA. Do not create a cosmetic PR.\n\n$prompt"
+          payload="$(jq -n --arg repository "$REPO" --arg sha "$TARGET_SHA" --arg task "$task" '{repository:$repository,target_sha:$sha,kind:"repository-council",task:$task}')"
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 -X POST -H 'Content-Type: application/json' --data "$payload" "$KILO_REPAIR_TRIGGER_URL")"
+          [[ "$code" == 2?? ]] || { echo "::error::Kilo Council trigger returned HTTP $code"; exit 1; }
