@@ -2,7 +2,7 @@ name: Autonomous PR issue repair
 
 on:
   workflow_run:
-    workflows: ["CI", "Koyeb production deployment watch", "Renovate dependency lock sync", "CodeQL", "Security and repository quality"]
+    workflows: ["CI", "CodeQL", "Security and repository quality"]
     types: [completed]
   issue_comment:
     types: [created]
@@ -30,8 +30,9 @@ jobs:
          (github.event.issue.pull_request &&
           (github.event.comment.user.type != 'Bot' ||
            github.event.comment.user.login == (vars.KILO_REPAIR_PR_LOGIN || 'kilo-code-bot[bot]')))) &&
-        (github.event_name != 'workflow_run' || github.event.action != 'requested' ||
-         github.event.workflow_run.event == 'pull_request')
+        (github.event_name != 'workflow_run' ||
+         (github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.conclusion == 'failure'))
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
