@@ -1,6 +1,0 @@
-Delete these paths from the repository when applying this update:
-
-.autonomy/repair-requests/36410726478.md
-.autonomy/repair-requests/36411980721.md
-.autonomy/repair-requests/36412036451.md
-.github/ISSUE_TEMPLATE/autonomous-repair.yml
