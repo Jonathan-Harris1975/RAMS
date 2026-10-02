@@ -55,27 +55,59 @@ jobs:
           fi
       - name: Gitleaks full-history secret scan
         id: gitleaks
-        continue-on-error: true
-        run: >-
-          .ci-tools/bin/gitleaks git .
-          --redact
-          --no-banner
-          --report-format json
-          --report-path gitleaks-report.json
-          --exit-code 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep "secret found" distinct from an operational scanner failure.
+          # Gitleaks otherwise uses exit 1 for findings, which makes an empty
+          # report needlessly ambiguous when CI itself has failed.
+          set +e
+          .ci-tools/bin/gitleaks git . \
+            --redact \
+            --no-banner \
+            --report-format json \
+            --report-path gitleaks-report.json \
+            --exit-code 42 2>&1 | tee gitleaks-scan.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          # Always leave a valid redacted report behind for the diagnostic
+          # artifact, including the clean-repository case.
+          if [ ! -s gitleaks-report.json ]; then
+            printf '[]\n' > gitleaks-report.json
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("gitleaks-report.json").read_text(encoding="utf-8"))
+          if not isinstance(report, list):
+              raise SystemExit("Gitleaks JSON report is not a list")
+          PY
+
+          case "$status" in
+            0)
+              echo 'Gitleaks completed: no unignored secrets detected.'
+              ;;
+            42)
+              echo 'Gitleaks detected potential secrets. See the redacted diagnostic artifact.' >&2
+              exit 42
+              ;;
+            *)
+              echo "Gitleaks scanner failed operationally with exit $status; this is not being misreported as a secret finding." >&2
+              exit "$status"
+              ;;
+          esac
       - name: Upload redacted Gitleaks diagnostic report
-        if: always() && hashFiles('gitleaks-report.json') != ''
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gitleaks-redacted-diagnostic-${{ github.run_id }}
-          path: gitleaks-report.json
-          if-no-files-found: error
+          path: |
+            gitleaks-report.json
+            gitleaks-scan.log
+          if-no-files-found: warn
           retention-days: 14
-      - name: Enforce Gitleaks result
-        if: steps.gitleaks.outcome == 'failure'
-        run: |
-          echo 'Gitleaks detected potential secrets. Download the redacted diagnostic artifact for rule, file, commit, line and fingerprint metadata.' >&2
-          exit 1
       - name: Validate GitHub Actions workflows
         run: .ci-tools/bin/actionlint -color
 
