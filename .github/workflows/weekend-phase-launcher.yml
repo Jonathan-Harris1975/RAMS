@@ -61,9 +61,11 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "phase=$phase" >> "$GITHUB_OUTPUT"
-          echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
+          {
+            echo "run=true"
+            echo "phase=$phase"
+            echo "workflow=$workflow"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Dispatch phase workflow
         if: steps.slot.outputs.run == 'true'
