@@ -1,11 +1,9 @@
 """Behavioural safety tests; no GitHub credentials or network access required."""
 import copy
 import importlib.util
-import json
 import os
 from pathlib import Path
 import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 os.environ.setdefault('GH_TOKEN', 'test-token')
