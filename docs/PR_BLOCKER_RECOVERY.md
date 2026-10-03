@@ -15,3 +15,5 @@ The agent receipt comment is one line:
 ```
 
 Only the configured Kilo implementation identity or installed repair App identity is trusted to supply receipts. The workflow uses pull-request write permission solely to resolve verified bot review threads. Existing native merge protections and reviewer decisions remain authoritative.
+
+Interactive events are authenticated in a read-only job against trusted bot identities, repository collaborators and the verified installed repair App before a write-scoped recovery job starts. Operational reports include safe error codes, HTTP status where available and a specific next action; raw exception URLs and response bodies are withheld.
