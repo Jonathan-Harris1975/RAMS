@@ -37,7 +37,7 @@ class Diagnostics(unittest.TestCase):
                 }],
             }]}))
             out = root / 'out'
-            text = security.render(out, {'gitleaks': {'outcome': 'failure'}}, 'owner/repo', 'https://github.com/owner/repo/actions/runs/1', raw)
+            text = security.render(out, {'gitleaks': {'outcome': 'failure', 'outputs': {'token': 'DO_NOT_PUBLISH_STEP_OUTPUT'}}}, 'owner/repo', 'https://github.com/owner/repo/actions/runs/1', raw)
             for p in out.iterdir():
                 self.assertNotIn('DO_NOT_PUBLISH', p.read_text())
             self.assertIn('/blob/' + 'a' * 40 + '/fixtures/example.py#L12', text)

@@ -150,7 +150,8 @@ def render(report_dir, steps, repo, run_url, raw_dir):
               '', 'Download **security-diagnostics** from this run’s Artifacts section for the Markdown report and metadata-only JSON.']
     result = '\n'.join(lines) + '\n'
     (report_dir / 'security-findings.md').write_text(result)
-    (report_dir / 'check-outcomes.json').write_text(json.dumps(steps, indent=2) + '\n')
+    outcomes = {name: {key: step.get(key) for key in ('outcome', 'conclusion')} for name, step in steps.items()}
+    (report_dir / 'check-outcomes.json').write_text(json.dumps(outcomes, indent=2) + '\n')
     return result
 
 
