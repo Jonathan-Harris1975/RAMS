@@ -68,3 +68,24 @@ history cannot inherit it. A new CI attempt invalidates an older release. Missin
 or expired evidence and bounded-pagination failures stop admission. No workflow
 scanner exception is added for this controller; trigger audit findings remain
 visible for review.
+
+
+## RAMS canonical hashed-lock ownership
+
+The privileged `renovate-lock-sync.yml` remains retired. Renovate's canonical
+`pip-compile` manager owns all five explicit compiled output paths and discovers
+their authoritative `.in` inputs. Independent `pip_requirements` extraction is
+disabled so compiled locks cannot become a second source of version proposals.
+Runtime updates propagate to both runtime and development outputs. Existing
+Python metadata in `pyproject.toml` remains Renovate-managed and the consistency
+gate still validates the full dependency architecture.
+
+The five existing lock files have only their recorded compile-command comments
+normalised to options supported by the pinned Renovate parser. Every package
+version, hash and lock body is unchanged. The manual regeneration utility emits
+compatible headers while retaining its no-trusted-host-output control during
+execution. Renovate alone selects future versions and regenerates locks on its
+existing PR branch; no repair App writes locks or executes PR package tooling.
+The original hash/compile, CI and security gates still validate the resulting
+exact head. Actual pinned Renovate extraction and strict configuration validation
+pass locally; live Renovate regeneration and merge acceptance remain unproved.

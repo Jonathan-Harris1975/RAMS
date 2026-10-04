@@ -55,5 +55,13 @@
       ]
     }
   ],
-  "automerge": false
+  "automerge": false,
+  "pip-compile": {
+    "managerFilePatterns": [
+      "/^requirements(?:-runtime\\.lock|-(?:bootstrap|build|dev|lock-tools)\\.txt)$/"
+    ]
+  },
+  "pip_requirements": {
+    "enabled": false
+  }
 }

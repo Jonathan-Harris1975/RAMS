@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import re
 import sys
 from pathlib import Path
 
@@ -29,13 +30,25 @@ def main() -> None:
                 "--allow-unsafe",
                 "--no-emit-index-url",
                 "--no-emit-trusted-host",
-                "--no-strip-extras",
+                "--strip-extras",
                 "--output-file",
                 output,
                 source,
             ],
             cwd=ROOT,
             check=True,
+        )
+
+        # Keep this output-only security option active during compilation, but
+        # omit it from the header because Renovate's parser rejects it.
+        # Dependency versions and hashes are untouched by this metadata edit.
+        path = ROOT / output
+        path.write_text(
+            re.sub(
+                r"(?m)^#    pip-compile .*$",
+                lambda match: match[0].replace(" --no-emit-trusted-host", ""),
+                path.read_text(),
+            )
         )
 
     subprocess.run(
