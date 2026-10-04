@@ -172,6 +172,30 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         hold.assert_called_once()
         admit.assert_not_called()
 
+    def test_human_hold_label_withdraws_existing_mergify_admission(self):
+        pr = copy.deepcopy(self.pr)
+        pr["labels"].extend([{"name": "hold"}, {"name": "autonomy:admitted"}])
+        remove = self.enterContext(patch.object(automation, "delete"))
+        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+
+        automation.reconcile_pr(pr)
+
+        remove.assert_called_once_with(
+            "/repos/owner/repo/issues/22/labels/autonomy%3Aadmitted",
+            expected=(200, 204),
+        )
+        admit.assert_not_called()
+
+    def test_admit_to_mergify_refuses_human_hold_label(self):
+        pr = copy.deepcopy(self.pr)
+        pr["labels"].append({"name": "do-not-merge"})
+        self.enterContext(patch.object(automation, "get", return_value=pr))
+        add = self.enterContext(patch.object(automation, "add_labels"))
+
+        automation.admit_to_mergify(22)
+
+        add.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
