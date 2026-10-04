@@ -6,24 +6,30 @@
   "dependencyDashboard": true,
   "timezone": "Europe/London",
   "schedule": [
-    "after 5:00am and before 7:30am on sunday"
+    "after 1am and before 3am on saturday"
   ],
   "rangeStrategy": "replace",
   "platformAutomerge": false,
   "minimumReleaseAge": "2 days",
   "vulnerabilityAlerts": {
-    "automerge": true,
+    "automerge": false,
     "minimumReleaseAge": "0 days",
     "labels": [
       "security"
+    ],
+    "addLabels": [
+      "dependency:auto-eligible"
     ]
   },
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": [
-      "after 5:00am and before 7:30am on sunday"
+      "after 1am and before 3am on saturday"
     ],
-    "automerge": true
+    "automerge": false,
+    "addLabels": [
+      "dependency:auto-eligible"
+    ]
   },
   "packageRules": [
     {
@@ -33,16 +39,21 @@
         "minor",
         "digest"
       ],
-      "automerge": true
+      "automerge": false,
+      "addLabels": [
+        "dependency:auto-eligible"
+      ]
     },
     {
       "description": "Keep major updates under manual review",
       "matchUpdateTypes": [
         "major"
       ],
-      "automerge": false
+      "automerge": false,
+      "addLabels": [
+        "dependency:manual"
+      ]
     }
   ],
-  "automergeType": "pr-comment",
-  "automergeComment": "@mergifyio queue"
+  "automerge": false
 }
