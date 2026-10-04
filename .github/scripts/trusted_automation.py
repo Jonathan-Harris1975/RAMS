@@ -28,6 +28,15 @@ CARRIER_PREFIX = "[autonomy] Repair "
 BRANCH_PR_LABEL = "automation:branch-pr"
 BRANCH_PR_RE = re.compile(r"^(fix|feat|chore|ci|work|codex)/[A-Za-z0-9._/-]+$")
 URL_END = r"(?![A-Za-z0-9/_-])"
+BLOCKING_LABELS = {
+    "autonomy:human-hold",
+    "autonomy:superseded",
+    "autonomy:obsolete",
+    "do-not-merge",
+    "do not merge",
+    "hold",
+    "needs-manual-review",
+}
 
 KILO_SENSITIVE_PREFIXES = (
     ".github/workflows/",
@@ -393,6 +402,13 @@ def admit_to_mergify(number: int) -> None:
     if pr.get("state") != "open":
         return
     labels = issue_labels(pr)
+    blocking = labels.intersection(BLOCKING_LABELS)
+    if blocking:
+        if "autonomy:admitted" in labels:
+            encoded = urllib.parse.quote("autonomy:admitted", safe="")
+            delete(f"/repos/{REPO}/issues/{number}/labels/{encoded}", expected=(200, 204))
+        log(f"PR #{number} admission withheld by blocking label(s): {', '.join(sorted(blocking))}.")
+        return
     if "autonomy:admitted" in labels:
         log(f"PR #{number} is already admitted to Mergify.")
         return
@@ -436,7 +452,18 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     if kind is None or pr.get("draft"):
         return
     labels = issue_labels(pr)
-    if labels.intersection({"autonomy:human-hold", "autonomy:superseded", "autonomy:obsolete"}):
+    blocking = labels.intersection(BLOCKING_LABELS)
+    if blocking:
+        if "autonomy:admitted" in labels:
+            encoded = urllib.parse.quote("autonomy:admitted", safe="")
+            delete(
+                f"/repos/{REPO}/issues/{int(pr['number'])}/labels/{encoded}",
+                expected=(200, 204),
+            )
+            log(
+                f"Withdrew Mergify admission for PR #{pr['number']} because of "
+                f"blocking label(s): {', '.join(sorted(blocking))}."
+            )
         return
     if kind == "carrier":
         # Carriers record the failed run and remain blocked until the linked
