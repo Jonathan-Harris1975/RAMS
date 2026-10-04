@@ -3,5 +3,6 @@
   "deployment": "koyeb-deployment-watch.yml",
   "artifact": "rams-deployment-attestation-",
   "dast": true,
-  "dispatch_step": "Dispatch Council contract to Kilo"
+  "dispatch_step": "Dispatch Council contract to Kilo",
+  "ci_start": "Sat 03:30"
 }
