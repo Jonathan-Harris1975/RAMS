@@ -70,13 +70,14 @@ jobs:
           python3 .github/scripts/kilo_webhook_url.py
       - name: Dispatch Council contract to Kilo
         env:
+          COUNCIL_RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
         run: |
           set -euo pipefail
           prompt="$(cat .council/council.md)"
-          task="Run the checked-in Council contract for $REPO@$TARGET_SHA. Do not create a cosmetic PR.\n\n$prompt"
-          payload="$(jq -n --arg repository "$REPO" --arg sha "$TARGET_SHA" --arg task "$task" '{repository:$repository,target_sha:$sha,kind:"repository-council",task:$task}')"
+          task="Run the checked-in Council contract for $REPO@$TARGET_SHA. Source Council run ID: $COUNCIL_RUN_ID. Return the completed disposition through the authenticated completion handoff in the contract. Do not create a cosmetic PR.\n\n$prompt"
+          payload="$(jq -n --arg repository "$REPO" --arg sha "$TARGET_SHA" --arg council_run_id "$COUNCIL_RUN_ID" --arg task "$task" '{repository:$repository,target_sha:$sha,council_run_id:$council_run_id,kind:"repository-council",task:$task}')"
           code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 -X POST -H 'Content-Type: application/json' --data "$payload" "$KILO_REPAIR_TRIGGER_URL")"
           [[ "$code" == 2?? ]] || { echo "::error::Kilo Council trigger returned HTTP $code"; exit 1; }

@@ -1,0 +1,7 @@
+{
+  "ci": "ci.yml",
+  "deployment": "koyeb-deployment-watch.yml",
+  "artifact": "rams-deployment-attestation-",
+  "dast": true,
+  "dispatch_step": "Dispatch Council contract to Kilo"
+}
