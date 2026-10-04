@@ -38,10 +38,10 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           MANUAL_PHASE: ${{ inputs.phase || '' }}
+          SCHEDULE_EXPR: ${{ github.event.schedule || '' }}
         shell: bash
         run: |
           set -euo pipefail
-          now="$(TZ=Europe/London date '+%a %H:%M')"
           phase=""; workflow=""
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             phase="$MANUAL_PHASE"
@@ -52,12 +52,20 @@ jobs:
               *) echo "::error::Unsupported phase $phase"; exit 1 ;;
             esac
           else
-          if [ "$now" = "Sat 03:30" ]; then phase="ci"; workflow="ci.yml"; fi
-          if [ "$now" = "Sat 18:00" ]; then phase="dast"; workflow="dast.yml"; fi
-          if [ "$now" = "Sun 08:30" ]; then phase="council"; workflow="council.yml"; fi
+            # GitHub scheduled jobs may start late. Resolve the immutable cron
+            # expression that fired rather than comparing the runner start minute.
+            london_offset="$(TZ=Europe/London date '+%z')"
+            case "${SCHEDULE_EXPR}:${london_offset}" in
+              "30 2 * * 6:+0100"|"30 3 * * 6:+0000")
+                phase="ci"; workflow="ci.yml" ;;
+              "0 17 * * 6:+0100"|"0 18 * * 6:+0000")
+                phase="dast"; workflow="dast.yml" ;;
+              "30 7 * * 0:+0100"|"30 8 * * 0:+0000")
+                phase="council"; workflow="council.yml" ;;
+            esac
           fi
           if [ -z "$phase" ]; then
-            echo "Scheduled UTC/DST duplicate is outside the intended London slot; no action."
+            echo "Scheduled UTC/DST duplicate is outside the intended Europe/London slot; no action."
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
