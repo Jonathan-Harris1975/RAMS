@@ -59,6 +59,57 @@ jobs:
           echo "Gitleaks self-test failed: expected the synthetic canary to be detected (exit 42), got exit $status." >&2
           exit 1
         fi
+    - name: Verify Gitleaks exact-fingerprint ignore contract
+      shell: bash
+      run: |
+        set -euo pipefail
+        fixture="$(mktemp -d)"
+        trap 'rm -rf "$fixture"' EXIT
+        cd "$fixture"
+        git init -q
+        git config user.name 'RAMS CI'
+        git config user.email 'ci@example.invalid'
+
+        canary_one="ghp_$(printf 'rams-gitleaks-ignore-contract-one' | sha256sum | cut -c1-36)"
+        printf 'token = "%s"\n' "$canary_one" > ignored.txt
+        git add ignored.txt
+        git commit -qm 'synthetic ignored finding'
+
+        set +e
+        "$GITHUB_WORKSPACE/.ci-tools/bin/gitleaks" git . --redact=100 --no-banner --report-format json --report-path first.json --exit-code 42
+        first_status=$?
+        set -e
+        test "$first_status" -eq 42 || {
+          echo "::error::Gitleaks canary was not detected before allowlisting (exit $first_status)."
+          exit 1
+        }
+
+        fingerprint="$(jq -er '.[0].Fingerprint' first.json)"
+        printf '%s\n' "$fingerprint" > .gitleaksignore
+
+        set +e
+        "$GITHUB_WORKSPACE/.ci-tools/bin/gitleaks" git . --redact=100 --no-banner --exit-code 42
+        ignored_status=$?
+        set -e
+        test "$ignored_status" -eq 0 || {
+          echo "::error::Exact Gitleaks fingerprint was not suppressed (exit $ignored_status)."
+          exit 1
+        }
+
+        canary_two="ghp_$(printf 'rams-gitleaks-ignore-contract-two' | sha256sum | cut -c1-36)"
+        printf 'token = "%s"\n' "$canary_two" > unlisted.txt
+        git add .gitleaksignore unlisted.txt
+        git commit -qm 'synthetic unlisted finding'
+
+        set +e
+        "$GITHUB_WORKSPACE/.ci-tools/bin/gitleaks" git . --redact=100 --no-banner --exit-code 42
+        unlisted_status=$?
+        set -e
+        test "$unlisted_status" -eq 42 || {
+          echo "::error::Unlisted synthetic finding did not fail Gitleaks (exit $unlisted_status)."
+          exit 1
+        }
+
     - name: Gitleaks full-history secret scan
       id: gitleaks
       shell: bash
