@@ -19,14 +19,14 @@ PENDING = {"pending", "provisioning", "scheduled", "allocating", "starting", "st
 
 
 def _walk(value: Any) -> Iterable[dict[str, Any]]:
-    if isinstance(value, dict):
-        if "status" in value and any(key in value for key in ("id", "created_at", "createdAt", "name")):
-            yield value
-        for child in value.values():
-            yield from _walk(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _walk(child)
+    """Read deployment records only, never nested builds or health-check steps."""
+    records = value.get("deployments") if isinstance(value, dict) else value
+    if not isinstance(records, list):
+        raise ValueError("Koyeb deployment list has an unexpected structure")
+    for item in records:
+        if not isinstance(item, dict) or not item.get("id") or "status" not in item:
+            raise ValueError("Koyeb deployment list contains an invalid record")
+        yield item
 
 
 def _created(item: dict[str, Any]) -> str:
