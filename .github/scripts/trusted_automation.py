@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admit and merge only verified automation pull requests.
+"""Admit only verified automation pull requests to Mergify.
 
 Runs from the trusted default-branch workflow. It never checks out or executes PR code.
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -25,11 +26,14 @@ REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
 RENOVATE_LOGIN = "renovate[bot]"
 KILO_LOGIN = os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]"
 CARRIER_PREFIX = "[autonomy] Repair "
+BRANCH_PR_LABEL = "automation:branch-pr"
+BRANCH_PR_RE = re.compile(r"^(fix|feat|chore|ci|work|codex)/[A-Za-z0-9._/-]+$")
 URL_END = r"(?![A-Za-z0-9/_-])"
 
 KILO_SENSITIVE_PREFIXES = (
     ".github/workflows/",
     ".github/actions/",
+    ".github/scripts/",
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".mergify.yml",
@@ -141,6 +145,21 @@ def renovate_automerge_enabled(pr: dict[str, Any]) -> bool:
     return is_renovate(pr) and "**Automerge**: Enabled." in (pr.get("body") or "")
 
 
+def is_managed_branch_pr(pr: dict[str, Any]) -> bool:
+    """Recognise trusted implementation PRs without giving them merge authority."""
+    labels = issue_labels(pr)
+    branch = str(pr.get("head", {}).get("ref", ""))
+    return (
+        pr.get("user", {}).get("login") == REPAIR_APP_LOGIN
+        and pr.get("state") == "open"
+        and not pr.get("draft")
+        and is_same_repo(pr)
+        and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
+        and BRANCH_PR_LABEL in labels
+        and BRANCH_PR_RE.fullmatch(branch) is not None
+    )
+
+
 def is_repair_carrier_identity(pr: dict[str, Any]) -> bool:
     """Identify a repair carrier regardless of lifecycle labels."""
     return (
@@ -246,6 +265,8 @@ def automation_kind(pr: dict[str, Any]) -> str | None:
     labels = issue_labels(pr)
     if is_renovate(pr):
         return "renovate"
+    if is_managed_branch_pr(pr):
+        return "branch-pr"
     if is_carrier(pr):
         return "carrier"
     if (pr.get("user", {}).get("login") == KILO_LOGIN and is_same_repo(pr) and
@@ -428,10 +449,14 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         # Major/manual Renovate PRs may run CI automatically, but remain human merge decisions.
         return
 
-    if kind == "kilo":
+    if kind in {"kilo", "branch-pr"}:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
-            place_human_hold(pr, "the repair changes governance/security automation files: " + ", ".join(sensitive[:8]))
+            source = "repair" if kind == "kilo" else "managed branch"
+            place_human_hold(
+                pr,
+                f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
+            )
             return
 
     if kind == "kilo":
