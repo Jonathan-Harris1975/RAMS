@@ -6,43 +6,51 @@
   "dependencyDashboard": true,
   "timezone": "Europe/London",
   "schedule": [
-    "after 5:00am and before 7:30am on sunday"
+    "after 1:00am and before 3:30am on saturday"
   ],
   "rangeStrategy": "replace",
   "platformAutomerge": false,
   "minimumReleaseAge": "2 days",
   "vulnerabilityAlerts": {
-    "automerge": true,
+    "automerge": false,
     "minimumReleaseAge": "0 days",
     "labels": [
-      "security"
+      "security",
+      "dependency:auto-eligible"
     ]
   },
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": [
-      "after 5:00am and before 7:30am on sunday"
+      "after 1:00am and before 3:30am on saturday"
     ],
-    "automerge": true
+    "automerge": false,
+    "labels": [
+      "dependency:auto-eligible"
+    ]
   },
   "packageRules": [
     {
-      "description": "Automerge patch, minor and digest updates (Python, Docker, GitHub Actions) once the stability window and required checks pass",
+      "description": "Mark patch, minor and digest updates (Python, Docker, GitHub Actions) once the stability window and required checks pass",
       "matchUpdateTypes": [
         "patch",
         "minor",
         "digest"
       ],
-      "automerge": true
+      "automerge": false,
+      "addLabels": [
+        "dependency:auto-eligible"
+      ]
     },
     {
       "description": "Keep major updates under manual review",
       "matchUpdateTypes": [
         "major"
       ],
-      "automerge": false
+      "automerge": false,
+      "addLabels": [
+        "dependency:manual"
+      ]
     }
-  ],
-  "automergeType": "pr-comment",
-  "automergeComment": "@mergifyio queue"
+  ]
 }
