@@ -20,10 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pinned release commit
-      with:
-        persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Check Koyeb deployment-watch configuration
         id: deployment_config
@@ -63,7 +62,9 @@ jobs:
             sha256sum --check --strict archive.sha256
             tar -xzf "$archive"
           )
-          sudo install -m 0755 "$workdir/koyeb" /usr/local/bin/koyeb
+          install -d -m 0755 "$HOME/.local/bin"
+          install -m 0755 "$workdir/koyeb" "$HOME/.local/bin/koyeb"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Watch production deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
