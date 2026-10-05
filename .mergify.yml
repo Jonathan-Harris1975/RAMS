@@ -45,6 +45,7 @@ merge_protections:
 queue_rules:
   - name: routine
     merge_method: squash
+    batch_size: 1
     queue_conditions:
       - base = main
       - label = autonomy:admitted
@@ -59,6 +60,8 @@ queue_rules:
       - -label = autonomy:obsolete
       - -label = autonomy:superseded
     merge_conditions:
+      - base = main
+      - label = autonomy:admitted
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
       - check-success = Trivy, Gitleaks and actionlint
@@ -112,6 +115,7 @@ pull_request_rules:
     actions:
       update:
 merge_queue:
+  max_parallel_checks: 1
   status_comments: outcomes
   queue_controls_comment: false
   skip_intermediate_results: false
