@@ -11,7 +11,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: rams-ci-${{ github.ref }}
+  # Keep exact-head PR evidence isolated from Mergify candidate/ref recalculations.
+  group: rams-ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
