@@ -478,12 +478,19 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     if kind in {"kilo", "branch-pr"}:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
-            source = "repair" if kind == "kilo" else "managed branch"
-            place_human_hold(
-                pr,
-                f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
-            )
-            return
+            number = int(pr["number"])
+            sha = str(pr.get("head", {}).get("sha", ""))
+            if not has_current_approval(number, sha):
+                source = "repair" if kind == "kilo" else "managed branch"
+                place_human_hold(
+                    pr,
+                    f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
+                )
+                return
+            if "autonomy:human-hold" in labels:
+                encoded = urllib.parse.quote("autonomy:human-hold", safe="")
+                delete(f"/repos/{REPO}/issues/{number}/labels/{encoded}", expected=(200, 204))
+                log(f"Cleared governance hold for PR #{number}: current head has explicit human approval.")
 
     if kind == "kilo":
         carriers = [source for source in list_open_prs() if is_carrier(source)]
