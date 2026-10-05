@@ -150,6 +150,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
                 return_value=[".github/workflows/security.yml"],
             )
         )
+        self.enterContext(patch.object(automation, "has_current_approval", return_value=False))
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
@@ -166,11 +167,43 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
                 return_value=[".github/scripts/trusted_automation.py"],
             )
         )
+        self.enterContext(patch.object(automation, "has_current_approval", return_value=False))
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
         hold.assert_called_once()
         admit.assert_not_called()
+
+    def test_exact_head_human_approval_clears_governance_hold(self):
+        pr = copy.deepcopy(self.pr)
+        pr["labels"].append({"name": "autonomy:human-hold"})
+        remove = self.enterContext(patch.object(automation, "delete"))
+        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+        approve = self.enterContext(patch.object(automation, "approve_pr"))
+        self.enterContext(
+            patch.object(
+                automation,
+                "pr_files",
+                return_value=[".github/workflows/security.yml"],
+            )
+        )
+        self.enterContext(patch.object(automation, "has_current_approval", return_value=True))
+        self.enterContext(
+            patch.object(
+                automation,
+                "all_required_checks_green",
+                return_value=(True, "green"),
+            )
+        )
+        self.enterContext(
+            patch.object(automation, "current_head_unchanged", return_value=pr)
+        )
+
+        automation.reconcile_pr(pr)
+
+        remove.assert_called_once()
+        admit.assert_called_once_with(22)
+        approve.assert_not_called()
 
     def test_human_hold_label_withdraws_existing_mergify_admission(self):
         pr = copy.deepcopy(self.pr)
