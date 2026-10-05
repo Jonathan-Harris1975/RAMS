@@ -402,16 +402,6 @@ def admit_to_mergify(number: int) -> None:
     if pr.get("state") != "open":
         return
     labels = issue_labels(pr)
-    if "autonomy:human-hold" in labels and kind in {"kilo", "branch-pr"}:
-        number = int(pr["number"])
-        sha = str(pr.get("head", {}).get("sha", ""))
-        sensitive = [path for path in pr_files(number) if sensitive_file(path)]
-        if sensitive and has_current_approval(number, sha):
-            encoded = urllib.parse.quote("autonomy:human-hold", safe="")
-            delete(f"/repos/{REPO}/issues/{number}/labels/{encoded}", expected=(200, 204))
-            labels.discard("autonomy:human-hold")
-            log(f"Cleared governance hold for PR #{number}: current head has explicit human approval.")
-
     blocking = labels.intersection(BLOCKING_LABELS)
     if blocking:
         if "autonomy:admitted" in labels:
@@ -462,6 +452,16 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     if kind is None or pr.get("draft"):
         return
     labels = issue_labels(pr)
+    if "autonomy:human-hold" in labels and kind in {"kilo", "branch-pr"}:
+        number = int(pr["number"])
+        sha = str(pr.get("head", {}).get("sha", ""))
+        sensitive = [path for path in pr_files(number) if sensitive_file(path)]
+        if sensitive and has_current_approval(number, sha):
+            encoded = urllib.parse.quote("autonomy:human-hold", safe="")
+            delete(f"/repos/{REPO}/issues/{number}/labels/{encoded}", expected=(200, 204))
+            labels.discard("autonomy:human-hold")
+            log(f"Cleared governance hold for PR #{number}: current head has explicit human approval.")
+
     blocking = labels.intersection(BLOCKING_LABELS)
     if blocking:
         if "autonomy:admitted" in labels:
