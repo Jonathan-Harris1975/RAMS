@@ -54,7 +54,7 @@ jobs:
           done
           jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
             --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
-            --arg status "${{ job.status }}" \
+            --arg status "$EVIDENCE_STATUS" \
             '{repository:$repository,default_branch_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,dast_status:$status,scanner:"OWASP ZAP"}' \
             > "$RUNNER_TEMP/dast-r2/summary.json"
           python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"
