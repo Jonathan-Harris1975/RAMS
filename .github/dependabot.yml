@@ -1,6 +1,6 @@
 version: 2
 updates:
-  - package-ecosystem: "pip" # zizmor: ignore[dependabot-cooldown] Renovate owns version updates; Dependabot remains for security updates.
+  - package-ecosystem: "pip" # Renovate owns all dependency PRs; Dependabot is passive with PR creation disabled.
     directory: "/"
     schedule:
       interval: "weekly"
@@ -32,7 +32,7 @@ updates:
     commit-message:
       prefix: "deps"
 
-  - package-ecosystem: "docker" # zizmor: ignore[dependabot-cooldown] Renovate owns version updates; Dependabot remains for security updates.
+  - package-ecosystem: "docker" # Renovate owns all dependency PRs; Dependabot is passive with PR creation disabled.
     directory: "/"
     schedule:
       interval: "weekly"
@@ -40,7 +40,7 @@ updates:
     commit-message:
       prefix: "deps(docker)"
 
-  - package-ecosystem: "github-actions" # zizmor: ignore[dependabot-cooldown] Renovate owns version updates; Dependabot remains for security updates.
+  - package-ecosystem: "github-actions" # Renovate owns all dependency PRs; Dependabot is passive with PR creation disabled.
     directory: "/"
     schedule:
       interval: "weekly"
