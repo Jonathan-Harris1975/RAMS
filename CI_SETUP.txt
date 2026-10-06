@@ -39,7 +39,7 @@ AUTONOMOUS PROVING-GROUP SETUP
 - DAST is enabled only when the authorised repository variables DAST_ENABLED=true and DAST_TARGET_URL is non-empty; the target must be HTTPS.
 - DAST and Council workflow evidence is persisted to the existing Cloudflare R2 bucket hive-repositories, bound to repository, exact default SHA, workflow run ID and run attempt.
 - R2 workflow persistence uses repository Actions secrets R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and the established RAMS R2 endpoint (or repository variable R2_ENDPOINT). Missing/insufficient bucket credentials are a persistence failure, not success.
-- Council workflow evidence records dispatched-not-certified until a genuine final Council certification result is available; dispatching Kilo must not be misreported as completed certification.
+- Repository Council now certifies the exact current default-branch SHA directly from live CI/security, autonomy-state, Mergify policy, DAST and Koyeb deployment evidence. Kilo is not the Council certifier; Kilo remains the deterministic repair agent.
 - Codecov remains repository-specific and must not be treated as a required merge gate unless the live ruleset says otherwise.
 
 - GitHub Actions must be allowed to create pull requests in repository Actions settings for the autonomous repair-PR workflow.
