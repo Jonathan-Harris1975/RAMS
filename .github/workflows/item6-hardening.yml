@@ -12,7 +12,7 @@ on:
 
 concurrency:
   group: item6-hardening-${{ github.repository }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
