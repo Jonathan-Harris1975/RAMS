@@ -42,7 +42,6 @@ KILO_SENSITIVE_PREFIXES = (
     ".github/workflows/",
     ".github/actions/",
     ".github/scripts/",
-    ".github/scripts/",
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".mergify.yml",
