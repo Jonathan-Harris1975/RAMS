@@ -158,32 +158,3 @@ jobs:
           CERTIFICATION_STATE: ${{ steps.certify.outputs.disposition || 'NOT_READY' }}
           EVIDENCE_FILES: council-report.json
         run: python .github/scripts/persist_r2_evidence.py
-
-      - name: Persist completed Council report in canonical R2 layout
-        if: always() && steps.target.outputs.sha != ''
-        env:
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          EVIDENCE_STATUS: ${{ steps.certify.outputs.disposition || 'NOT_READY' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f council-report.json || { echo "::error::Completed Council JSON is unavailable."; exit 1; }
-          mkdir -p "$RUNNER_TEMP/council-r2"
-          cp council-report.json "$RUNNER_TEMP/council-r2/council-report.json"
-          {
-            echo "# Repository Council report"
-            echo
-            echo "- Repository: $GITHUB_REPOSITORY"
-            echo "- Exact SHA: ${{ steps.target.outputs.sha }}"
-            echo "- Workflow run: $GITHUB_RUN_ID"
-            echo "- Attempt: $GITHUB_RUN_ATTEMPT"
-            echo "- Disposition: ${{ steps.certify.outputs.disposition || 'NOT_READY' }}"
-            echo
-            echo "## Machine-readable assessment"
-            echo
-            echo '~~~json'
-            cat council-report.json
-            echo '~~~'
-          } > "$RUNNER_TEMP/council-r2/council-report.md"
-          python3 .github/scripts/persist_ci_report_r2.py council "${{ steps.target.outputs.sha }}" "$RUNNER_TEMP/council-r2"
