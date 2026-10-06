@@ -10,9 +10,11 @@ on:
 
 permissions:
   actions: read
+  checks: read
   contents: read
   pull-requests: read
   security-events: read
+  statuses: read
 
 concurrency:
   group: repository-council-${{ github.repository }}
@@ -21,6 +23,8 @@ concurrency:
 env:
   R2_ENDPOINT: ${{ vars.R2_ENDPOINT || 'https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com' }}
   EVIDENCE_BUCKET: hive-repositories
+  DAST_ENABLED: ${{ vars.DAST_ENABLED || 'false' }}
+  DAST_TARGET_URL: ${{ vars.DAST_TARGET_URL || '' }}
 
 jobs:
   council:
@@ -31,6 +35,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+
       - name: Resolve exact target SHA
         id: target
         env:
@@ -44,50 +49,105 @@ jobs:
           target="${REQUESTED_SHA:-$current}"
           test "$target" = "$current" || { echo "::error::Council target must be the current default-branch SHA."; exit 1; }
           echo "sha=$target" >> "$GITHUB_OUTPUT"
-      - name: Require exact-SHA CI/security evidence
+
+      - name: Certify exact default SHA
+        id: certify
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REQUIRED_WORKFLOWS: "CI|CodeQL|Security and repository quality"
+        shell: bash
         run: |
-          set -euo pipefail
-          IFS='|' read -r -a required <<< "$REQUIRED_WORKFLOWS"
+          set -uo pipefail
+          failures='[]'
+          evidence='{}'
+
           runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" --jq 'map(.workflow_runs) | add')"
-          for workflow in "${required[@]}"; do
+
+          for workflow in "CI" "CodeQL" "Security and repository quality" "Item 6 hardening"; do
             result="$(jq -r --arg name "$workflow" '[.[] | select(.name == $name and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
-            test "$result" = success || { echo "::error::$workflow exact-SHA evidence is $result"; exit 1; }
+            evidence="$(jq --arg k "$workflow" --arg v "$result" '.workflows[$k]=$v' <<< "$evidence")"
+            if [ "$result" != "success" ]; then
+              failures="$(jq --arg v "$workflow exact-SHA evidence is $result" '. + [$v]' <<< "$failures")"
+            fi
           done
-      - name: Refuse unresolved autonomy state
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
+
           blockers="$(gh pr list --state open --limit 1000 --json number,labels,url --jq '[.[] | select(any(.labels[]?; .name == "autonomy:human-hold") or (any(.labels[]?; .name == "autonomy:repair") and (any(.labels[]?; .name == "autonomy:obsolete" or .name == "autonomy:superseded") | not)))]')"
-          test "$(jq length <<< "$blockers")" -eq 0 || { jq . <<< "$blockers"; exit 1; }
-      - name: Validate Kilo Council trigger
-        env:
-          KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
-        run: |
-          test -n "${KILO_REPAIR_TRIGGER_URL:-}"
-          python3 .github/scripts/kilo_webhook_url.py
-      - name: Dispatch Council contract to Kilo
-        env:
-          REPO: ${{ github.repository }}
-          TARGET_SHA: ${{ steps.target.outputs.sha }}
-          KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
-        run: |
-          set -euo pipefail
-          prompt="$(cat .council/council.md)"
-          task="Run the checked-in Council contract for $REPO@$TARGET_SHA. Do not create a cosmetic PR.\n\n$prompt"
-          payload="$(jq -n --arg repository "$REPO" --arg sha "$TARGET_SHA" --arg task "$task" '{repository:$repository,target_sha:$sha,kind:"repository-council",task:$task}')"
-          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 -X POST -H 'Content-Type: application/json' --data "$payload" "$KILO_REPAIR_TRIGGER_URL")"
-          [[ "$code" == 2?? ]] || { echo "::error::Kilo Council trigger returned HTTP $code"; exit 1; }
+          blocker_count="$(jq length <<< "$blockers")"
+          evidence="$(jq --argjson n "$blocker_count" '.autonomyBlockerCount=$n' <<< "$evidence")"
+          if [ "$blocker_count" -ne 0 ]; then
+            failures="$(jq --arg v "unresolved autonomy state exists" '. + [$v]' <<< "$failures")"
+          fi
+
+          mergify_ok="$(python3 - <<'PY'
+          from pathlib import Path
+          text = Path(".mergify.yml").read_text()
+          checks = [
+              "merge_method: squash",
+              "label = autonomy:admitted",
+              "check-success = ci-gate",
+              "check-success = CodeQL security alert gate",
+              "check-success = Trivy, Gitleaks and actionlint",
+          ]
+          print("true" if all(item in text for item in checks) else "false")
+          PY
+          )"
+          evidence="$(jq --argjson ok "$mergify_ok" '.mergifyPolicy=$ok' <<< "$evidence")"
+          if [ "$mergify_ok" != "true" ]; then
+            failures="$(jq --arg v "Mergify policy does not prove admitted squash-merge authority" '. + [$v]' <<< "$failures")"
+          fi
+
+          koyeb_state="$(gh api "repos/${REPO}/commits/${TARGET_SHA}/status" --jq '[.statuses[] | select(.context | startswith("Koyeb - "))] | sort_by(.updated_at) | last | .state // "missing"')"
+          evidence="$(jq --arg v "$koyeb_state" '.koyebDeployment=$v' <<< "$evidence")"
+          if [ "$koyeb_state" != "success" ]; then
+            failures="$(jq --arg v "Koyeb deployment status is $koyeb_state" '. + [$v]' <<< "$failures")"
+          fi
+
+          if [ "$DAST_ENABLED" = "true" ]; then
+            if [ -z "$DAST_TARGET_URL" ]; then
+              dast_state="INVALID_CONFIGURATION"
+              failures="$(jq --arg v "DAST_ENABLED=true but DAST_TARGET_URL is empty" '. + [$v]' <<< "$failures")"
+            else
+              dast_state="$(jq -r '[.[] | select(.name == "DAST penetration test" and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
+              if [ "$dast_state" != "success" ]; then
+                failures="$(jq --arg v "DAST exact-SHA evidence is $dast_state" '. + [$v]' <<< "$failures")"
+              fi
+            fi
+          else
+            dast_state="DAST_DISABLED"
+          fi
+          evidence="$(jq --arg v "$dast_state" '.dast=$v' <<< "$evidence")"
+
+          failure_count="$(jq length <<< "$failures")"
+          if [ "$failure_count" -eq 0 ]; then
+            disposition="READY_FOR_COUNCIL_ACCEPTANCE"
+          else
+            disposition="NOT_READY"
+          fi
+
+          jq -n             --arg schemaVersion "rams-repository-council/v1"             --arg repository "$REPO"             --arg targetSha "$TARGET_SHA"             --arg workflowRunId "$GITHUB_RUN_ID"             --arg workflowRunAttempt "$GITHUB_RUN_ATTEMPT"             --arg disposition "$disposition"             --argjson evidence "$evidence"             --argjson failures "$failures"             '{
+              schemaVersion:$schemaVersion,
+              repository:$repository,
+              targetSha:$targetSha,
+              workflowRunId:$workflowRunId,
+              workflowRunAttempt:$workflowRunAttempt,
+              disposition:$disposition,
+              evidence:$evidence,
+              failures:$failures
+            }' > council-report.json
+
+          echo "disposition=$disposition" >> "$GITHUB_OUTPUT"
+          cat council-report.json
+          if [ "$disposition" != "READY_FOR_COUNCIL_ACCEPTANCE" ]; then
+            echo "::error::Repository Council disposition: $disposition"
+            exit 1
+          fi
+
       - name: Install pinned R2 client dependencies
         if: always()
         run: python -m pip install --require-hashes -r requirements-runtime.lock
-      - name: Persist Council workflow evidence to hive-repositories
+
+      - name: Persist Council certification evidence to hive-repositories
         if: always()
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -95,5 +155,6 @@ jobs:
           TARGET_SHA: ${{ steps.target.outputs.sha || github.sha }}
           EVIDENCE_KIND: council
           EVIDENCE_STATUS: ${{ job.status }}
-          CERTIFICATION_STATE: dispatched-not-certified
+          CERTIFICATION_STATE: ${{ steps.certify.outputs.disposition || 'NOT_READY' }}
+          EVIDENCE_FILES: council-report.json
         run: python .github/scripts/persist_r2_evidence.py
