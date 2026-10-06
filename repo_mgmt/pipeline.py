@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -166,6 +168,74 @@ def _mark_code_fixes_manual(
                 )
         tasks.append(task)
     return tasks
+
+
+def _apply_audit_remediation_routing(
+    issues: list[dict[str, Any]],
+    audit: dict[str, Any],
+    pipeline_id: PipelineId,
+) -> list[dict[str, Any]]:
+    """Fail closed so audit pipelines never become a competing code writer.
+
+    AIMS website/content final reports must carry audit-remediation-routing/v1.
+    Eligible code fixes are preserved as machine-readable routing tasks for Kilo
+    (with cto.new as controlled low/medium fallback), not executed directly by RAMS.
+    """
+    if pipeline_id not in {"website", "content"}:
+        return issues
+
+    operational = audit.get("operational") if isinstance(audit, dict) else None
+    routing = operational.get("remediationRouting") if isinstance(operational, dict) else None
+    valid = (
+        isinstance(routing, dict)
+        and routing.get("schemaVersion") == "audit-remediation-routing/v1"
+        and routing.get("repairExecutionPolicy") == "external-agent-only"
+        and routing.get("singleWriterRequired") is True
+        and routing.get("auditOwnsRepair") is False
+        and str(routing.get("primaryRepairAgent", "")).lower() == "kilo"
+        and str(routing.get("plannedEngineeringAgent", "")).lower() == "cto.new"
+        and routing.get("ownershipTransferRequired") is True
+        and str(routing.get("dependencyVersionOwner", "")).lower() == "renovate"
+        and str(routing.get("mergeAuthority", "")).lower() == "mergify"
+    )
+    if not valid:
+        return _mark_code_fixes_manual(
+            issues,
+            "Audit remediation routing contract missing/invalid; direct RAMS code mutation refused.",
+        )
+
+    routed: list[dict[str, Any]] = []
+    for issue in issues:
+        task = dict(issue)
+        if task.get("classification") != "code_fix":
+            routed.append(task)
+            continue
+        material = {
+            "pipeline": pipeline_id,
+            "sourceAudit": task.get("sourceAudit"),
+            "sourceFindingIds": task.get("sourceFindingIds", []),
+            "affectedPaths": task.get("affectedPaths", []),
+            "allowedFixClass": task.get("allowedFixClass"),
+            "requiredOutcome": task.get("requiredOutcome"),
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        ).hexdigest()
+        task["proposedClassification"] = "code_fix"
+        task["classification"] = "manual_review"
+        task["status"] = "routing_required"
+        task["ownershipFingerprint"] = f"audit:{pipeline_id}:{fingerprint}"
+        task["recommendedAgent"] = "kilo"
+        task["fallbackAgent"] = "cto.new"
+        task["fallbackEligible"] = str(task.get("severity", "")).lower() in {"low", "medium"}
+        task["singleWriterRequired"] = True
+        task["ownershipTransferRequired"] = True
+        task["auditOwnsRepair"] = False
+        task["evidence"] = list(task.get("evidence", [])) + [
+            "Direct RAMS patching disabled by audit-remediation-routing/v1; route through Kilo/cto.new ownership lock."
+        ]
+        routed.append(task)
+    return routed
 
 
 def _validation_to_task_block(validation: ValidationSummary) -> dict[str, Any]:
@@ -642,6 +712,7 @@ async def _run_async(
         issues = await asyncio.to_thread(
             issue_normaliser.normalise, audit, pipeline_id, _date(), cfg, router
         )
+        issues = _apply_audit_remediation_routing(issues, audit, pipeline_id)
         code_fix_limit = (
             cfg.rms_website_max_issues_per_run
             if pipeline_id == "website"
