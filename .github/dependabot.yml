@@ -1,9 +1,11 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "pip" # Renovate owns all dependency PRs; Dependabot is passive with PR creation disabled.
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 0
     groups:
       fastapi-family:
@@ -32,18 +34,22 @@ updates:
     commit-message:
       prefix: "deps"
 
-  - package-ecosystem: "docker"
+  - package-ecosystem: "docker" # Renovate owns all dependency PRs; Dependabot is passive with PR creation disabled.
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(docker)"
 
-  - package-ecosystem: "github-actions"
+  - package-ecosystem: "github-actions" # Renovate owns all dependency PRs; Dependabot is passive with PR creation disabled.
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 0
     commit-message:
       prefix: "deps(ci)"

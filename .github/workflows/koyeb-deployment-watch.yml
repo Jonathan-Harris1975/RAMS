@@ -1,7 +1,7 @@
 name: Koyeb production deployment watch
 
 on:
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers] exact-main successful same-repository CI gate
     workflows: ["CI"]
     types: [completed]
   workflow_dispatch:
@@ -20,8 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pinned release commit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Check Koyeb deployment-watch configuration
         id: deployment_config
