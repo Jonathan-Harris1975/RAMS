@@ -1,7 +1,7 @@
 name: Renovate dependency lock sync
 
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted Renovate-only metadata sync; PR code is not executed
     types: [opened, synchronize, reopened]
 
 permissions:
