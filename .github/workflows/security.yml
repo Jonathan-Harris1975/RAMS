@@ -174,8 +174,8 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-    with:
-      persist-credentials: false
+      with:
+        persist-credentials: false
     - name: Install pinned Docker and shell linters
       run: python scripts/install_ci_tools.py hadolint shellcheck
     - name: Lint Dockerfile
@@ -189,8 +189,8 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-    with:
-      persist-credentials: false
+      with:
+        persist-credentials: false
     - name: Install pinned Lychee
       continue-on-error: true
       run: python scripts/install_ci_tools.py lychee
