@@ -40,16 +40,21 @@ jobs:
           allow_issue_writing: false
           fail_action: true
           artifact_name: dast-zap-full-${{ github.run_id }}
-      - name: Install pinned R2 client dependencies
-        if: always()
-        run: python -m pip install --require-hashes -r requirements-runtime.lock
-      - name: Persist DAST evidence to hive-repositories
+      - name: Persist and verify DAST evidence in canonical R2 layout
         if: always()
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          TARGET_SHA: ${{ github.sha }}
-          EVIDENCE_KIND: dast
           EVIDENCE_STATUS: ${{ job.status }}
-          EVIDENCE_FILES: "report_json.json,report_md.md,report_html.html"
-        run: python .github/scripts/persist_r2_evidence.py
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dast-r2"
+          for file in report_json.json report_md.md report_html.html; do
+            test ! -f "$file" || cp "$file" "$RUNNER_TEMP/dast-r2/$file"
+          done
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg status "$EVIDENCE_STATUS" \
+            '{repository:$repository,default_branch_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,dast_status:$status,scanner:"OWASP ZAP"}' \
+            > "$RUNNER_TEMP/dast-r2/summary.json"
+          python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"
