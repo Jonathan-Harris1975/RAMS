@@ -244,7 +244,7 @@ class KiloPolicyTests(unittest.TestCase):
         self.assertEqual(permission["external_directory"], "deny")
         for tool in ("edit", "write", "apply_patch"):
             self.assertEqual(permission[tool]["*"], "allow")
-            for path in ("kilo.jsonc", ".github/workflows/*", ".github/scripts/*", ".mergify.yml", "renovate.json"):
+            for path in ("kilo.jsonc", ".github/workflows/*", ".github/scripts/*", ".github/production-governance.json", ".mergify.yml", "renovate.json"):
                 self.assertEqual(permission[tool][path], "deny")
 
     def test_shell_is_deny_by_default_and_cannot_merge_deploy_or_force_push(self):
