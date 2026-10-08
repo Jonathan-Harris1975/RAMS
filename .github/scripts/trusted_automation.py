@@ -55,6 +55,7 @@ KILO_SENSITIVE_PREFIXES = (
     "CI_SETUP.txt",
 )
 KILO_SENSITIVE_EXACT = {
+    ".github/production-governance.json",
     "kilo.jsonc",
     "scripts/secret_scan.py",
     "scripts/install_ci_tools.py",

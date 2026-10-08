@@ -244,7 +244,7 @@ class KiloPolicyTests(unittest.TestCase):
         self.assertEqual(permission["external_directory"], "deny")
         for tool in ("edit", "write", "apply_patch"):
             self.assertEqual(permission[tool]["*"], "allow")
-            for path in ("kilo.jsonc", ".github/workflows/*", ".github/scripts/*", ".mergify.yml", "renovate.json"):
+            for path in ("kilo.jsonc", ".github/workflows/*", ".github/scripts/*", ".github/production-governance.json", ".mergify.yml", "renovate.json"):
                 self.assertEqual(permission[tool][path], "deny")
 
     def test_shell_is_deny_by_default_and_cannot_merge_deploy_or_force_push(self):
@@ -278,6 +278,16 @@ class RenovateGovernanceTests(unittest.TestCase):
             automation.reconcile_pr(pr)
         hold.assert_called_once()
         admit.assert_not_called()
+
+
+class ProductionGovernanceProtectionTests(unittest.TestCase):
+    def test_contract_is_sensitive_and_kilo_cannot_mutate_it(self):
+        path = ".github/production-governance.json"
+        self.assertTrue(automation.sensitive_file(path))
+        root = Path(__file__).resolve().parents[2]
+        policy = json.loads((root / "kilo.jsonc").read_text(encoding="utf-8"))
+        for tool in ("edit", "write", "apply_patch"):
+            self.assertEqual(policy["permission"][tool][path], "deny")
 
 
 if __name__ == "__main__":
