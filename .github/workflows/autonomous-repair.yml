@@ -2,7 +2,7 @@ name: Autonomous main-branch repair PR
 
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers] trusted same-repository/current-SHA repair router
-    workflows: ["CI", "CodeQL", "Security and repository quality"]
+    workflows: ["CI", "Koyeb production deployment watch", "CodeQL", "Security and repository quality"]
     types: [completed]
   workflow_dispatch:
 
