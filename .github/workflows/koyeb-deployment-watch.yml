@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: koyeb-deployment-watch-RAMS
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   watch:
