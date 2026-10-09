@@ -74,5 +74,17 @@ class DeploymentRecords(unittest.TestCase):
         self.assertTrue(watch._matches_expected_deployment(self.record(), "a" * 40, expected))
 
 
+    def test_updated_time_cannot_substitute_for_creation_time(self):
+        from datetime import UTC, datetime
+
+        expected = datetime(2026, 10, 4, 10, 0, tzinfo=UTC)
+        item = self.record()
+        item.pop("created_at")
+        item["updated_at"] = "2026-10-04T10:10:00Z"
+        self.assertFalse(watch._matches_expected_deployment(item, "a" * 40, expected))
+        item["created_at"] = "2026-10-04T09:00:00Z"
+        self.assertFalse(watch._matches_expected_deployment(item, "a" * 40, expected))
+
+
 if __name__ == "__main__":
     unittest.main()
