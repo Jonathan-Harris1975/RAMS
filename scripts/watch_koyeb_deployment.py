@@ -87,8 +87,11 @@ def _deployment_sha(item: dict[str, Any]) -> str:
 
 def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expected_after: datetime | None) -> bool:
     candidate_sha = _deployment_sha(item)
-    if expected_sha and candidate_sha and not candidate_sha.lower().startswith(expected_sha.lower()):
-        return False
+    if expected_sha:
+        if not candidate_sha or len(expected_sha) != 40 or len(candidate_sha) != 40:
+            return False
+        if candidate_sha.lower() != expected_sha.lower():
+            return False
     if expected_after is not None:
         created = _parse_timestamp(_created(item))
         if created is not None and created < expected_after - timedelta(minutes=5):
