@@ -30,7 +30,7 @@ def _walk(value: Any) -> Iterable[dict[str, Any]]:
 
 
 def _created(item: dict[str, Any]) -> str:
-    return str(item.get("created_at") or item.get("createdAt") or item.get("updated_at") or item.get("updatedAt") or "")
+    return str(item.get("created_at") or item.get("createdAt") or "")
 
 
 def _deployments(service: str, token: str) -> list[dict[str, Any]]:
