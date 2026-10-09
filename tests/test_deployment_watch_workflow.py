@@ -36,9 +36,8 @@ def test_exact_sha_watch_gates_attestation_and_retained_evidence() -> None:
     watch = text.index("- name: Watch production deployment")
     attestation = text.index("- name: Record exact-SHA production deployment attestation")
     evidence = text.index("- name: Retain production deployment evidence")
-    dispatch = text.index("- name: Trigger central ecosystem smoke")
 
-    assert watch < attestation < evidence < dispatch
+    assert watch < attestation < evidence
     assert "EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in _step(
         text, "Watch production deployment"
     )
@@ -55,18 +54,14 @@ def test_exact_sha_watch_gates_attestation_and_retained_evidence() -> None:
         assert "deployment_config.outputs.configured" not in body
 
 
-def test_smoke_dispatch_is_not_a_substitute_for_attestation() -> None:
+def test_deployment_attestation_does_not_trigger_obsolete_ecosystem_smoke() -> None:
     text = _workflow()
     evidence = _step(text, "Retain production deployment evidence")
-    dispatch = _step(text, "Trigger central ecosystem smoke")
 
     assert "deployment-attestation.json" in evidence
-    assert 'if [ -z "${ECOSYSTEM_SMOKE_DISPATCH_TOKEN:-}" ]; then' in dispatch
-    assert "::notice::Optional MAST ecosystem smoke dispatch is not configured" in dispatch
-    assert "::warning::Optional MAST ecosystem smoke dispatch failed" in dispatch
-    assert text.index("Retain production deployment evidence") < text.index(
-        "Trigger central ecosystem smoke"
-    )
+    assert "ecosystem-smoke.yml" not in text
+    assert "ECOSYSTEM_SMOKE_DISPATCH_TOKEN" not in text
+    assert "Trigger central ecosystem smoke" not in text
 
 
 def test_alert_delivery_cannot_turn_verification_steps_non_blocking() -> None:
