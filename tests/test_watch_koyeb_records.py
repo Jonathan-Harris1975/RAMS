@@ -61,5 +61,18 @@ class DeploymentRecords(unittest.TestCase):
         self.assertTrue(watch._matches_expected_deployment(self.record(), expected, None))
 
 
+    def test_missing_or_invalid_deployment_time_cannot_attest_release(self):
+        from datetime import UTC, datetime
+
+        expected = datetime(2026, 10, 4, 10, 0, tzinfo=UTC)
+        for timestamp in (None, "", "not-a-timestamp"):
+            item = self.record()
+            item.pop("created_at")
+            if timestamp is not None:
+                item["created_at"] = timestamp
+            self.assertFalse(watch._matches_expected_deployment(item, "a" * 40, expected))
+        self.assertTrue(watch._matches_expected_deployment(self.record(), "a" * 40, expected))
+
+
 if __name__ == "__main__":
     unittest.main()
