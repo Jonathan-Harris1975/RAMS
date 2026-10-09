@@ -49,6 +49,17 @@ class DeploymentRecords(unittest.TestCase):
     def test_wrong_commit_remains_ineligible(self):
         self.assertFalse(watch._matches_expected_deployment(self.record(), "b" * 40, None))
 
+    def test_missing_or_short_commit_cannot_attest_expected_release(self):
+        expected = "a" * 40
+        missing = self.record()
+        missing.pop("definition")
+        self.assertFalse(watch._matches_expected_deployment(missing, expected, None))
+        shortened = self.record()
+        shortened["definition"]["git"]["sha"] = "a" * 12
+        self.assertFalse(watch._matches_expected_deployment(shortened, expected, None))
+        self.assertFalse(watch._matches_expected_deployment(self.record(), "a" * 12, None))
+        self.assertTrue(watch._matches_expected_deployment(self.record(), expected, None))
+
 
 if __name__ == "__main__":
     unittest.main()
