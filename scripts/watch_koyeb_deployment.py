@@ -94,7 +94,7 @@ def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expect
             return False
     if expected_after is not None:
         created = _parse_timestamp(_created(item))
-        if created is not None and created < expected_after - timedelta(minutes=5):
+        if created is None or created < expected_after - timedelta(minutes=5):
             return False
     return True
 
