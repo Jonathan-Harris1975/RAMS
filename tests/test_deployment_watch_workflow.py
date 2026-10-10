@@ -34,21 +34,14 @@ def test_automatic_production_watcher_fails_closed_without_koyeb_configuration()
 def test_exact_sha_watch_gates_attestation_and_retained_evidence() -> None:
     text = _workflow()
     watch = text.index("- name: Watch production deployment")
-    attestation = text.index("- name: Record exact-SHA production deployment attestation")
     evidence = text.index("- name: Retain production deployment evidence")
 
-    assert watch < attestation < evidence
-    assert "EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in _step(
-        text, "Watch production deployment"
-    )
-    assert "DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in _step(
-        text, "Record exact-SHA production deployment attestation"
-    )
-    for name in (
-        "Watch production deployment",
-        "Record exact-SHA production deployment attestation",
-        "Retain production deployment evidence",
-    ):
+    assert watch < evidence
+    watch_body = _step(text, "Watch production deployment")
+    assert "EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in watch_body
+    assert "DEPLOYMENT_ATTESTATION_PATH: deployment-attestation.json" in watch_body
+    assert "Record exact-SHA production deployment attestation" not in text
+    for name in ("Watch production deployment", "Retain production deployment evidence"):
         body = _step(text, name)
         assert "continue-on-error" not in body
         assert "deployment_config.outputs.configured" not in body
