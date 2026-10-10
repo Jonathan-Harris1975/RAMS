@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from ops_notify import send_event
 
-SUCCESS = {"healthy", "sleeping"}
+SUCCESS = {"healthy"}
 FAILURE = {"error", "failed", "unhealthy", "cancelled", "canceled"}
 PENDING = {"pending", "provisioning", "scheduled", "allocating", "starting", "stopping", "building", "deploying", "degraded"}
 
@@ -71,18 +71,27 @@ def _parse_timestamp(value: str) -> datetime | None:
 
 
 def _deployment_sha(item: dict[str, Any]) -> str:
-    candidates = {"commit_sha", "commitSha", "git_sha", "gitSha", "sha", "revision"}
-    stack: list[Any] = [item]
-    while stack:
-        value = stack.pop()
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key in candidates and isinstance(child, str) and len(child.strip()) >= 7:
-                    return child.strip()
-                stack.append(child)
-        elif isinstance(value, list):
-            stack.extend(value)
-    return ""
+    # Build steps, logs and annotations are not authoritative deployment identity.
+    keys = {"commit_sha", "commitSha", "git_sha", "gitSha", "sha", "revision"}
+    values: set[str] = set()
+    containers = [item, item.get("git"), item.get("definition")]
+    definition = item.get("definition")
+    if isinstance(definition, dict):
+        containers.append(definition.get("git"))
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            if key not in container:
+                continue
+            value = container[key]
+            if not isinstance(value, str):
+                return ""
+            cleaned = value.strip().lower()
+            if len(cleaned) != 40 or any(c not in "0123456789abcdef" for c in cleaned):
+                return ""
+            values.add(cleaned)
+    return next(iter(values)) if len(values) == 1 else ""
 
 
 def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expected_after: datetime | None) -> bool:
@@ -99,21 +108,75 @@ def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expect
     return True
 
 
+def _image_digest(item: dict[str, Any]) -> str:
+    """Accept only an observed immutable sha256 digest, not a mutable image tag."""
+    values = []
+    for container in (item, item.get("image"), item.get("definition")):
+        if not isinstance(container, dict):
+            continue
+        for key in ("image_digest", "imageDigest", "digest"):
+            value = container.get(key)
+            if isinstance(value, str):
+                values.append(value)
+    values = [v.lower().removeprefix("sha256:") for v in values]
+    if len(set(values)) != 1 or not values:
+        return ""
+    digest = values[0]
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        return ""
+    return "sha256:" + digest
+
+
+def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) -> bool:
+    digest = _image_digest(item)
+    deployment_id = item.get("id")
+    if not digest or not isinstance(deployment_id, str) or not deployment_id:
+        print("Missing immutable image digest or deployment ID; refusing attestation.", file=sys.stderr)
+        return False
+    output = os.getenv("DEPLOYMENT_ATTESTATION_PATH", "").strip()
+    if not output:
+        print("Deployment attestation output path is required.", file=sys.stderr)
+        return False
+    with open(output, "w", encoding="utf-8") as handle:
+        json.dump({"repository": os.getenv("GITHUB_REPOSITORY", ""), "sha": expected_sha,
+                   "workflow_run": os.getenv("GITHUB_RUN_ID", ""), "service_reference": service,
+                   "deployment_id": deployment_id, "image_digest": digest,
+                   "environment": os.getenv("DEPLOYMENT_ENVIRONMENT", "production"),
+                   "status": "healthy", "observed_at": datetime.now(UTC).isoformat()}, handle, sort_keys=True)
+        handle.write("\n")
+    return True
+
+
 def main() -> int:
     service = os.getenv("KOYEB_SERVICE", "").strip()
     token = os.getenv("KOYEB_TOKEN", "").strip()
     display_name = os.getenv("SERVICE_DISPLAY_NAME", service or "Koyeb service").strip()
     if not service or not token:
-        print("Koyeb deployment watcher is not configured; skipping.")
-        return 0
-    attempts = max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40")))
-    poll_seconds = max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15")))
+        print("Koyeb deployment watcher is not configured; refusing to attest.", file=sys.stderr)
+        return 1
+    attempts = min(40, max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40"))))
+    poll_seconds = min(30, max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15"))))
     expected_sha = os.getenv("EXPECTED_DEPLOYMENT_SHA", os.getenv("GITHUB_SHA", "")).strip()
-    expected_after = _parse_timestamp(os.getenv("EXPECTED_DEPLOYMENT_AFTER", ""))
+    raw_expected_after = os.getenv("EXPECTED_DEPLOYMENT_AFTER", "").strip()
+    expected_after = _parse_timestamp(raw_expected_after)
+    if raw_expected_after and expected_after is None:
+        print("Invalid EXPECTED_DEPLOYMENT_AFTER timestamp; refusing to attest.", file=sys.stderr)
+        return 1
+    if len(expected_sha) != 40 or any(ch not in "0123456789abcdefABCDEF" for ch in expected_sha):
+        print("A full expected commit SHA is mandatory.", file=sys.stderr)
+        return 1
     degraded_seen = 0
     last: dict[str, Any] | None = None
     for attempt in range(1, attempts + 1):
-        candidates = _deployments(service, token)
+        try:
+            candidates = _deployments(service, token)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            # CLI failures are provider/transport incidents, not repairable code.
+            # Never print stderr: provider errors can contain credentials.
+            print(f"Provider query unavailable ({attempt}/{attempts}).", file=sys.stderr)
+            if attempt < attempts:
+                time.sleep(min(30, poll_seconds * (2 ** min(attempt - 1, 3))))
+            continue
         last = next(
             (item for item in candidates if _matches_expected_deployment(item, expected_sha, expected_after)),
             None,
@@ -126,7 +189,7 @@ def main() -> int:
         deployment_id = str(last.get("id") or last.get("name") or "unknown")
         print(f"{display_name} deployment {deployment_id}: {status} ({attempt}/{attempts})")
         if status in SUCCESS:
-            return 0
+            return 0 if _write_attestation(last, expected_sha, service) else 1
         if status == "degraded":
             degraded_seen += 1
             if degraded_seen < 4:
