@@ -66,6 +66,8 @@ def test_attestation_requires_observed_identity(tmp_path):
         assert not target.exists()
         assert not watcher._write_attestation({"id": "deployment-1", "status": "healthy", "commit_sha": "b" * 40, "image_digest": "sha256:" + "c" * 64}, "a" * 40, "service")
         assert not target.exists()
+        assert not watcher._write_attestation({"id": "deployment-1", "status": "healthy", "commit_sha": "a" * 40, "service_id": "other-service", "image_digest": "sha256:" + "c" * 64}, "a" * 40, "service")
+        assert not target.exists()
         assert watcher._write_attestation({"id": "deployment-1", "status": "healthy", "commit_sha": "a" * 40, "image_digest": "sha256:" + "c" * 64}, "a" * 40, "service")
         import json
         evidence = json.loads(target.read_text())
