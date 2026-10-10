@@ -83,3 +83,10 @@ def test_deployment_watch_completion_routes_into_autonomous_repair() -> None:
     repair = (WORKFLOW_PATH.parent / "autonomous-repair.yml").read_text(encoding="utf-8")
     assert '"Koyeb production deployment watch"' in repair
     assert "github.event.workflow_run.head_repository.full_name == github.repository" in repair
+
+
+def test_manual_production_watch_is_restricted_to_main_branch() -> None:
+    text = _workflow()
+    assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in text
+    assert "github.event.workflow_run.conclusion == 'success'" in text
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in text
