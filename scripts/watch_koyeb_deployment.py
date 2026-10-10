@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from ops_notify import send_event
 
-SUCCESS = {"healthy", "sleeping"}
+SUCCESS = {"healthy"}
 FAILURE = {"error", "failed", "unhealthy", "cancelled", "canceled"}
 PENDING = {"pending", "provisioning", "scheduled", "allocating", "starting", "stopping", "building", "deploying", "degraded"}
 
@@ -104,12 +104,19 @@ def main() -> int:
     token = os.getenv("KOYEB_TOKEN", "").strip()
     display_name = os.getenv("SERVICE_DISPLAY_NAME", service or "Koyeb service").strip()
     if not service or not token:
-        print("Koyeb deployment watcher is not configured; skipping.")
-        return 0
+        print("Koyeb deployment watcher is not configured; refusing to attest.", file=sys.stderr)
+        return 1
     attempts = max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40")))
     poll_seconds = max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15")))
     expected_sha = os.getenv("EXPECTED_DEPLOYMENT_SHA", os.getenv("GITHUB_SHA", "")).strip()
-    expected_after = _parse_timestamp(os.getenv("EXPECTED_DEPLOYMENT_AFTER", ""))
+    raw_expected_after = os.getenv("EXPECTED_DEPLOYMENT_AFTER", "").strip()
+    expected_after = _parse_timestamp(raw_expected_after)
+    if raw_expected_after and expected_after is None:
+        print("Invalid EXPECTED_DEPLOYMENT_AFTER timestamp; refusing to attest.", file=sys.stderr)
+        return 1
+    if len(expected_sha) != 40 or any(ch not in "0123456789abcdefABCDEF" for ch in expected_sha):
+        print("A full expected commit SHA is mandatory.", file=sys.stderr)
+        return 1
     degraded_seen = 0
     last: dict[str, Any] | None = None
     for attempt in range(1, attempts + 1):
