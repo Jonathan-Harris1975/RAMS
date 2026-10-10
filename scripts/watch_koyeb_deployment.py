@@ -128,6 +128,11 @@ def _image_digest(item: dict[str, Any]) -> str:
 
 
 def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) -> bool:
+    # Revalidate the provider record at the attestation boundary, not only in the poller.
+    # A healthy status or caller-supplied SHA is not proof of the running artifact.
+    if (_status(item) != "healthy" or not _matches_expected_deployment(item, expected_sha, None)):
+        print("Deployment status or provider-observed commit does not match; refusing attestation.", file=sys.stderr)
+        return False
     digest = _image_digest(item)
     deployment_id = item.get("id")
     if not digest or not isinstance(deployment_id, str) or not deployment_id:
