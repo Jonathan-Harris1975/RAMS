@@ -134,7 +134,7 @@ def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) ->
                    "deployment_id": deployment_id, "image_digest": digest,
                    "environment": os.getenv("DEPLOYMENT_ENVIRONMENT", "production"),
                    "status": "healthy", "observed_at": datetime.now(UTC).isoformat()}, handle, sort_keys=True)
-        handle.write("\\n")
+        handle.write("\n")
     return True
 
 
