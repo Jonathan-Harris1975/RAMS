@@ -75,13 +75,9 @@ jobs:
           GITHUB_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           EXPECTED_DEPLOYMENT_AFTER: ${{ github.event.workflow_run.created_at || '' }}
+          DEPLOYMENT_ATTESTATION_PATH: deployment-attestation.json
+          DEPLOYMENT_ENVIRONMENT: production
         run: python scripts/watch_koyeb_deployment.py
-      - name: Record exact-SHA production deployment attestation
-        env:
-          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-        run: |
-          printf '{"repository":"%s","sha":"%s","workflow_run":"%s","service":"RAMS","status":"production-deployment-green"}\n' \
-            "$GITHUB_REPOSITORY" "$DEPLOYED_SHA" "$GITHUB_RUN_ID" > deployment-attestation.json
       - name: Retain production deployment evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
