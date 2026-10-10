@@ -2,7 +2,7 @@
 
 Recorded: 2026-10-10 UTC
 Repository: Jonathan-Harris1975/RAMS
-Baseline main SHA: `2edea2cc6ac91892caeba5d43047e0817ea3a1f2`
+Baseline main SHA: `b91884cf899261caba4a58552348673956aebfe3`
 Verdict: **NOT READY**\n\nHardening branch: `assurance/live-test-evidence-20261010` (PR #346). Deployment watcher now requires a provider-observed deployment ID and sha256 image digest before emitting the attestation; this has not been validated against live Koyeb payloads or a CI run.
 
 This is an evidence ledger, not an assertion of successful provider verification. A missing run URL or observation means blocked, never passed.
@@ -16,7 +16,7 @@ This is an evidence ledger, not an assertion of successful provider verification
 | Safeguards | Local release checks | blocked | `scripts/release_gate.sh`, `scripts/verify_hash_enforcement.py` | Full checks not run for baseline SHA in this review | Execute checks in clean runner | RAMS CI |
 | Safeguards | Branch rules and required checks | blocked | GitHub repository settings | Rules and required-check names not verified | Inspect repository rules | Repository owner |
 | Coordination | OIDC and MAST/HIVE evidence contracts | blocked | `.github/workflows/oidc-readiness.yml` | No verified cross-repo consumption or freshness evidence | Inspect MAST/HIVE and provider trust | Ecosystem maintainers |
-| Coordination | PR reconciliation | blocked | PR #345 | PR #345 and PR #346 remain open; reviews and checks not yet validated | Review and merge under branch protection | Repository maintainers |
+| Coordination | PR reconciliation | blocked | PR #345 | PR #345 merged; PR #346 remains draft; reviews and checks not yet validated | Review and merge under branch protection | Repository maintainers |
 
 ## Safe live-test runbook
 
@@ -31,3 +31,12 @@ This is an evidence ledger, not an assertion of successful provider verification
 9. Record witnessed results and rollback outcome here before changing the verdict.
 
 **No live failure injection or deployment mutation is authorised by this document.**
+
+## 2026-10-10 implementation update
+
+- PR #345 was merged into main at `b91884cf899261caba4a58552348673956aebfe3`.
+- PR #346 commit `2ec4afbc163cd705bc60ee216d177c09bb8ce932`: CI run 38042400754, CodeQL 38042400720, security 38042400747, hardening 38042400732 and autofix 38042400787 all concluded success.
+- PR #346 commits `21f8524e7a819d840a4aad6c1e6a38700a808d0e` and `1a9fc89590bfad27f0f0b14b9fb3bf303150a05c` add a second independent provider-SHA/status validation at the attestation boundary and regression cases. No workflow runs were returned for the latter commit at the time of inspection: **these new changes are not yet CI-verified**.
+- Still blocked: provider-observed service/environment provenance, current-commit CI/security checks, branch protection, MAST/HIVE consumption, staging rehearsal and rollback evidence. Do not treat earlier green checks as validation of newer commits.
+
+**Verdict remains NOT READY until mandatory evidence is verified.**
