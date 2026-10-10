@@ -3,7 +3,7 @@
 Recorded: 2026-10-10 UTC
 Repository: Jonathan-Harris1975/RAMS
 Baseline main SHA: `2edea2cc6ac91892caeba5d43047e0817ea3a1f2`
-Verdict: **NOT READY**
+Verdict: **NOT READY**\n\nHardening branch: `assurance/live-test-evidence-20261010` (PR #346). Deployment watcher now requires a provider-observed deployment ID and sha256 image digest before emitting the attestation; this has not been validated against live Koyeb payloads or a CI run.
 
 This is an evidence ledger, not an assertion of successful provider verification. A missing run URL or observation means blocked, never passed.
 
@@ -12,11 +12,11 @@ This is an evidence ledger, not an assertion of successful provider verification
 | Detection | Koyeb deployment watch | blocked | `.github/workflows/koyeb-deployment-watch.yml`, `scripts/watch_koyeb_deployment.py` | Current HEAD run and Koyeb deployment evidence not yet captured | Verify provider configuration, run conclusions and skipped jobs | RAMS operations |
 | Detection | Failure diagnostics | blocked | `.github/workflows/failure-diagnostics.yml` | Recent failure/cancelled/skipped run coverage not yet reconciled | Inspect 30 relevant runs | RAMS CI |
 | Self-repair | Classification and bounded repair | blocked | `.github/workflows/autonomous-repair.yml` | Live and fixture-backed failure routing not yet demonstrated | Verify App credentials, deduplication, escalation | RAMS automation |
-| Safeguards | Immutable deployment identity | blocked | `scripts/watch_koyeb_deployment.py` checks commit SHA and timestamp; workflow emits `deployment-attestation.json` | Current attestation lacks observed image digest, deployment ID and environment | Bind attestation to verified provider fields and test mismatches | RAMS release |
+| Safeguards | Immutable deployment identity | blocked | `scripts/watch_koyeb_deployment.py` checks commit SHA and timestamp; workflow emits `deployment-attestation.json` | New watcher emits observed image digest and deployment ID and configured environment; actual Koyeb payload and environment provenance unverified | Verify actual provider payload shape, environment identity, and mismatch handling in staging | RAMS release |
 | Safeguards | Local release checks | blocked | `scripts/release_gate.sh`, `scripts/verify_hash_enforcement.py` | Full checks not run for baseline SHA in this review | Execute checks in clean runner | RAMS CI |
 | Safeguards | Branch rules and required checks | blocked | GitHub repository settings | Rules and required-check names not verified | Inspect repository rules | Repository owner |
 | Coordination | OIDC and MAST/HIVE evidence contracts | blocked | `.github/workflows/oidc-readiness.yml` | No verified cross-repo consumption or freshness evidence | Inspect MAST/HIVE and provider trust | Ecosystem maintainers |
-| Coordination | PR reconciliation | blocked | PR #345 | Open documentation correction; reviews and checks not yet validated | Review and merge under branch protection | Repository maintainers |
+| Coordination | PR reconciliation | blocked | PR #345 | PR #345 and PR #346 remain open; reviews and checks not yet validated | Review and merge under branch protection | Repository maintainers |
 
 ## Safe live-test runbook
 
