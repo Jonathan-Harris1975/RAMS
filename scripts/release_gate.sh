@@ -43,19 +43,22 @@ docker run --rm "$IMAGE_NAME" git --version
 docker run --rm "$IMAGE_NAME" node --version
 docker run --rm "$IMAGE_NAME" npm --version
 docker run --rm "$IMAGE_NAME" node -e "process.exit(Number(process.versions.node.split('.')[0]) === 24 ? 0 : 1)"
-docker run --rm "$IMAGE_NAME" sh -ec 'test ! -w /app; touch /tmp/rams-write-check; python -m pip check; python -c "import repo_mgmt.api, repo_mgmt.pipeline"'
+docker run --rm "$IMAGE_NAME" sh -ec 'test ! -w /app; touch /tmp/rams-write-check; ! python -m pip --version >/dev/null 2>&1; python -c "import repo_mgmt.api, repo_mgmt.pipeline"'
 
 docker rm -f rams-release-gate >/dev/null 2>&1 || true
 docker run -d --name rams-release-gate -p "$PORT:8000" --env-file .env.example-dry-run -e RMS_API_KEY="$RMS_RELEASE_GATE_API_KEY" "$IMAGE_NAME" >/dev/null
 cleanup() { docker logs rams-release-gate || true; docker rm -f rams-release-gate >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+api_started=false
 for _ in {1..30}; do
   if curl -fsS "http://127.0.0.1:${PORT}/health" >/tmp/rams-health.json; then
+    api_started=true
     break
   fi
   sleep 1
 done
+test "$api_started" = "true"
 
 container_healthy=false
 for _ in {1..75}; do

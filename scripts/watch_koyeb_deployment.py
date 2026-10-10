@@ -71,18 +71,27 @@ def _parse_timestamp(value: str) -> datetime | None:
 
 
 def _deployment_sha(item: dict[str, Any]) -> str:
-    candidates = {"commit_sha", "commitSha", "git_sha", "gitSha", "sha", "revision"}
-    stack: list[Any] = [item]
-    while stack:
-        value = stack.pop()
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key in candidates and isinstance(child, str) and len(child.strip()) >= 7:
-                    return child.strip()
-                stack.append(child)
-        elif isinstance(value, list):
-            stack.extend(value)
-    return ""
+    # Build steps, logs and annotations are not authoritative deployment identity.
+    keys = {"commit_sha", "commitSha", "git_sha", "gitSha", "sha", "revision"}
+    values: set[str] = set()
+    containers = [item, item.get("git"), item.get("definition")]
+    definition = item.get("definition")
+    if isinstance(definition, dict):
+        containers.append(definition.get("git"))
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            if key not in container:
+                continue
+            value = container[key]
+            if not isinstance(value, str):
+                return ""
+            cleaned = value.strip().lower()
+            if len(cleaned) != 40 or any(c not in "0123456789abcdef" for c in cleaned):
+                return ""
+            values.add(cleaned)
+    return next(iter(values)) if len(values) == 1 else ""
 
 
 def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expected_after: datetime | None) -> bool:
@@ -145,8 +154,8 @@ def main() -> int:
     if not service or not token:
         print("Koyeb deployment watcher is not configured; refusing to attest.", file=sys.stderr)
         return 1
-    attempts = max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40")))
-    poll_seconds = max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15")))
+    attempts = min(40, max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40"))))
+    poll_seconds = min(30, max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15"))))
     expected_sha = os.getenv("EXPECTED_DEPLOYMENT_SHA", os.getenv("GITHUB_SHA", "")).strip()
     raw_expected_after = os.getenv("EXPECTED_DEPLOYMENT_AFTER", "").strip()
     expected_after = _parse_timestamp(raw_expected_after)
@@ -159,7 +168,15 @@ def main() -> int:
     degraded_seen = 0
     last: dict[str, Any] | None = None
     for attempt in range(1, attempts + 1):
-        candidates = _deployments(service, token)
+        try:
+            candidates = _deployments(service, token)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            # CLI failures are provider/transport incidents, not repairable code.
+            # Never print stderr: provider errors can contain credentials.
+            print(f"Provider query unavailable ({attempt}/{attempts}).", file=sys.stderr)
+            if attempt < attempts:
+                time.sleep(min(30, poll_seconds * (2 ** min(attempt - 1, 3))))
+            continue
         last = next(
             (item for item in candidates if _matches_expected_deployment(item, expected_sha, expected_after)),
             None,
