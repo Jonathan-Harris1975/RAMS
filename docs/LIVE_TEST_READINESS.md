@@ -3,7 +3,9 @@
 Recorded: 2026-10-10 UTC
 Repository: Jonathan-Harris1975/RAMS
 Baseline main SHA: `b91884cf899261caba4a58552348673956aebfe3`
-Verdict: **NOT READY**\n\nHardening branch: `assurance/live-test-evidence-20261010` (PR #346). Deployment watcher now requires a provider-observed deployment ID and sha256 image digest before emitting the attestation; this has not been validated against live Koyeb payloads or a CI run.
+Verdict: **NOT READY**
+
+Hardening branch: `assurance/live-test-evidence-20261010` (PR #346). Deployment watcher now requires a provider-observed deployment ID and sha256 image digest before emitting the attestation; this has not been validated against live Koyeb payloads or a CI run.
 
 This is an evidence ledger, not an assertion of successful provider verification. A missing run URL or observation means blocked, never passed.
 
@@ -40,3 +42,12 @@ This is an evidence ledger, not an assertion of successful provider verification
 - Still blocked: provider-observed service/environment provenance, current-commit CI/security checks, branch protection, MAST/HIVE consumption, staging rehearsal and rollback evidence. Do not treat earlier green checks as validation of newer commits.
 
 **Verdict remains NOT READY until mandatory evidence is verified.**
+
+## Subsequent hardening and validation status
+
+- Commit `f6f56e2aaa6e92ed0d8070a9da983a9772d2ca5a` rejects contradictory provider-supplied service IDs; commit `e6dace8f3f8f80ce523e75ff940c64bca10a49b8` adds the corresponding regression test. Absence of a provider service ID is **not** proof of service provenance.
+- Commit `c7cabd2d93470e804c7c02c48a63fa06992a1766` restricts manually dispatched production deployment verification to `main`; commit `02362bcf28a4709544597617c2ba3d7dbfde24d4` adds the workflow regression test.
+- On earlier SHA `6b4908dba1b07523e3c69f502c0e2785a41ead2d`, CodeQL, security, hardening and autofix succeeded; CI was still in progress when inspected. On SHA `e6dace8f3f8f80ce523e75ff940c64bca10a49b8`, security and autofix succeeded; CI was in progress, CodeQL queued and hardening cancelled by a newer commit. These observations do not validate the current head.
+- MAST and HIVE repository read access confirmed; live OIDC evidence consumption remains unverified. Provider staging evidence and branch-protection settings remain unavailable through the current inspection.
+
+**Stop condition:** Do not merge, deploy or mark READY until the final head passes all required checks and the staging/rollback/provider provenance and integration evidence is captured.
