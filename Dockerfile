@@ -3,7 +3,7 @@
 # Runtime includes Python, Git, Node.js 24.x, and npm for target validation.
 # ──────────────────────────────────────────────────────────────────────────
 
-FROM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS node-runtime
+FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS node-runtime
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Keep the pinned Node 24 runtime and patched npm release together so the
