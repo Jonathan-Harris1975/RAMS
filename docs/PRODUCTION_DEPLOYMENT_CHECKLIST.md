@@ -47,7 +47,7 @@ RAMS may mutate and validate its ephemeral checkout, but it does not push branch
 
 ## Verification commands
 
-Before runtime probes, confirm the automatic GitHub production watcher has `KOYEB_TOKEN` and `KOYEB_SERVICE`. Missing configuration fails the watcher. A release is production-attested only after the bounded Koyeb watch observes the expected source SHA, the exact-SHA JSON evidence is retained, and the governed ecosystem-smoke dispatch succeeds.
+Before runtime probes, confirm the automatic GitHub production watcher has `KOYEB_TOKEN` and `KOYEB_SERVICE`. Missing configuration fails the watcher. A release is production-attested only after the bounded Koyeb watch observes the expected source SHA, the exact-SHA JSON evidence is retained, and the evidence is retained. Ecosystem-wide verification is performed through the separate OIDC evidence contract; this watcher does not dispatch the retired ecosystem-smoke workflow.
 
 The deterministic source contract can be checked without provider credentials:
 
