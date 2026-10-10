@@ -133,6 +133,14 @@ def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) ->
     if (_status(item) != "healthy" or not _matches_expected_deployment(item, expected_sha, None)):
         print("Deployment status or provider-observed commit does not match; refusing attestation.", file=sys.stderr)
         return False
+    # Reject explicit provider service identities that contradict the requested service.
+    # Some Koyeb API versions omit this field, so absence remains a documented
+    # provider-provenance gate rather than fabricated verification.
+    for key in ("service_id", "serviceId", "service_reference"):
+        observed = item.get(key)
+        if observed is not None and (not isinstance(observed, str) or observed != service):
+            print("Provider deployment service identity conflicts with requested service.", file=sys.stderr)
+            return False
     digest = _image_digest(item)
     deployment_id = item.get("id")
     if not digest or not isinstance(deployment_id, str) or not deployment_id:
