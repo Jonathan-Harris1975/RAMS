@@ -99,6 +99,45 @@ def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expect
     return True
 
 
+def _image_digest(item: dict[str, Any]) -> str:
+    """Accept only an observed immutable sha256 digest, not a mutable image tag."""
+    values = []
+    for container in (item, item.get("image"), item.get("definition")):
+        if not isinstance(container, dict):
+            continue
+        for key in ("image_digest", "imageDigest", "digest"):
+            value = container.get(key)
+            if isinstance(value, str):
+                values.append(value)
+    values = [v.lower().removeprefix("sha256:") for v in values]
+    if len(set(values)) != 1 or not values:
+        return ""
+    digest = values[0]
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        return ""
+    return "sha256:" + digest
+
+
+def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) -> bool:
+    digest = _image_digest(item)
+    deployment_id = item.get("id")
+    if not digest or not isinstance(deployment_id, str) or not deployment_id:
+        print("Missing immutable image digest or deployment ID; refusing attestation.", file=sys.stderr)
+        return False
+    output = os.getenv("DEPLOYMENT_ATTESTATION_PATH", "").strip()
+    if not output:
+        print("Deployment attestation output path is required.", file=sys.stderr)
+        return False
+    with open(output, "w", encoding="utf-8") as handle:
+        json.dump({"repository": os.getenv("GITHUB_REPOSITORY", ""), "sha": expected_sha,
+                   "workflow_run": os.getenv("GITHUB_RUN_ID", ""), "service_reference": service,
+                   "deployment_id": deployment_id, "image_digest": digest,
+                   "environment": os.getenv("DEPLOYMENT_ENVIRONMENT", "production"),
+                   "status": "healthy", "observed_at": datetime.now(UTC).isoformat()}, handle, sort_keys=True)
+        handle.write("\\n")
+    return True
+
+
 def main() -> int:
     service = os.getenv("KOYEB_SERVICE", "").strip()
     token = os.getenv("KOYEB_TOKEN", "").strip()
@@ -133,7 +172,7 @@ def main() -> int:
         deployment_id = str(last.get("id") or last.get("name") or "unknown")
         print(f"{display_name} deployment {deployment_id}: {status} ({attempt}/{attempts})")
         if status in SUCCESS:
-            return 0
+            return 0 if _write_attestation(last, expected_sha, service) else 1
         if status == "degraded":
             degraded_seen += 1
             if degraded_seen < 4:
