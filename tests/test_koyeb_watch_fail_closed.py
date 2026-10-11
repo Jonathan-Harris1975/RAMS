@@ -104,6 +104,10 @@ def test_attestation_refusal_sends_redacted_operational_event(tmp_path):
     assert event["event_type"] == "deployment_attestation_refused"
     assert event["release_id"] == expected
     assert event["details"]["deploymentId"] == "deployment-42"
+    assert event["details"]["providerStatus"] == "healthy"
+    assert event["details"]["expectedCommitMatched"] is True
     assert event["details"]["immutableImageDigestPresent"] is False
+    assert event["details"]["deploymentIdPresent"] is True
+    assert event["details"]["serviceIdentityConflict"] is False
     assert "must-not-be-forwarded" not in str(event)
     assert not target.exists()
