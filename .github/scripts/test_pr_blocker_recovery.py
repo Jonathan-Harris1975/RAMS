@@ -565,5 +565,14 @@ class Recovery(unittest.TestCase):
             retry.assert_not_called()
 
 
+
+    def test_blocker_recovery_runs_after_router_failure_unless_cancelled(self):
+        workflow = (Path(__file__).parents[1] / "workflows/pr-issue-repair.yml").read_text()
+        step = workflow.split(
+            "    - name: Recover merge conflicts and verified review blockers", 1
+        )[1].split("\n    - name:", 1)[0]
+        self.assertIn("!cancelled()", step)
+
+
 if __name__ == "__main__":
     unittest.main()
