@@ -127,15 +127,25 @@ def _image_digest(item: dict[str, Any]) -> str:
     return "sha256:" + digest
 
 
-def _attestation_refused(item: dict[str, Any], expected_sha: str, service: str, reason: str) -> bool:
+def _attestation_refused(
+    item: dict[str, Any],
+    expected_sha: str,
+    service: str,
+    reason: str,
+    *,
+    status: str,
+    expected_commit_matched: bool,
+    immutable_image_digest_present: bool,
+    deployment_id_present: bool,
+    service_identity_conflict: bool,
+) -> bool:
     """Record a fail-closed attestation refusal without copying provider payloads."""
     print(f"Deployment attestation refused: {reason}", file=sys.stderr)
     deployment_id = item.get("id")
     if not isinstance(deployment_id, str) or not deployment_id:
         deployment_id = "unknown"
     deployment_id = "".join(char for char in deployment_id if char.isalnum() or char in "-_.")[:80] or "unknown"
-    status = _status(item)
-    if status not in SUCCESS | FAILURE | PENDING:
+    if status not in (SUCCESS | FAILURE | PENDING):
         status = "unknown"
     run_id = os.getenv("GITHUB_RUN_ID", "").strip() or "unknown"
     repository = os.getenv("GITHUB_REPOSITORY", "").strip()
@@ -158,14 +168,10 @@ def _attestation_refused(item: dict[str, Any], expected_sha: str, service: str, 
             "runId": run_id,
             "deploymentId": deployment_id,
             "providerStatus": status,
-            "expectedCommitMatched": _matches_expected_deployment(item, expected_sha, None),
-            "immutableImageDigestPresent": bool(_image_digest(item)),
-            "deploymentIdPresent": deployment_id != "unknown",
-            "serviceIdentityConflict": any(
-                item.get(key) is not None
-                and (not isinstance(item.get(key), str) or item.get(key) != service)
-                for key in ("service_id", "serviceId", "service_reference")
-            ),
+            "expectedCommitMatched": expected_commit_matched,
+            "immutableImageDigestPresent": immutable_image_digest_present,
+            "deploymentIdPresent": deployment_id_present,
+            "serviceIdentityConflict": service_identity_conflict,
         },
     }
     try:
@@ -179,29 +185,45 @@ def _attestation_refused(item: dict[str, Any], expected_sha: str, service: str, 
 
 
 def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) -> bool:
-    # Revalidate the provider record at the attestation boundary, not only in the poller.
-    # A healthy status or caller-supplied SHA is not proof of the running artifact.
-    if (_status(item) != "healthy" or not _matches_expected_deployment(item, expected_sha, None)):
+    # Revalidate provider identity once at the attestation boundary.
+    status = _status(item)
+    expected_commit_matched = _matches_expected_deployment(item, expected_sha, None)
+    digest = _image_digest(item)
+    deployment_id = item.get("id")
+    service_identity_conflict = False
+    for key in ("service_id", "serviceId", "service_reference"):
+        observed = item.get(key)
+        if observed is not None and (not isinstance(observed, str) or observed != service):
+            service_identity_conflict = True
+            break
+
+    refusal_facts = {
+        "status": status,
+        "expected_commit_matched": expected_commit_matched,
+        "immutable_image_digest_present": bool(digest),
+        "deployment_id_present": isinstance(deployment_id, str) and bool(deployment_id),
+        "service_identity_conflict": service_identity_conflict,
+    }
+    if status != "healthy" or not expected_commit_matched:
         return _attestation_refused(
             item, expected_sha, service,
             "Deployment status or provider-observed commit does not match the requested release.",
+            **refusal_facts,
         )
     # Reject explicit provider service identities that contradict the requested service.
     # Some Koyeb API versions omit this field, so absence remains a documented
     # provider-provenance gate rather than fabricated verification.
-    for key in ("service_id", "serviceId", "service_reference"):
-        observed = item.get(key)
-        if observed is not None and (not isinstance(observed, str) or observed != service):
-            return _attestation_refused(
-                item, expected_sha, service,
-                "Provider deployment service identity conflicts with the requested service.",
-            )
-    digest = _image_digest(item)
-    deployment_id = item.get("id")
+    if service_identity_conflict:
+        return _attestation_refused(
+            item, expected_sha, service,
+            "Provider deployment service identity conflicts with the requested service.",
+            **refusal_facts,
+        )
     if not digest or not isinstance(deployment_id, str) or not deployment_id:
         return _attestation_refused(
             item, expected_sha, service,
             "Missing immutable image digest or deployment ID.",
+            **refusal_facts,
         )
     output = os.getenv("DEPLOYMENT_ATTESTATION_PATH", "").strip()
     if not output:
