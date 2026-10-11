@@ -129,6 +129,7 @@ def _image_digest(item: dict[str, Any]) -> str:
 
 def _attestation_refused(item: dict[str, Any], expected_sha: str, service: str, reason: str) -> bool:
     """Record a fail-closed attestation refusal without copying provider payloads."""
+    print(f"Deployment attestation refused: {reason}", file=sys.stderr)
     deployment_id = item.get("id")
     if not isinstance(deployment_id, str) or not deployment_id:
         deployment_id = "unknown"
