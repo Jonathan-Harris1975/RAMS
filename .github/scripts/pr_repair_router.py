@@ -299,6 +299,17 @@ def safe_route_error(exc: Exception) -> str:
     return f"{type(exc).__name__}; detail withheld"
 
 
+
+def fail_routing(exc: Exception) -> None:
+    """Surface a failed repair handoff as a failed workflow step without leaking secrets."""
+    print(
+        f"::error::PR repair routing failed: {safe_route_error(exc)}. "
+        "The source CI/security result remains authoritative.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def main() -> None:
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as stream:
         event = json.load(stream)
@@ -313,6 +324,4 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"::warning::PR repair routing unavailable: {safe_route_error(exc)}. "
-              "The source CI/security result remains authoritative.", file=sys.stderr)
-        sys.exit(0)
+        fail_routing(exc)
