@@ -121,7 +121,7 @@ def test_attestation_refusal_sends_redacted_operational_event(tmp_path):
         assert not watcher._write_attestation(item, expected, "service-123")
     alert.assert_called_once()
     event = alert.call_args.args[0]
-    assert "Missing immutable image digest or deployment ID." in error_log.getvalue()
+    assert "Provider deployment does not expose an immutable image digest." in error_log.getvalue()
     assert "could not be delivered" in error_log.getvalue()
     assert "must-not-be-forwarded" not in error_log.getvalue()
     assert event["event_type"] == "deployment_attestation_refused"
