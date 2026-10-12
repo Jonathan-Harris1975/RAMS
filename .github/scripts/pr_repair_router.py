@@ -210,9 +210,12 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     comments = all_pages(f"/repos/{REPO}/issues/{number}/comments")
     markers = [c for c in comments if c.get("user", {}).get("login") == "github-actions[bot]" and
                "<!-- kilo-auto-repair:" in (c.get("body") or "")]
-    if any(marker in c["body"] for c in markers):
+    matching_markers = [c for c in markers if marker in c["body"]]
+    if matching_markers and any("dispatch-state: rejected-http-" not in c["body"] for c in matching_markers):
         print(f"PR #{number} already has its current {kind} repair request; skipping.")
         return 'already-requested'
+    if matching_markers:
+        print(f"PR #{number} has an explicit rejected handoff; a bounded retry is eligible.")
     if sum(f":{kind} -->" in c["body"] for c in markers) >= 2:
         print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
         return 'attempt-limit'
@@ -268,6 +271,15 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     instruction = machine_contract() + "\n\n" + instruction
     payload = {"repository": REPO, "source_pr": source, "source_sha": sha,
                "kind": kind, "task": instruction, "findings": findings[:12]}
+    # Write the deduplication marker before contacting Kilo. If the later
+    # acknowledgement update fails, an event retry still sees the reservation.
+    reservation = api("POST", f"/repos/{REPO}/issues/{number}/comments", {"body":
+        f"{marker}\ndispatch-state: pending\nAutonomous Kilo repair handoff reserved for the current {kind} findings. "
+        "If delivery outcome is uncertain, inspect Kilo before retrying; the source PR remains governed by its normal checks."})
+    reservation_id = (reservation or {}).get("id") if isinstance(reservation, dict) else None
+    if not isinstance(reservation_id, int):
+        raise RuntimeError("Could not persist the repair handoff deduplication marker")
+
     request = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
                                      headers={"Content-Type": "application/json"})
     try:
@@ -275,13 +287,26 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
             if response.status not in (200, 201, 202, 204):
                 raise RuntimeError(f"Kilo trigger returned HTTP {response.status}")
     except urllib.error.HTTPError as exc:
+        if 400 <= exc.code < 500:
+            try:
+                api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
+                    f"{marker}\ndispatch-state: rejected-http-{exc.code}\n"
+                    f"Kilo explicitly rejected this repair handoff with HTTP {exc.code}; "
+                    "one bounded retry remains available after correcting or clearing the rejection."})
+            except Exception:
+                print("::warning::Kilo rejected the repair handoff, but its reservation could not be marked retryable; automatic retry remains suppressed.")
         raise RuntimeError(f"Kilo trigger returned HTTP {exc.code}") from None
     except urllib.error.URLError:
+        # The provider may have accepted before the connection failed; keep the
+        # pending marker and require inspection before another dispatch.
         raise RuntimeError("Kilo trigger could not be reached") from None
-    api("POST", f"/repos/{REPO}/issues/{number}/comments", {"body":
-        f"{marker}\nAutonomous Kilo repair requested for the current {kind} findings. "
-        "No human reply or @kilocode-bot command is required. "
-        "The source PR remains governed by its normal checks."})
+
+    try:
+        api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
+            f"{marker}\ndispatch-state: accepted\nKilo accepted the repair request for {kind}. "
+            "The source PR remains governed by its normal checks."})
+    except Exception:
+        print("::warning::Kilo accepted the repair request, but its acknowledgement could not be updated; the persisted marker still suppresses duplicate dispatch.")
     print(f"Sent {kind} repair for PR #{number} at {sha[:12]} to Kilo.")
     return 'requested'
 
@@ -299,6 +324,17 @@ def safe_route_error(exc: Exception) -> str:
     return f"{type(exc).__name__}; detail withheld"
 
 
+
+def fail_routing(exc: Exception) -> None:
+    """Surface a failed repair handoff as a failed workflow step without leaking secrets."""
+    print(
+        f"::error::PR repair routing failed: {safe_route_error(exc)}. "
+        "The source CI/security result remains authoritative.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def main() -> None:
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as stream:
         event = json.load(stream)
@@ -313,6 +349,4 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"::warning::PR repair routing unavailable: {safe_route_error(exc)}. "
-              "The source CI/security result remains authoritative.", file=sys.stderr)
-        sys.exit(0)
+        fail_routing(exc)
