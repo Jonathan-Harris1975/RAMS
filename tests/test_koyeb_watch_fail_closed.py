@@ -78,6 +78,29 @@ def test_attestation_requires_observed_identity(tmp_path):
 
 
 
+def test_missing_attestation_path_refuses_with_operational_evidence():
+    watcher = _load()
+    expected = "a" * 40
+    item = {
+        "id": "deployment-43",
+        "status": "healthy",
+        "commit_sha": expected,
+        "image_digest": "sha256:" + "c" * 64,
+    }
+    error_log = StringIO()
+    with patch.dict(os.environ, {"DEPLOYMENT_ATTESTATION_PATH": ""}), \
+         patch.object(watcher, "send_event", return_value=True) as alert, \
+         redirect_stderr(error_log):
+        assert not watcher._write_attestation(item, expected, "service-123")
+    alert.assert_called_once()
+    event = alert.call_args.args[0]
+    assert "output path is not configured" in error_log.getvalue()
+    assert event["details"]["expectedCommitMatched"] is True
+    assert event["details"]["immutableImageDigestPresent"] is True
+    assert event["details"]["deploymentIdPresent"] is True
+    assert event["details"]["serviceIdentityConflict"] is False
+
+
 def test_attestation_refusal_sends_redacted_operational_event(tmp_path):
     watcher = _load()
     target = tmp_path / "attestation.json"
