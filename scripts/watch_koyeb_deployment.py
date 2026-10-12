@@ -230,6 +230,7 @@ def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) ->
         return _attestation_refused(
             item, expected_sha, service,
             "Deployment attestation output path is not configured.",
+            **refusal_facts,
         )
     with open(output, "w", encoding="utf-8") as handle:
         json.dump({"repository": os.getenv("GITHUB_REPOSITORY", ""), "sha": expected_sha,
