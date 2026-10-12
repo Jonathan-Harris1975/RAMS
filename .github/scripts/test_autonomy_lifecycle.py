@@ -305,6 +305,10 @@ class ProductionGovernanceProtectionTests(unittest.TestCase):
         self.assertIn('--field body="$marker', dispatch)
         self.assertIn("--jq '.id'", dispatch)
         self.assertIn("if ! gh api --method PATCH", dispatch)
+        self.assertIn("dispatch-state: pending", dispatch)
+        self.assertIn("dispatch-state: accepted", dispatch)
+        self.assertIn("dispatch-state: rejected-http-$status", dispatch)
+        self.assertIn('rejected_attempts" -ge 2', dispatch)
 
 
 if __name__ == "__main__":
