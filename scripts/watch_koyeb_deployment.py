@@ -219,10 +219,16 @@ def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) ->
             "Provider deployment service identity conflicts with the requested service.",
             **refusal_facts,
         )
-    if not digest or not isinstance(deployment_id, str) or not deployment_id:
+    if not digest:
         return _attestation_refused(
             item, expected_sha, service,
-            "Missing immutable image digest or deployment ID.",
+            "Provider deployment does not expose an immutable image digest.",
+            **refusal_facts,
+        )
+    if not isinstance(deployment_id, str) or not deployment_id:
+        return _attestation_refused(
+            item, expected_sha, service,
+            "Provider deployment does not expose an immutable deployment ID.",
             **refusal_facts,
         )
     output = os.getenv("DEPLOYMENT_ATTESTATION_PATH", "").strip()
