@@ -121,3 +121,33 @@ def test_provider_outage_has_bounded_retries_and_no_attestation(tmp_path):
         assert sleep.call_count == 2
         assert notify.call_count == 1
         assert not target.exists()
+
+
+def test_missing_image_digest_reports_only_the_missing_provider_field():
+    item = {
+        "id": "deployment-1",
+        "status": "healthy",
+        "created_at": "2026-10-12T17:00:00Z",
+        "definition": {"git": {"sha": "a" * 40}},
+    }
+    with patch.object(watch, "send_event") as notify:
+        assert watch._write_attestation(item, "a" * 40, "service") is False
+    event = notify.call_args.args[0]
+    assert event["summary"] == "Provider deployment does not expose an immutable image digest."
+    assert event["details"]["deploymentIdPresent"] is True
+    assert event["details"]["immutableImageDigestPresent"] is False
+
+
+def test_missing_deployment_id_reports_only_the_missing_provider_field():
+    item = {
+        "status": "healthy",
+        "created_at": "2026-10-12T17:00:00Z",
+        "definition": {"git": {"sha": "a" * 40}},
+        "image_digest": "sha256:" + "c" * 64,
+    }
+    with patch.object(watch, "send_event") as notify:
+        assert watch._write_attestation(item, "a" * 40, "service") is False
+    event = notify.call_args.args[0]
+    assert event["summary"] == "Provider deployment does not expose an immutable deployment ID."
+    assert event["details"]["deploymentIdPresent"] is False
+    assert event["details"]["immutableImageDigestPresent"] is True
