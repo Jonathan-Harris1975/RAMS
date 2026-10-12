@@ -127,29 +127,111 @@ def _image_digest(item: dict[str, Any]) -> str:
     return "sha256:" + digest
 
 
+def _attestation_refused(
+    item: dict[str, Any],
+    expected_sha: str,
+    service: str,
+    reason: str,
+    *,
+    status: str,
+    expected_commit_matched: bool,
+    immutable_image_digest_present: bool,
+    deployment_id_present: bool,
+    service_identity_conflict: bool,
+) -> bool:
+    """Record a fail-closed attestation refusal without copying provider payloads."""
+    print(f"Deployment attestation refused: {reason}", file=sys.stderr)
+    deployment_id = item.get("id")
+    if not isinstance(deployment_id, str) or not deployment_id:
+        deployment_id = "unknown"
+    deployment_id = "".join(char for char in deployment_id if char.isalnum() or char in "-_.")[:80] or "unknown"
+    if status not in (SUCCESS | FAILURE | PENDING):
+        status = "unknown"
+    run_id = os.getenv("GITHUB_RUN_ID", "").strip() or "unknown"
+    repository = os.getenv("GITHUB_REPOSITORY", "").strip()
+    run_url = ""
+    if repository and run_id.isdigit():
+        run_url = f"{os.getenv('GITHUB_SERVER_URL', 'https://github.com').rstrip('/')}/{repository}/actions/runs/{run_id}"
+    event = {
+        "event_id": f"koyeb:{service}:attestation-refused:{deployment_id}:{run_id}",
+        "source": "koyeb_deployment_watcher",
+        "service": os.getenv("SERVICE_DISPLAY_NAME", service).strip() or "Koyeb service",
+        "severity": "critical",
+        "event_type": "deployment_attestation_refused",
+        "title": "Koyeb deployment attestation was refused",
+        "summary": reason,
+        "release_id": expected_sha,
+        "url": run_url or None,
+        "details": {
+            "repository": repository or None,
+            "workflow": os.getenv("GITHUB_WORKFLOW"),
+            "runId": run_id,
+            "deploymentId": deployment_id,
+            "providerStatus": status,
+            "expectedCommitMatched": expected_commit_matched,
+            "immutableImageDigestPresent": immutable_image_digest_present,
+            "deploymentIdPresent": deployment_id_present,
+            "serviceIdentityConflict": service_identity_conflict,
+        },
+    }
+    try:
+        delivered = send_event(event)
+    except Exception as exc:
+        print(f"Attestation refusal alert failed: {exc.__class__.__name__}", file=sys.stderr)
+        delivered = False
+    if not delivered:
+        print("::warning::Deployment attestation refusal could not be delivered to the operational alert inbox.", file=sys.stderr)
+    return False
+
+
 def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) -> bool:
-    # Revalidate the provider record at the attestation boundary, not only in the poller.
-    # A healthy status or caller-supplied SHA is not proof of the running artifact.
-    if (_status(item) != "healthy" or not _matches_expected_deployment(item, expected_sha, None)):
-        print("Deployment status or provider-observed commit does not match; refusing attestation.", file=sys.stderr)
-        return False
-    # Reject explicit provider service identities that contradict the requested service.
-    # Some Koyeb API versions omit this field, so absence remains a documented
-    # provider-provenance gate rather than fabricated verification.
+    # Revalidate provider identity once at the attestation boundary.
+    status = _status(item)
+    expected_commit_matched = _matches_expected_deployment(item, expected_sha, None)
+    digest = _image_digest(item)
+    deployment_id = item.get("id")
+    service_identity_conflict = False
     for key in ("service_id", "serviceId", "service_reference"):
         observed = item.get(key)
         if observed is not None and (not isinstance(observed, str) or observed != service):
-            print("Provider deployment service identity conflicts with requested service.", file=sys.stderr)
-            return False
-    digest = _image_digest(item)
-    deployment_id = item.get("id")
+            service_identity_conflict = True
+            break
+
+    refusal_facts = {
+        "status": status,
+        "expected_commit_matched": expected_commit_matched,
+        "immutable_image_digest_present": bool(digest),
+        "deployment_id_present": isinstance(deployment_id, str) and bool(deployment_id),
+        "service_identity_conflict": service_identity_conflict,
+    }
+    if status != "healthy" or not expected_commit_matched:
+        return _attestation_refused(
+            item, expected_sha, service,
+            "Deployment status or provider-observed commit does not match the requested release.",
+            **refusal_facts,
+        )
+    # Reject explicit provider service identities that contradict the requested service.
+    # Some Koyeb API versions omit this field, so absence remains a documented
+    # provider-provenance gate rather than fabricated verification.
+    if service_identity_conflict:
+        return _attestation_refused(
+            item, expected_sha, service,
+            "Provider deployment service identity conflicts with the requested service.",
+            **refusal_facts,
+        )
     if not digest or not isinstance(deployment_id, str) or not deployment_id:
-        print("Missing immutable image digest or deployment ID; refusing attestation.", file=sys.stderr)
-        return False
+        return _attestation_refused(
+            item, expected_sha, service,
+            "Missing immutable image digest or deployment ID.",
+            **refusal_facts,
+        )
     output = os.getenv("DEPLOYMENT_ATTESTATION_PATH", "").strip()
     if not output:
-        print("Deployment attestation output path is required.", file=sys.stderr)
-        return False
+        return _attestation_refused(
+            item, expected_sha, service,
+            "Deployment attestation output path is not configured.",
+            **refusal_facts,
+        )
     with open(output, "w", encoding="utf-8") as handle:
         json.dump({"repository": os.getenv("GITHUB_REPOSITORY", ""), "sha": expected_sha,
                    "workflow_run": os.getenv("GITHUB_RUN_ID", ""), "service_reference": service,
@@ -252,3 +334,4 @@ if __name__ == "__main__":
     except (RuntimeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
         print(f"Koyeb deployment watcher failed: {exc.__class__.__name__}: {exc}", file=sys.stderr)
         raise SystemExit(1)
+
