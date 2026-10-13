@@ -47,6 +47,27 @@ def test_exact_sha_watch_gates_attestation_and_retained_evidence() -> None:
         assert "deployment_config.outputs.configured" not in body
 
 
+def test_failed_deployment_watch_retains_exact_sha_outcome_and_logs() -> None:
+    text = _workflow()
+    watch = _step(text, "Watch production deployment")
+    outcome = _step(text, "Record deployment-watch outcome")
+    evidence = _step(text, "Retain production deployment evidence")
+
+    assert "id: watch_deployment" in watch
+    assert "tee deployment-watch.log" in watch
+    assert "if: ${{ always() }}" in outcome
+    assert "steps.deployment_config.outcome" in outcome
+    assert "steps.watch_deployment.outcome" in outcome
+    assert "attestation_written" in outcome
+    assert 'json.dumps(evidence, sort_keys=True) + "\\n"' in outcome
+    assert 'json.dumps(evidence, sort_keys=True) + "\\\\n"' not in outcome
+    assert "if: ${{ always() }}" in evidence
+    assert "deployment-watch-outcome.json" in evidence
+    assert "deployment-watch.log" in evidence
+    assert "deployment-attestation.json" in evidence
+    assert "if-no-files-found: warn" in evidence
+
+
 def test_deployment_attestation_does_not_trigger_obsolete_ecosystem_smoke() -> None:
     text = _workflow()
     evidence = _step(text, "Retain production deployment evidence")
