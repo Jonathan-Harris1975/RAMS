@@ -211,15 +211,12 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
     def test_human_hold_label_withdraws_existing_mergify_admission(self):
         pr = copy.deepcopy(self.pr)
         pr["labels"].extend([{"name": "hold"}, {"name": "autonomy:admitted"}])
-        remove = self.enterContext(patch.object(automation, "delete"))
+        remove = self.enterContext(patch.object(automation, "remove_label"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
 
         automation.reconcile_pr(pr)
 
-        remove.assert_called_once_with(
-            "/repos/owner/repo/issues/22/labels/autonomy%3Aadmitted",
-            expected=(200, 204),
-        )
+        remove.assert_called_once_with(22, "autonomy:admitted")
         admit.assert_not_called()
 
     def test_admit_to_mergify_refuses_human_hold_label(self):
@@ -228,7 +225,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         self.enterContext(patch.object(automation, "get", return_value=pr))
         add = self.enterContext(patch.object(automation, "add_labels"))
 
-        automation.admit_to_mergify(22)
+        automation.admit_to_mergify(22, self.sha)
 
         add.assert_not_called()
 
@@ -436,7 +433,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
     def test_sensitive_owner_codex_changes_are_held(self):
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
-            patch.object(automation, "council_evidence_freeze", return_value=(False, "clear")),
+            patch.object(automation, "council_evidence_freeze", return_value=(False, "clear"), create=True),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
             patch.object(automation, "place_human_hold") as hold,
             patch.object(automation, "admit_to_mergify") as admit,
