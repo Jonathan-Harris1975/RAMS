@@ -501,6 +501,7 @@ def admit_to_mergify(number: int, expected_sha: str) -> None:
         "autonomy:superseded",
         "autonomy:obsolete",
         "do-not-merge",
+        "do not merge",
         "needs-manual-review",
         "needs-human-review",
         "hold",
