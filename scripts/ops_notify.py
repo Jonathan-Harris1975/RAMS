@@ -67,7 +67,7 @@ def main() -> int:
     parser.add_argument("--url", default="")
     args = parser.parse_args()
     event_id = args.event_id or f"{args.source}:{args.service}:{os.getenv('GITHUB_RUN_ID', datetime.now(UTC).isoformat())}"
-    send_event(
+    delivered = send_event(
         {
             "event_id": event_id,
             "source": args.source,
@@ -86,7 +86,7 @@ def main() -> int:
             },
         }
     )
-    return 0
+    return 0 if delivered else 1
 
 
 if __name__ == "__main__":
