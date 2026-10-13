@@ -576,11 +576,7 @@ def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
     blocking = labels.intersection(BLOCKING_LABELS)
     if blocking:
         if "autonomy:admitted" in labels:
-            encoded = urllib.parse.quote("autonomy:admitted", safe="")
-            delete(
-                f"/repos/{REPO}/issues/{int(pr['number'])}/labels/{encoded}",
-                expected=(200, 204),
-            )
+            remove_label(int(pr["number"]), "autonomy:admitted")
             log(
                 f"Withdrew Mergify admission for PR #{pr['number']} because of "
                 f"blocking label(s): {', '.join(sorted(blocking))}."
