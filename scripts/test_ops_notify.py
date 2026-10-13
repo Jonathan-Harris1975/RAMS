@@ -40,5 +40,37 @@ class OpsNotifyHTTPErrorTests(unittest.TestCase):
                 self.assertNotIn(test_token, stderr.getvalue())
 
 
+
+class OpsNotifyCliExitTests(unittest.TestCase):
+    def _run_main(self, *, delivered=None, error=None, missing=False):
+        argv = ["ops_notify", "--service", "test", "--event-type", "test",
+                "--title", "test", "--summary", "test"]
+        clean = ["", ""] if missing else ["https://ops.example/events", "test-token"]
+        with patch.object(ops_notify.sys, "argv", argv), \
+                patch("ops_notify._clean", side_effect=clean), \
+                patch("ops_notify.urllib.request.urlopen", return_value=delivered, side_effect=error):
+            return ops_notify.main()
+
+    def test_cli_successful_delivery_exits_zero(self):
+        class Response:
+            status = 202
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                pass
+        self.assertEqual(self._run_main(delivered=Response()), 0)
+
+    def test_cli_http_failure_exits_nonzero(self):
+        error = urllib.error.HTTPError(
+            "https://ops.example/events", 503, "private response detail", {}, None
+        )
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self._run_main(error=error), 1)
+
+    def test_cli_missing_configuration_exits_nonzero(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self._run_main(missing=True), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
