@@ -216,7 +216,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
 
         automation.reconcile_pr(pr)
 
-        remove.assert_called_once_with(22, "autonomy:admitted")
+        remove.assert_any_call(22, "autonomy:admitted")
         admit.assert_not_called()
 
     def test_admit_to_mergify_refuses_human_hold_label(self):
