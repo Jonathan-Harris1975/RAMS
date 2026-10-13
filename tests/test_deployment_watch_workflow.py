@@ -59,6 +59,8 @@ def test_failed_deployment_watch_retains_exact_sha_outcome_and_logs() -> None:
     assert "steps.deployment_config.outcome" in outcome
     assert "steps.watch_deployment.outcome" in outcome
     assert "attestation_written" in outcome
+    assert 'json.dumps(evidence, sort_keys=True) + "\\n"' in outcome
+    assert 'json.dumps(evidence, sort_keys=True) + "\\\\n"' not in outcome
     assert "if: ${{ always() }}" in evidence
     assert "deployment-watch-outcome.json" in evidence
     assert "deployment-watch.log" in evidence
