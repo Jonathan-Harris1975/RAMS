@@ -66,6 +66,7 @@ jobs:
           install -m 0755 "$workdir/koyeb" "$HOME/.local/bin/koyeb"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Watch production deployment
+        id: watch_deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
           KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE || secrets.KOYEB_SERVICE }}
@@ -77,11 +78,40 @@ jobs:
           EXPECTED_DEPLOYMENT_AFTER: ${{ github.event.workflow_run.created_at || '' }}
           DEPLOYMENT_ATTESTATION_PATH: deployment-attestation.json
           DEPLOYMENT_ENVIRONMENT: production
-        run: python scripts/watch_koyeb_deployment.py
+        run: |
+          set -o pipefail
+          python scripts/watch_koyeb_deployment.py 2>&1 | tee deployment-watch.log
+      - name: Record deployment-watch outcome
+        if: ${{ always() }}
+        env:
+          EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          CONFIG_OUTCOME: ${{ steps.deployment_config.outcome }}
+          WATCH_OUTCOME: ${{ steps.watch_deployment.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          evidence = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "expected_sha": os.environ["EXPECTED_DEPLOYMENT_SHA"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "configuration_outcome": os.environ["CONFIG_OUTCOME"],
+              "watch_outcome": os.environ["WATCH_OUTCOME"],
+              "attestation_written": Path("deployment-attestation.json").is_file(),
+          }
+          Path("deployment-watch-outcome.json").write_text(
+              json.dumps(evidence, sort_keys=True) + "\\n", encoding="utf-8"
+          )
+          PY
       - name: Retain production deployment evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: rams-deployment-attestation-${{ github.event.workflow_run.head_sha || github.sha }}
-          path: deployment-attestation.json
-          if-no-files-found: error
+          name: rams-deployment-evidence-${{ github.event.workflow_run.head_sha || github.sha }}
+          path: |
+            deployment-watch-outcome.json
+            deployment-watch.log
+            deployment-attestation.json
+          if-no-files-found: warn
           retention-days: 90
