@@ -435,6 +435,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
             patch.object(automation, "council_evidence_freeze", return_value=(False, "clear"), create=True),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
+            patch.object(automation, "has_current_approval", return_value=False),
             patch.object(automation, "place_human_hold") as hold,
             patch.object(automation, "admit_to_mergify") as admit,
             patch.object(automation, "set_admission_check"),
