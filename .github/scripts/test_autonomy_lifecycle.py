@@ -140,7 +140,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
-        admit.assert_called_once_with(22)
+        admit.assert_called_once_with(22, self.sha)
         approve.assert_not_called()
 
     def test_managed_branch_pr_touching_governance_gets_human_hold(self):
@@ -205,7 +205,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         automation.reconcile_pr(pr)
 
         remove.assert_called_once()
-        admit.assert_called_once_with(22)
+        admit.assert_called_once_with(22, self.sha)
         approve.assert_not_called()
 
     def test_human_hold_label_withdraws_existing_mergify_admission(self):
@@ -368,6 +368,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
         sha = "d" * 40
         pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
         with (
+            patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
             patch.object(automation, "_reconcile_pr_candidate"),
             patch.object(automation, "set_admission_check") as set_check,
             patch.object(automation, "remove_label") as remove_label,
@@ -386,6 +387,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
         def verified(candidate):
             automation.VERIFIED_ADMISSION_HEADS.add((number, sha))
         with (
+            patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
             patch.object(automation, "_reconcile_pr_candidate", side_effect=verified),
             patch.object(automation, "set_admission_check") as set_check,
             patch.object(automation, "remove_label") as remove_label,
