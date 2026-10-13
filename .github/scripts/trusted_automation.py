@@ -486,7 +486,7 @@ def approve_pr(number: int, sha: str) -> None:
     log(f"Approved PR #{number} at {sha[:12]} after trusted checks passed.")
 
 
-def admit_to_native_merge(number: int, expected_sha: str) -> None:
+def admit_to_mergify(number: int, expected_sha: str) -> None:
     pr = get(f"/repos/{REPO}/pulls/{number}")
     if pr.get("state") != "open":
         return
@@ -639,7 +639,7 @@ def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
         if current_head_unchanged(number, sha) is None:
             return
 
-    admit_to_native_merge(number, sha)
+    admit_to_mergify(number, sha)
 
 
 def reconcile_pr(pr: dict[str, Any]) -> None:
