@@ -101,7 +101,7 @@ jobs:
               "attestation_written": Path("deployment-attestation.json").is_file(),
           }
           Path("deployment-watch-outcome.json").write_text(
-              json.dumps(evidence, sort_keys=True) + "\\n", encoding="utf-8"
+              json.dumps(evidence, sort_keys=True) + "\n", encoding="utf-8"
           )
           PY
       - name: Retain production deployment evidence
