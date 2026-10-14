@@ -189,6 +189,59 @@ def test_missing_premium_approval_uses_qualified_nonpremium_fallback(settings, m
     assert persisted["premiumApprovals"] == {}
 
 
+def test_missing_premium_approval_rejects_unevaluated_fallback(settings, mock_r2) -> None:
+    registry = {
+        "expert": [
+            {
+                "model_id": "anthropic/claude-opus-5",
+                "approved_roles": ["chair"],
+            }
+        ],
+        "coding": [{"model_id": "openai/gpt-5.6-luna", "score": 0.9}],
+    }
+
+    with pytest.raises(TypeError, match="structured premium_justification"):
+        apply_rams_model_governance(
+            settings, mock_r2, registry=registry, source_run_id="council-unevaluated"
+        )
+
+    mock_r2.put_object.assert_not_called()
+
+
+def test_premium_fallback_preserves_distinct_primary_secondary_models(settings, mock_r2) -> None:
+    registry = {
+        "coding": [
+            {
+                "model_id": "anthropic/claude-opus-5",
+                "score": 1.0,
+                "approved_roles": ["primary", "secondary"],
+            },
+            {
+                "model_id": "openai/gpt-5.6-luna",
+                "score": 0.9,
+                "evaluation_passed": True,
+                "approved_roles": ["primary", "secondary"],
+            },
+            {
+                "model_id": "openai/gpt-5.6-sol",
+                "score": 0.8,
+                "evaluation_passed": True,
+                "approved_roles": ["primary", "secondary"],
+            },
+        ]
+    }
+
+    result = apply_rams_model_governance(
+        settings, mock_r2, registry=registry, source_run_id="council-distinct-fallback"
+    )
+
+    primary = result["assignments"]["OPENROUTER_PRIMARY_MODEL"]
+    secondary = result["assignments"]["OPENROUTER_SECONDARY_MODEL"]
+    assert primary == "openai/gpt-5.6-sol"
+    assert secondary == "openai/gpt-5.6-luna"
+    assert primary != secondary
+
+
 def test_complete_premium_justification_is_persisted_and_activated(settings, mock_r2) -> None:
     registry = {
         "coding": [
