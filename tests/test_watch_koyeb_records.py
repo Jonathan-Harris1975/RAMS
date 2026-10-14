@@ -189,7 +189,7 @@ def test_build_log_digest_queries_exact_deployment_only():
         "",
     )
     with patch.object(watch.subprocess, "run", return_value=result) as run:
-        assert watch._deployment_build_digest("service", "token", item) == "sha256:" + digest
+        assert watch._deployment_build_digest("token", item) == "sha256:" + digest
     command = run.call_args.args[0]
     assert command[:4] == ["koyeb", "deployments", "logs", deployment_id]
     assert command[command.index("--type") + 1] == "build"
