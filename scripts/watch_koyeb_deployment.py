@@ -165,7 +165,7 @@ def _build_log_digest_from_output(output: str, deployment_id: str) -> str:
     return "sha256:" + next(iter(digests))
 
 
-def _deployment_build_digest(service: str, token: str, item: dict[str, Any]) -> str:
+def _deployment_build_digest(token: str, item: dict[str, Any]) -> str:
     """Read Koyeb build logs scoped to one deployment and extract its immutable manifest."""
     deployment_id = item.get("id")
     created = _parse_timestamp(_created(item))
@@ -360,7 +360,7 @@ def main() -> int:
         if status in SUCCESS:
             build_log_digest = ""
             if not _image_digest(last):
-                build_log_digest = _deployment_build_digest(service, token, last)
+                build_log_digest = _deployment_build_digest(token, last)
             return 0 if _write_attestation(last, expected_sha, service, build_log_digest) else 1
         if status == "degraded":
             degraded_seen += 1
