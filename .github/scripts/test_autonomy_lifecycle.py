@@ -146,6 +146,8 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         approve.assert_not_called()
 
     def test_managed_branch_pr_touching_governance_gets_human_hold(self):
+        self.enterContext(patch.object(automation, "add_labels"))
+        self.enterContext(patch.object(automation, "comment"))
         hold = self.enterContext(patch.object(automation, "place_human_hold"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
         self.enterContext(
@@ -159,7 +161,9 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
-        hold.assert_called_once()
+        hold.a        self.enterContext(patch.object(automation, "add_labels"))
+        self.enterContext(patch.object(automation, "comment"))
+ssert_called_once()
         admit.assert_not_called()
 
     def test_managed_branch_pr_cannot_rewrite_admission_controller(self):
@@ -260,6 +264,8 @@ class KiloPolicyTests(unittest.TestCase):
 
 class RenovateGovernanceTests(unittest.TestCase):
     def test_auto_eligible_renovate_governance_change_gets_hold(self):
+        self.enterContext(patch.object(automation, "add_labels"))
+        self.enterContext(patch.object(automation, "comment"))
         self.enterContext(patch.object(automation, "has_operator_risk_approval", return_value=False))
         pr = {
             "number": 77, "state": "open", "draft": False,
