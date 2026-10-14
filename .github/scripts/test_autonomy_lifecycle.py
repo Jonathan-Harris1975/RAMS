@@ -177,10 +177,9 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         admit.assert_not_called()
         risk_label.assert_called_once_with(self.pr["number"], [automation.RISK_APPROVAL_LABEL])
 
-    def test_exact_head_human_approval_clears_governance_hold(self):
+    def test_generic_human_hold_remains_blocking_after_risk_approval(self):
         pr = copy.deepcopy(self.pr)
         pr["labels"].append({"name": "autonomy:human-hold"})
-        remove = self.enterContext(patch.object(automation, "delete"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
         approve = self.enterContext(patch.object(automation, "approve_pr"))
         self.enterContext(
@@ -190,6 +189,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
                 return_value=[".github/workflows/security.yml"],
             )
         )
+        self.enterContext(patch.object(automation, "has_operator_risk_approval", return_value=True))
         self.enterContext(patch.object(automation, "has_current_approval", return_value=True))
         self.enterContext(
             patch.object(
@@ -204,13 +204,13 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
 
         automation.reconcile_pr(pr)
 
-        remove.assert_called_once()
-        admit.assert_called_once_with(22, self.sha)
+        admit.assert_not_called()
         approve.assert_not_called()
 
     def test_human_hold_label_withdraws_existing_mergify_admission(self):
         pr = copy.deepcopy(self.pr)
         pr["labels"].extend([{"name": "hold"}, {"name": "autonomy:admitted"}])
+        self.enterContext(patch.object(automation, "pr_files", return_value=["docs/runbook.md"]))
         remove = self.enterContext(patch.object(automation, "remove_label"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
 
