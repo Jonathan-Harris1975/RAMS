@@ -523,13 +523,20 @@ def _nonpremium_fallback(
     role: str,
     selected: Mapping[str, object],
     now: datetime,
+    exclude: frozenset[str] = frozenset(),
 ) -> dict[str, object] | None:
-    """Choose the best eligible non-premium candidate when approval is absent."""
+    """Choose the best evaluated, distinct, eligible non-premium fallback."""
     candidates = _role_candidates(registry, role, now)
-    selected_id = _model_id(selected)
+    selected_id = _model_id(selected).casefold()
+    excluded = {model_id.casefold() for model_id in exclude}
     for candidate in candidates:
         model_id = _model_id(candidate)
-        if not model_id or model_id.casefold() == selected_id.casefold():
+        if (
+            not model_id
+            or model_id.casefold() == selected_id
+            or model_id.casefold() in excluded
+            or _optional_bool(candidate.get("evaluation_passed")) is not True
+        ):
             continue
         if is_premium_model(model_id, candidate):
             continue
@@ -578,8 +585,19 @@ def apply_rams_model_governance(
             try:
                 approval = _normalise_premium_justification(item, now=now)
             except (TypeError, ValueError):
+                paired_env = {
+                    "OPENROUTER_PRIMARY_MODEL": "OPENROUTER_SECONDARY_MODEL",
+                    "OPENROUTER_SECONDARY_MODEL": "OPENROUTER_PRIMARY_MODEL",
+                    "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL": "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL",
+                    "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL": "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL",
+                }.get(env_name)
+                paired_model = _model_id(selections.get(paired_env or "", {}))
                 fallback_item = _nonpremium_fallback(
-                    registry, role=role, selected=item, now=now
+                    registry,
+                    role=role,
+                    selected=item,
+                    now=now,
+                    exclude=frozenset({paired_model}) if paired_model else frozenset(),
                 )
                 if fallback_item is None:
                     raise
