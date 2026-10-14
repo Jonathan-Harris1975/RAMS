@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Enable GitHub native auto-merge only for trusted, exact-head admissions.
+"""Keep trusted repair PRs on the repository's Mergify-only merge path.
 
 This runs from the trusted default-branch workflow. It reads PR metadata only,
-never checks out or executes PR code, and disables an existing request when a
-current admission or hold condition no longer authorizes merging.
-"""
+never checks out or executes PR code, and removes GitHub native auto-merge
+requests for PRs admitted to the Mergify lifecycle.
 from __future__ import annotations
 
 import json
@@ -19,18 +18,6 @@ TOKEN = os.environ.get("NATIVE_MERGE_TOKEN", "")
 REPO = os.environ.get("REPO", "")
 DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 ADMISSION_CHECK = "Trusted autonomy admission"
-BLOCKING_LABELS = {
-    "autonomy:human-hold",
-    "autonomy:council-freeze",
-    "autonomy:superseded",
-    "autonomy:obsolete",
-    "do-not-merge",
-    "do not merge",
-    "hold",
-    "needs-manual-review",
-    "needs-human-review",
-}
-
 
 def request(method: str, path: str, data: dict[str, Any] | None = None) -> Any:
     url = path if path.startswith("http") else f"{API}{path}"
@@ -97,26 +84,6 @@ def merge_request(pr_node_id: str) -> dict[str, Any] | None:
     return node.get("autoMergeRequest")
 
 
-def merge_method() -> str:
-    settings = request("GET", f"/repos/{REPO}")
-    for setting, method in (
-        ("allow_squash_merge", "SQUASH"),
-        ("allow_merge_commit", "MERGE"),
-        ("allow_rebase_merge", "REBASE"),
-    ):
-        if settings.get(setting):
-            return method
-    raise RuntimeError(f"Repository {REPO} allows no GitHub merge method")
-
-
-def enable(pr_node_id: str) -> None:
-    method = merge_method()
-    graphql(
-        "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: " + method + "}) { pullRequest { number } } }",
-        {"id": pr_node_id},
-    )
-
-
 def disable(pr_node_id: str) -> None:
     graphql(
         "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { pullRequest { number } } }",
@@ -132,43 +99,25 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
         return
     active_request = merge_request(node_id)
 
-    # Ignore PRs outside the trusted admission system, including a user's
-    # unrelated native auto-merge request.
+    # Leave unrelated user-managed PRs alone. Trusted repair PRs are merged
+    # only by Mergify after exact-head admission; this workflow never arms the
+    # GitHub native auto-merge path.
     if "autonomy:admitted" not in labels and active_request is None:
         return
 
     pr = request("GET", f"/repos/{REPO}/pulls/{number}")
     current_labels = {label["name"] for label in pr.get("labels", [])}
     sha = str((pr.get("head") or {}).get("sha") or "")
-    exact_admission, has_admission_evidence = admission_check(number, sha) if sha else (False, False)
-    blocked = bool(current_labels.intersection(BLOCKING_LABELS))
-    eligible_except_mergeability = (
-        pr.get("state") == "open"
-        and not pr.get("draft")
-        and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
-        and "autonomy:admitted" in current_labels
-        and not blocked
-        and exact_admission
-    )
-    if eligible_except_mergeability and pr.get("mergeable") is None:
-        # GitHub computes mergeability asynchronously. Preserve active requests
-        # until the result is known instead of flapping them during that window.
-        return
-    eligible = eligible_except_mergeability and bool(pr.get("mergeable"))
+    _, has_admission_evidence = admission_check(number, sha) if sha else (False, False)
 
-    if eligible:
-        if active_request is None:
-            enable(node_id)
-            print(f"Enabled GitHub native auto-merge for admitted PR #{number} at {sha}.")
-        return
-
-    # Only cancel requests associated with an autonomy admission label or
-    # exact-head admission evidence. This leaves unrelated user requests alone.
     if active_request is not None and (
         "autonomy:admitted" in current_labels or has_admission_evidence
     ):
         disable(node_id)
-        print(f"Disabled GitHub native auto-merge for PR #{number}; admission or hold conditions no longer pass.")
+        print(
+            f"Disabled GitHub native auto-merge for trusted PR #{number}; "
+            "Mergify is the repository's merge authority."
+        )
 
 
 def main() -> int:
