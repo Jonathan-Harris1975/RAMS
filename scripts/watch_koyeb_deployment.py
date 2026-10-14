@@ -153,7 +153,7 @@ def _build_log_digest_from_output(output: str, deployment_id: str) -> str:
     except (TypeError, ValueError):
         return ""
     pattern = re.compile(
-        rf"pushing manifest for \\S+:{re.escape(deployment_id)}@sha256:([0-9a-fA-F]{{64}})(?:\\b|$)"
+        rf"pushing manifest for \S+:{re.escape(deployment_id)}@sha256:([0-9a-fA-F]{{64}})(?:\b|$)"
     )
     digests = {
         match.group(1).lower()
