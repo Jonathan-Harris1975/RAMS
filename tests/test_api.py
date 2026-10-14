@@ -915,7 +915,6 @@ def test_model_governance_rejects_unjustified_premium_selection(
     settings = make_settings(repo_dirs, RMS_API_KEY="test-key")
     mock_r2 = install_valid_api(monkeypatch, settings)
     registry = {
-        "coding": [{"model_id": "openai/gpt-5.6-sol", "score": 1.0}],
         "expert": [
             {
                 "model_id": "anthropic/claude-opus-5",
