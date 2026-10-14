@@ -4,6 +4,7 @@
 This runs from the trusted default-branch workflow. It reads PR metadata only,
 never checks out or executes PR code, and removes GitHub native auto-merge
 requests for PRs admitted to the Mergify lifecycle.
+"""
 from __future__ import annotations
 
 import json
