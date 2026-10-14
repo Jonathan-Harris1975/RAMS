@@ -151,3 +151,63 @@ def test_missing_deployment_id_reports_only_the_missing_provider_field():
     assert event["summary"] == "Provider deployment does not expose an immutable deployment ID."
     assert event["details"]["deploymentIdPresent"] is False
     assert event["details"]["immutableImageDigestPresent"] is True
+
+
+
+def test_build_log_digest_requires_exact_deployment_manifest():
+    deployment_id = "dfcb067f-7c16-4eb9-af6d-9ddeeb1b4e08"
+    digest = "a" * 64
+    payload = {"data": [
+        {"msg": f"#18 pushing manifest for registry01.prod.koyeb.com/org/service:{deployment_id}@sha256:{digest} 0.6s done"},
+        {"msg": f"#18 pushing manifest for registry01.prod.koyeb.com/org/service:latest@sha256:{'b' * 64} 0.0s done"},
+    ]}
+    output = json.dumps(payload)
+    assert watch._build_log_digest_from_output(output, deployment_id) == "sha256:" + digest
+    assert watch._build_log_digest_from_output(output, "another-deployment") == ""
+    assert watch._build_log_digest_from_output(
+        json.dumps({"data": [{"msg": f"pushing manifest for registry/service:{deployment_id}@sha256:latest"}]}),
+        deployment_id,
+    ) == ""
+
+
+def test_build_log_digest_rejects_conflicting_exact_deployment_manifests():
+    deployment_id = "dfcb067f-7c16-4eb9-af6d-9ddeeb1b4e08"
+    payload = {"data": [
+        {"msg": f"pushing manifest for registry/service:{deployment_id}@sha256:{'a' * 64}"},
+        {"msg": f"pushing manifest for registry/service:{deployment_id}@sha256:{'b' * 64}"},
+    ]}
+    assert watch._build_log_digest_from_output(json.dumps(payload), deployment_id) == ""
+
+
+def test_build_log_digest_queries_exact_deployment_only():
+    deployment_id = "dfcb067f-7c16-4eb9-af6d-9ddeeb1b4e08"
+    item = {"id": deployment_id, "created_at": "2026-10-14T01:24:42Z"}
+    digest = "c" * 64
+    result = subprocess.CompletedProcess(
+        [], 0,
+        json.dumps({"data": [{"msg": f"pushing manifest for registry/service:{deployment_id}@sha256:{digest}"}]}),
+        "",
+    )
+    with patch.object(watch.subprocess, "run", return_value=result) as run:
+        assert watch._deployment_build_digest("service", "token", item) == "sha256:" + digest
+    command = run.call_args.args[0]
+    assert command[:4] == ["koyeb", "deployments", "logs", deployment_id]
+    assert command[command.index("--type") + 1] == "build"
+    assert command[-2:] == ["--token", "token"]
+
+
+def test_build_log_digest_can_attest_only_with_provider_commit_and_health(tmp_path):
+    target = tmp_path / "attestation.json"
+    expected = "a" * 40
+    digest = "c" * 64
+    item = {
+        "id": "deployment-1",
+        "status": "healthy",
+        "created_at": "2026-10-12T17:00:00Z",
+        "definition": {"git": {"sha": expected}},
+    }
+    with patch.dict(os.environ, {"DEPLOYMENT_ATTESTATION_PATH": str(target)}):
+        assert watch._write_attestation(item, expected, "service", "sha256:" + digest)
+    evidence = json.loads(target.read_text())
+    assert evidence["image_digest"] == "sha256:" + digest
+    assert evidence["image_digest_source"] == "deployment_build_logs"
