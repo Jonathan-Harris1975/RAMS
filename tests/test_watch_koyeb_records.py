@@ -211,3 +211,38 @@ def test_build_log_digest_can_attest_only_with_provider_commit_and_health(tmp_pa
     evidence = json.loads(target.read_text())
     assert evidence["image_digest"] == "sha256:" + digest
     assert evidence["image_digest_source"] == "deployment_build_logs"
+
+
+
+class KoyebJsonLines(unittest.TestCase):
+    def test_build_log_digest_parses_multiple_json_records(self):
+        deployment_id = "dfcb067f-7c16-4eb9-af6d-9ddeeb1b4e08"
+        digest = "a" * 64
+        output = "\n".join(
+            (
+                json.dumps({"created_at": "2026-10-14T01:24:44Z", "msg": "build step started"}),
+                json.dumps({
+                    "created_at": "2026-10-14T01:24:45Z",
+                    "msg": (
+                        f"pushing manifest for registry01.prod.koyeb.com/org/service:"
+                        f"{deployment_id}@sha256:{digest} 0.6s done"
+                    ),
+                }),
+                json.dumps({"created_at": "2026-10-14T01:24:46Z", "msg": "build step completed"}),
+            )
+        )
+
+        self.assertEqual(
+            watch._build_log_digest_from_output(output, deployment_id),
+            "sha256:" + digest,
+        )
+
+    def test_build_log_digest_rejects_malformed_json_lines(self):
+        deployment_id = "dfcb067f-7c16-4eb9-af6d-9ddeeb1b4e08"
+        digest = "a" * 64
+        output = "\n".join((
+            json.dumps({"msg": f"pushing manifest for registry/service:{deployment_id}@sha256:{digest}"}),
+            "not-json",
+        ))
+
+        self.assertEqual(watch._build_log_digest_from_output(output, deployment_id), "")
