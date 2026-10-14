@@ -177,9 +177,10 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         admit.assert_not_called()
         risk_label.assert_called_once_with(self.pr["number"], [automation.RISK_APPROVAL_LABEL])
 
-    def test_generic_human_hold_remains_blocking_after_risk_approval(self):
+    def test_exact_head_approval_clears_risk_hold_and_admits(self):
         pr = copy.deepcopy(self.pr)
-        pr["labels"].append({"name": "autonomy:human-hold"})
+        pr["labels"].append({"name": automation.RISK_APPROVAL_LABEL})
+        remove = self.enterContext(patch.object(automation, "remove_label"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
         approve = self.enterContext(patch.object(automation, "approve_pr"))
         self.enterContext(
@@ -204,7 +205,8 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
 
         automation.reconcile_pr(pr)
 
-        admit.assert_not_called()
+        remove.assert_called_once_with(22, automation.RISK_APPROVAL_LABEL)
+        admit.assert_called_once_with(22, self.sha)
         approve.assert_not_called()
 
     def test_human_hold_label_withdraws_existing_mergify_admission(self):
@@ -449,6 +451,16 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
             candidate.update(change)
             self.assertFalse(automation.is_owner_codex_pr(candidate))
 
+    def test_stale_risk_hold_is_cleared_when_diff_becomes_low_risk(self):
+        pr = copy.deepcopy(self.pr)
+        pr["labels"] = [{"name": automation.RISK_APPROVAL_LABEL}]
+        remove = self.enterContext(patch.object(automation, "remove_label"))
+
+        held = automation.require_operator_risk_approval(pr, ["docs/runbook.md"], "codex")
+
+        self.assertFalse(held)
+        remove.assert_called_once_with(pr["number"], automation.RISK_APPROVAL_LABEL)
+
     def test_owner_exact_head_risk_approval(self):
         owner_review = {
             "state": "APPROVED",
@@ -465,7 +477,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
 
         later_other_head_review = dict(owner_review, commit_id="b" * 40, state="CHANGES_REQUESTED")
         owner_comment = {
-            "body": f"/risk-approve {self.sha}",
+            "body": f"/risk-approve  {self.sha} ",
             "created_at": "2026-10-14T00:01:00Z",
             "user": {"login": "owner"},
         }

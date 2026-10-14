@@ -106,6 +106,9 @@ RISK_LOW_RISK_PREFIXES_BY_REPO = {
         "transcripts/", "podcast/", "resources/", "for-teams/",
     ),
 }
+# RAMS is the repository automation control plane: every application change can
+# affect repository access, branch state, or release evidence, so Python source
+# remains owner-reviewed until a separately safe application subtree exists.
 RISK_LOW_RISK_CODE_EXTENSIONS_BY_REPO = {
     "AIMS": {".js", ".jsx", ".ts", ".tsx"},
     "AIMS-UI": {".js", ".jsx", ".ts", ".tsx", ".css", ".scss", ".html", ".svg"},
@@ -599,7 +602,10 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
         owner_comments.extend(
             item for item in chunk
             if item.get("user", {}).get("login") == owner_login
-            and str(item.get("body") or "").strip() == f"/risk-approve {sha}"
+            and re.fullmatch(
+                rf"/risk-approve\s+{re.escape(sha)}\s*",
+                str(item.get("body") or "").strip(),
+            )
         )
         if len(chunk) < 100:
             break
@@ -629,6 +635,7 @@ def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: s
     if not risky_paths:
         if RISK_APPROVAL_LABEL in labels:
             remove_label(number, RISK_APPROVAL_LABEL)
+            labels.discard(RISK_APPROVAL_LABEL)
             log(f"Cleared stale risk approval hold for PR #{number}: its current diff has no high-risk paths.")
         return False
     sha = str(pr.get("head", {}).get("sha", ""))
@@ -637,6 +644,7 @@ def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: s
     if has_operator_risk_approval(number, sha):
         if RISK_APPROVAL_LABEL in labels:
             remove_label(number, RISK_APPROVAL_LABEL)
+            labels.discard(RISK_APPROVAL_LABEL)
             log(f"Cleared risk approval hold for PR #{number}: repository owner approved exact head {sha[:12]}.")
         return False
     if RISK_APPROVAL_LABEL not in labels:
@@ -670,7 +678,7 @@ def risk_policy_contract_test() -> None:
         ".github/workflows/ci.yml", ".github/scripts/trusted_automation.py",
         "infra/main.tf", "backend/alembic/versions/001.sql",
         "src/auth/session.ts", "package-lock.json", "tests/test_auth.py",
-        "unknown/README.txt", "unknown/README.md", "src/requirements-runtime.lock",
+        "unknown/README.txt", "unknown/README.md", "requirements.in", "src/requirements-runtime.lock",
         "requirements-dev.txt", "./.github/workflows/security.yml",
     )
     low_risk = ("docs/runbook.md", "README.md")
