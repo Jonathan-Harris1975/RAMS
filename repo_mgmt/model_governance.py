@@ -517,6 +517,28 @@ def _apply_premium_approvals(
         cfg.rms_engineering_council_expert_enabled = bool(chair_approval)
 
 
+def _nonpremium_fallback(
+    registry: Mapping[str, object],
+    *,
+    role: str,
+    selected: Mapping[str, object],
+    now: datetime,
+) -> dict[str, object] | None:
+    """Choose the best eligible non-premium candidate when approval is absent."""
+    candidates = _role_candidates(registry, role, now)
+    selected_id = _model_id(selected)
+    for candidate in candidates:
+        model_id = _model_id(candidate)
+        if not model_id or model_id.casefold() == selected_id.casefold():
+            continue
+        if is_premium_model(model_id, candidate):
+            continue
+        if _cost_requires_justification(candidate, candidates):
+            continue
+        return candidate
+    return None
+
+
 def apply_rams_model_governance(
     cfg: Settings,
     r2: R2Client,
@@ -524,14 +546,11 @@ def apply_rams_model_governance(
     registry: Mapping[str, object],
     source_run_id: str | None,
 ) -> dict[str, Any]:
-    """Persist qualified HIVE model selections, then activate them atomically."""
+    """Persist and activate HIVE selections, falling back when premium evidence is absent."""
     now = datetime.now(UTC)
     selections = _build_rams_model_selections(registry, now=now)
-    assignments = {
-        env_name: _model_id(item) for env_name, item in selections.items() if _model_id(item)
-    }
     clean_source_run_id = str(source_run_id or "").strip() or None
-    if not assignments:
+    if not selections:
         return {
             "ok": True,
             "applied": False,
@@ -542,22 +561,47 @@ def apply_rams_model_governance(
 
     premium_approvals: dict[str, dict[str, object]] = {}
     decisions: dict[str, dict[str, object]] = {}
-    for env_name, item in selections.items():
+    for env_name, initial_item in list(selections.items()):
         role = next(
             role_name
             for role_name, candidate_env in _ROLE_ENV_NAMES.items()
             if candidate_env == env_name
         )
+        item = initial_item
         alternatives = _role_candidates(registry, role, now)
         premium = is_premium_model(_model_id(item), item) or _cost_requires_justification(
             item, alternatives
         )
         justification_id: str | None = None
+        fallback: dict[str, object] | None = None
         if premium:
-            approval = _normalise_premium_justification(item, now=now)
-            premium_approvals[env_name] = approval
-            justification_id = str(approval["justificationId"])
-        decisions[env_name] = {
+            try:
+                approval = _normalise_premium_justification(item, now=now)
+            except (TypeError, ValueError):
+                fallback_item = _nonpremium_fallback(
+                    registry, role=role, selected=item, now=now
+                )
+                if fallback_item is None:
+                    raise
+                fallback = {
+                    "fromModelId": _model_id(item),
+                    "reason": "premium approval absent or invalid",
+                }
+                item = fallback_item
+                selections[env_name] = item
+                alternatives = _role_candidates(registry, role, now)
+                premium = is_premium_model(_model_id(item), item) or _cost_requires_justification(
+                    item, alternatives
+                )
+                if premium:
+                    raise ValueError(
+                        f"Non-premium fallback for {env_name} still requires premium approval"
+                    )
+            else:
+                premium_approvals[env_name] = approval
+                justification_id = str(approval["justificationId"])
+
+        decision: dict[str, object] = {
             "modelId": _model_id(item),
             "role": role,
             "sourceCategory": str(item.get("_category") or ""),
@@ -567,6 +611,21 @@ def apply_rams_model_governance(
             "expirationDate": item.get("expiration_date", item.get("expires_at")),
             "premium": premium,
             "justificationId": justification_id,
+        }
+        if fallback is not None:
+            decision["premiumFallback"] = fallback
+        decisions[env_name] = decision
+
+    assignments = {
+        env_name: _model_id(item) for env_name, item in selections.items() if _model_id(item)
+    }
+    if not assignments:
+        return {
+            "ok": True,
+            "applied": False,
+            "persisted": False,
+            "reason": "no-qualified-active-models",
+            "sourceRunId": clean_source_run_id,
         }
 
     payload: dict[str, Any] = {
@@ -579,6 +638,7 @@ def apply_rams_model_governance(
             "retirementWindowDays": _RETIREMENT_WINDOW_DAYS,
             "premiumCostMultiplier": _PREMIUM_COST_MULTIPLIER,
             "premiumApprovalMaxDays": _PREMIUM_APPROVAL_MAX_DAYS,
+            "premiumFallback": "select an eligible non-premium candidate when premium approval is absent or invalid",
             "budgetBehaviour": "observe-and-review-never-stop-authorised-work",
         },
         "assignments": assignments,
