@@ -148,15 +148,24 @@ def _build_log_digest_from_output(output: str, deployment_id: str) -> str:
     """Return a digest only from a manifest tag scoped to this exact deployment."""
     if not deployment_id or not output:
         return ""
-    try:
-        payload = json.loads(output)
-    except (TypeError, ValueError):
+    payloads = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        try:
+            payloads.append(json.loads(line))
+        except (TypeError, ValueError):
+            # The Koyeb CLI emits one JSON log record per line. Reject malformed
+            # output instead of attesting from a partial log stream.
+            return ""
+    if not payloads:
         return ""
     pattern = re.compile(
         rf"pushing manifest for \S+:{re.escape(deployment_id)}@sha256:([0-9a-fA-F]{{64}})(?:\b|$)"
     )
     digests = {
         match.group(1).lower()
+        for payload in payloads
         for message in _log_messages(payload)
         if (match := pattern.search(message))
     }
