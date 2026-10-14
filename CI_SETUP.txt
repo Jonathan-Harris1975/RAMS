@@ -56,7 +56,7 @@ AUTONOMOUS REPAIR + TRUSTED PR AUTOMATION
 - Fork secrets and write tokens remain disabled. An unlinked Kilo PR or any unknown bot/user PR is not automatically admitted.
 - Renovate PRs may be admitted to run CI regardless of update type. Admission must not request native auto-merge; safe classes are queued only by GitHub native auto-merge after exact-head checks and policy pass. Major/manual Renovate PRs remain manual as defined by committed `renovate.json` policy.
 - A verified linked Kilo implementation PR may be approved only after the current head SHA has successful repository CI, CodeQL and repository-security workflows while GitHub enforces any other required branch/ruleset checks.
-- Kilo implementation changes to workflows, Renovate/Mergify configuration, CodeQL/security policy, secret-scanner controls, CODEOWNERS, SECURITY.md or autonomy governance files receive `autonomy:human-hold`. Carrier PRs are lifecycle evidence and never auto-merge.
+- Kilo implementation changes to workflows, Renovate/native auto-merge configuration, CodeQL/security policy, secret-scanner controls, CODEOWNERS, SECURITY.md or autonomy governance files receive `autonomy:human-hold`. Carrier PRs are lifecycle evidence and never auto-merge.
 - The trusted lifecycle workflow may close explicitly `autonomy:superseded` and `autonomy:obsolete` PRs; GitHub native auto-merge handles eligible admitted PRs subject to the active rulesets.
 - Trusted automation verifies and adopts exact-head policy state, then enables GitHub native auto-merge for eligible PRs. GitHub protections remain in force throughout.
 - Keep GitHub automatic deletion of merged head branches enabled where desired to remove completed automation branches.
