@@ -527,20 +527,22 @@ def _nonpremium_fallback(
 ) -> dict[str, object] | None:
     """Choose the best evaluated, distinct, eligible non-premium fallback."""
     candidates = _role_candidates(registry, role, now)
+    nonpremium_candidates = [
+        candidate
+        for candidate in candidates
+        if not is_premium_model(_model_id(candidate), candidate)
+    ]
     selected_id = _model_id(selected).casefold()
     excluded = {model_id.casefold() for model_id in exclude}
-    for candidate in candidates:
+    for candidate in nonpremium_candidates:
         model_id = _model_id(candidate)
         if (
             not model_id
             or model_id.casefold() == selected_id
             or model_id.casefold() in excluded
-            or _optional_bool(candidate.get("evaluation_passed")) is not True
         ):
             continue
-        if is_premium_model(model_id, candidate):
-            continue
-        if _cost_requires_justification(candidate, candidates):
+        if _cost_requires_justification(candidate, nonpremium_candidates):
             continue
         return candidate
     return None
@@ -577,8 +579,13 @@ def apply_rams_model_governance(
         )
         item = initial_item
         alternatives = _role_candidates(registry, role, now)
+        nonpremium_alternatives = [
+            candidate
+            for candidate in alternatives
+            if not is_premium_model(_model_id(candidate), candidate)
+        ]
         premium = is_premium_model(_model_id(item), item) or _cost_requires_justification(
-            item, alternatives
+            item, nonpremium_alternatives
         )
         justification_id: str | None = None
         fallback: dict[str, object] | None = None
@@ -654,8 +661,13 @@ def apply_rams_model_governance(
                     if next_paired is not None:
                         selections[paired_env] = next_paired
                 alternatives = _role_candidates(registry, role, now)
+                nonpremium_alternatives = [
+                    candidate
+                    for candidate in alternatives
+                    if not is_premium_model(_model_id(candidate), candidate)
+                ]
                 premium = is_premium_model(_model_id(item), item) or _cost_requires_justification(
-                    item, alternatives
+                    item, nonpremium_alternatives
                 )
                 if premium:
                     raise ValueError(
@@ -702,7 +714,10 @@ def apply_rams_model_governance(
             "retirementWindowDays": _RETIREMENT_WINDOW_DAYS,
             "premiumCostMultiplier": _PREMIUM_COST_MULTIPLIER,
             "premiumApprovalMaxDays": _PREMIUM_APPROVAL_MAX_DAYS,
-            "premiumFallback": "select an eligible non-premium candidate when premium approval is absent or invalid",
+            "premiumFallback": True,
+            "premiumFallbackDescription": (
+                "select an eligible non-premium candidate when premium approval is absent or invalid"
+            ),
             "budgetBehaviour": "observe-and-review-never-stop-authorised-work",
         },
         "assignments": assignments,
