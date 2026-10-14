@@ -215,18 +215,21 @@ def test_premium_fallback_preserves_distinct_primary_secondary_models(settings, 
                 "model_id": "anthropic/claude-opus-5",
                 "score": 1.0,
                 "evaluation_passed": True,
+                "estimated_cost_per_task": 0.01,
                 "approved_roles": ["primary", "secondary"],
             },
             {
                 "model_id": "openai/gpt-5.6-luna",
                 "score": 0.9,
                 "evaluation_passed": True,
+                "estimated_cost_per_task": 0.012,
                 "approved_roles": ["primary", "secondary"],
             },
             {
                 "model_id": "openai/gpt-5.6-sol",
                 "score": 0.8,
                 "evaluation_passed": True,
+                "estimated_cost_per_task": 0.019,
                 "approved_roles": ["primary", "secondary"],
             },
         ]
@@ -238,8 +241,8 @@ def test_premium_fallback_preserves_distinct_primary_secondary_models(settings, 
 
     primary = result["assignments"]["OPENROUTER_PRIMARY_MODEL"]
     secondary = result["assignments"]["OPENROUTER_SECONDARY_MODEL"]
-    assert primary == "openai/gpt-5.6-sol"
-    assert secondary == "openai/gpt-5.6-luna"
+    assert primary == "openai/gpt-5.6-luna"
+    assert secondary == "openai/gpt-5.6-sol"
     assert primary != secondary
 
 
