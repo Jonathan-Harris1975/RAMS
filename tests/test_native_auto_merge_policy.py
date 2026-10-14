@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import unittest
 from pathlib import Path
-
-import pytest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).parents[1] / ".github" / "scripts" / "native_auto_merge.py"
 SPEC = importlib.util.spec_from_file_location("native_auto_merge", SCRIPT)
@@ -23,49 +23,55 @@ def _pr(labels: list[str]) -> dict:
     }
 
 
-def test_admitted_pr_is_left_for_mergify_without_enabling_native_auto_merge(monkeypatch) -> None:
-    graphql_calls = []
-    monkeypatch.setattr(native_auto_merge, "merge_request", lambda _node: None)
-    monkeypatch.setattr(native_auto_merge, "request", lambda *_args, **_kwargs: _pr(["autonomy:admitted"]))
-    monkeypatch.setattr(native_auto_merge, "admission_check", lambda *_args: (True, True))
-    monkeypatch.setattr(native_auto_merge, "graphql", lambda query, *_args: graphql_calls.append(query))
+class NativeAutoMergePolicyTests(unittest.TestCase):
+    def test_admitted_pr_is_left_for_mergify_without_enabling_native_auto_merge(self) -> None:
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value=None),
+            patch.object(native_auto_merge, "request", return_value=_pr(["autonomy:admitted"])),
+            patch.object(native_auto_merge, "admission_check", return_value=(True, True)),
+            patch.object(native_auto_merge, "graphql") as graphql,
+        ):
+            native_auto_merge.reconcile({
+                "number": 12,
+                "node_id": "PR_node",
+                "labels": [{"name": "autonomy:admitted"}],
+            })
+        graphql.assert_not_called()
 
-    native_auto_merge.reconcile({"number": 12, "node_id": "PR_node", "labels": [{"name": "autonomy:admitted"}]})
+    def test_existing_native_request_for_admitted_pr_is_disabled(self) -> None:
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value={"enabledAt": "now"}),
+            patch.object(native_auto_merge, "request", return_value=_pr(["autonomy:admitted"])),
+            patch.object(native_auto_merge, "admission_check", return_value=(True, True)),
+            patch.object(native_auto_merge, "graphql") as graphql,
+        ):
+            native_auto_merge.reconcile({
+                "number": 12,
+                "node_id": "PR_node",
+                "labels": [{"name": "autonomy:admitted"}],
+            })
+        graphql.assert_called_once()
+        self.assertIn("disablePullRequestAutoMerge", graphql.call_args.args[0])
 
-    assert graphql_calls == []
+    def test_native_request_with_exact_admission_evidence_is_disabled(self) -> None:
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value={"enabledAt": "now"}),
+            patch.object(native_auto_merge, "request", return_value=_pr([])),
+            patch.object(native_auto_merge, "admission_check", return_value=(False, True)),
+            patch.object(native_auto_merge, "graphql") as graphql,
+        ):
+            native_auto_merge.reconcile({"number": 12, "node_id": "PR_node", "labels": []})
+        graphql.assert_called_once()
+        self.assertIn("disablePullRequestAutoMerge", graphql.call_args.args[0])
+
+    def test_unrelated_pr_without_native_request_is_ignored(self) -> None:
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value=None),
+            patch.object(native_auto_merge, "request") as request,
+        ):
+            native_auto_merge.reconcile({"number": 12, "node_id": "PR_node", "labels": []})
+        request.assert_not_called()
 
 
-def test_existing_native_request_for_admitted_pr_is_disabled(monkeypatch) -> None:
-    graphql_calls = []
-    monkeypatch.setattr(native_auto_merge, "merge_request", lambda _node: {"enabledAt": "now"})
-    monkeypatch.setattr(native_auto_merge, "request", lambda *_args, **_kwargs: _pr(["autonomy:admitted"]))
-    monkeypatch.setattr(native_auto_merge, "admission_check", lambda *_args: (True, True))
-    monkeypatch.setattr(native_auto_merge, "graphql", lambda query, *_args: graphql_calls.append(query))
-
-    native_auto_merge.reconcile({"number": 12, "node_id": "PR_node", "labels": [{"name": "autonomy:admitted"}]})
-
-    assert len(graphql_calls) == 1
-    assert "disablePullRequestAutoMerge" in graphql_calls[0]
-
-
-def test_active_native_request_with_exact_admission_evidence_is_disabled(monkeypatch) -> None:
-    graphql_calls = []
-    monkeypatch.setattr(native_auto_merge, "merge_request", lambda _node: {"enabledAt": "now"})
-    monkeypatch.setattr(native_auto_merge, "request", lambda *_args, **_kwargs: _pr([]))
-    monkeypatch.setattr(native_auto_merge, "admission_check", lambda *_args: (False, True))
-    monkeypatch.setattr(native_auto_merge, "graphql", lambda query, *_args: graphql_calls.append(query))
-
-    native_auto_merge.reconcile({"number": 12, "node_id": "PR_node", "labels": []})
-
-    assert len(graphql_calls) == 1
-    assert "disablePullRequestAutoMerge" in graphql_calls[0]
-
-
-def test_unrelated_pr_without_native_request_is_ignored(monkeypatch) -> None:
-    calls = []
-    monkeypatch.setattr(native_auto_merge, "merge_request", lambda _node: None)
-    monkeypatch.setattr(native_auto_merge, "request", lambda *args, **kwargs: calls.append((args, kwargs)))
-
-    native_auto_merge.reconcile({"number": 12, "node_id": "PR_node", "labels": []})
-
-    assert calls == []
+if __name__ == "__main__":
+    unittest.main()
