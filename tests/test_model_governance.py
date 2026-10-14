@@ -152,6 +152,44 @@ def test_premium_selection_without_justification_is_rejected(settings, mock_r2) 
     mock_r2.put_object.assert_not_called()
 
 
+def test_missing_premium_approval_uses_qualified_nonpremium_fallback(settings, mock_r2) -> None:
+    registry = {
+        "expert": [
+            {
+                "model_id": "anthropic/claude-opus-5",
+                "score": 1.0,
+                "approved_roles": ["chair"],
+            }
+        ],
+        "coding": [
+            {
+                "model_id": "openai/gpt-5.6-luna",
+                "score": 0.9,
+                "evaluation_passed": True,
+            }
+        ],
+    }
+
+    result = apply_rams_model_governance(
+        settings, mock_r2, registry=registry, source_run_id="council-nonpremium"
+    )
+
+    chair_key = "RMS_ENGINEERING_COUNCIL_CHAIR_MODEL"
+    chair = result["decisions"][chair_key]
+    assert chair["modelId"] == "openai/gpt-5.6-luna"
+    assert chair["premium"] is False
+    assert chair["premiumFallback"] == {
+        "fromModelId": "anthropic/claude-opus-5",
+        "reason": "premium approval absent or invalid",
+    }
+    assert result["assignments"][chair_key] == "openai/gpt-5.6-luna"
+    assert result["premiumApprovals"] == {}
+    assert settings.rms_engineering_council_expert_enabled is False
+    persisted = json.loads(mock_r2.put_object.call_args.args[2])
+    assert persisted["assignments"][chair_key] == "openai/gpt-5.6-luna"
+    assert persisted["premiumApprovals"] == {}
+
+
 def test_complete_premium_justification_is_persisted_and_activated(settings, mock_r2) -> None:
     registry = {
         "coding": [
