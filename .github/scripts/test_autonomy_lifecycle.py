@@ -465,7 +465,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
         owner_review = {
             "state": "APPROVED",
             "commit_id": self.sha,
-            "submitted_at": "2026-10-14T00:00:00Z",
+            "submitted_at": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
             "user": {"login": "owner"},
         }
         with patch.object(
@@ -478,7 +478,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
         later_other_head_review = dict(owner_review, commit_id="b" * 40, state="CHANGES_REQUESTED")
         owner_comment = {
             "body": f"/risk-approve  {self.sha} ",
-            "created_at": "2026-10-14T00:01:00Z",
+            "created_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat(),
             "user": {"login": "owner"},
         }
         with patch.object(
@@ -496,7 +496,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
         rejected_review = dict(owner_review, state="CHANGES_REQUESTED")
         owner_comment = {
             "body": f"/risk-approve {self.sha}",
-            "created_at": "2026-10-14T00:01:00Z",
+            "created_at": (datetime.now(timezone.utc) - timedelta(minutes=4)).isoformat(),
             "user": {"login": "owner"},
         }
         with patch.object(
@@ -667,7 +667,7 @@ class RiskApprovalExpiryTests(unittest.TestCase):
         self.assertEqual(automation.RISK_APPROVAL_TTL.days, 7)
 
     def test_recent_exact_head_owner_review_is_accepted(self):
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
         now = datetime.now(timezone.utc).isoformat()
         with patch.object(automation, "REPO", "owner/repo"), patch.object(
             automation, "get",
