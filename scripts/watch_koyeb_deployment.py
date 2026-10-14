@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -108,8 +109,8 @@ def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expect
     return True
 
 
-def _image_digest(item: dict[str, Any]) -> str:
-    """Accept only an observed immutable sha256 digest, not a mutable image tag."""
+def _image_digest(item: dict[str, Any], build_log_digest: str = "") -> str:
+    """Accept an observed immutable sha256 digest, not a mutable image tag."""
     values = []
     for container in (item, item.get("image"), item.get("definition")):
         if not isinstance(container, dict):
@@ -118,6 +119,8 @@ def _image_digest(item: dict[str, Any]) -> str:
             value = container.get(key)
             if isinstance(value, str):
                 values.append(value)
+    if not values and build_log_digest:
+        values.append(build_log_digest)
     values = [v.lower().removeprefix("sha256:") for v in values]
     if len(set(values)) != 1 or not values:
         return ""
@@ -126,6 +129,70 @@ def _image_digest(item: dict[str, Any]) -> str:
         return ""
     return "sha256:" + digest
 
+
+def _log_messages(value: Any) -> Iterable[str]:
+    """Yield only message fields from the structured Koyeb CLI log response."""
+    if isinstance(value, dict):
+        message = value.get("msg")
+        if isinstance(message, str):
+            yield message
+        for key, child in value.items():
+            if key != "msg":
+                yield from _log_messages(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _log_messages(child)
+
+
+def _build_log_digest_from_output(output: str, deployment_id: str) -> str:
+    """Return a digest only from a manifest tag scoped to this exact deployment."""
+    if not deployment_id or not output:
+        return ""
+    try:
+        payload = json.loads(output)
+    except (TypeError, ValueError):
+        return ""
+    pattern = re.compile(
+        rf"pushing manifest for \S+:{re.escape(deployment_id)}@sha256:([0-9a-fA-F]{{64}})(?:\b|$)"
+    )
+    digests = {
+        match.group(1).lower()
+        for message in _log_messages(payload)
+        if (match := pattern.search(message))
+    }
+    if len(digests) != 1:
+        return ""
+    return "sha256:" + next(iter(digests))
+
+
+def _deployment_build_digest(token: str, item: dict[str, Any]) -> str:
+    """Read Koyeb build logs scoped to one deployment and extract its immutable manifest."""
+    deployment_id = item.get("id")
+    created = _parse_timestamp(_created(item))
+    if not isinstance(deployment_id, str) or not deployment_id or created is None:
+        return ""
+    end = datetime.now(UTC)
+    command = [
+        "koyeb", "deployments", "logs", deployment_id,
+        "--type", "build",
+        "--start-time", (created - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S"),
+        "--end-time", end.strftime("%Y-%m-%d %H:%M:%S"),
+        "--order", "asc", "--full", "-o", "json", "--token", token,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=45,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return _build_log_digest_from_output(result.stdout, deployment_id)
 
 def _attestation_refused(
     item: dict[str, Any],
@@ -184,11 +251,11 @@ def _attestation_refused(
     return False
 
 
-def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) -> bool:
+def _write_attestation(item: dict[str, Any], expected_sha: str, service: str, build_log_digest: str = "") -> bool:
     # Revalidate provider identity once at the attestation boundary.
     status = _status(item)
     expected_commit_matched = _matches_expected_deployment(item, expected_sha, None)
-    digest = _image_digest(item)
+    digest = _image_digest(item, build_log_digest)
     deployment_id = item.get("id")
     service_identity_conflict = False
     for key in ("service_id", "serviceId", "service_reference"):
@@ -242,6 +309,7 @@ def _write_attestation(item: dict[str, Any], expected_sha: str, service: str) ->
         json.dump({"repository": os.getenv("GITHUB_REPOSITORY", ""), "sha": expected_sha,
                    "workflow_run": os.getenv("GITHUB_RUN_ID", ""), "service_reference": service,
                    "deployment_id": deployment_id, "image_digest": digest,
+                   "image_digest_source": "deployment_record" if _image_digest(item) else "deployment_build_logs",
                    "environment": os.getenv("DEPLOYMENT_ENVIRONMENT", "production"),
                    "status": "healthy", "observed_at": datetime.now(UTC).isoformat()}, handle, sort_keys=True)
         handle.write("\n")
@@ -290,7 +358,10 @@ def main() -> int:
         deployment_id = str(last.get("id") or last.get("name") or "unknown")
         print(f"{display_name} deployment {deployment_id}: {status} ({attempt}/{attempts})")
         if status in SUCCESS:
-            return 0 if _write_attestation(last, expected_sha, service) else 1
+            build_log_digest = ""
+            if not _image_digest(last):
+                build_log_digest = _deployment_build_digest(token, last)
+            return 0 if _write_attestation(last, expected_sha, service, build_log_digest) else 1
         if status == "degraded":
             degraded_seen += 1
             if degraded_seen < 4:
