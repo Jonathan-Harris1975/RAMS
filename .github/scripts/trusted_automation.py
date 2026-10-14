@@ -9,7 +9,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -67,6 +67,8 @@ KILO_SENSITIVE_EXACT = {
 }
 
 RISK_APPROVAL_LABEL = "autonomy:risk-approval-required"
+# Exact-head owner approval expires after seven days.
+RISK_APPROVAL_TTL = timedelta(days=7)
 RISK_HIGH_RISK_PREFIXES = (
     ".github/", ".circleci/", ".buildkite/", ".gitlab/", ".devcontainer/",
     "infra/", "infrastructure/", "terraform/", "k8s/", "kubernetes/", "helm/",
@@ -563,7 +565,6 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
             review for review in chunk
             if review.get("user", {}).get("login") == owner_login
             and review.get("state") != "PENDING"
-            and review.get("commit_id") == sha
         )
         if len(chunk) < 100:
             break
@@ -581,6 +582,11 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
 
     if any(timestamp_order(review, "submitted_at") == float("-inf") for review in owner_reviews):
         return False
+    now = datetime.now(timezone.utc).timestamp()
+
+    def unexpired(timestamp: float) -> bool:
+        age = now - timestamp
+        return 0 <= age <= RISK_APPROVAL_TTL.total_seconds()
     latest_review = max(
         owner_reviews,
         key=lambda review: timestamp_order(review, "submitted_at"),
@@ -591,6 +597,8 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
         latest_review
         and latest_review.get("state") == "APPROVED"
         and latest_review.get("commit_id") == sha
+        and latest_review_time is not None
+        and unexpired(latest_review_time)
     ):
         return True
 
@@ -602,10 +610,7 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
         owner_comments.extend(
             item for item in chunk
             if item.get("user", {}).get("login") == owner_login
-            and re.fullmatch(
-                rf"/risk-approve\s+{re.escape(sha)}\s*",
-                str(item.get("body") or "").strip(),
-            )
+            and str(item.get("body") or "").strip() == f"/risk-approve {sha}"
         )
         if len(chunk) < 100:
             break
@@ -624,7 +629,7 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
     comment_time = timestamp_order(latest_approval_comment, "created_at")
     if comment_time == float("-inf"):
         return False
-    return latest_review_time is None or comment_time > latest_review_time
+    return (latest_review_time is None or comment_time > latest_review_time) and unexpired(comment_time)
 
 
 def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: str) -> bool:
@@ -652,7 +657,7 @@ def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: s
         comment(
             number,
             f"Autonomous merge is paused for high-risk or unclassified changes. The repository owner must approve this exact head "
-            f"SHA: submit an approving review, or comment `/risk-approve {sha}`. Any new commit requires fresh approval. "
+            f"SHA: submit an approving review, or comment `/risk-approve {sha}`. Any new commit requires fresh approval; this approval expires after seven days. "
             f"Paths: {', '.join(risky_paths[:8])}{f' … and {len(risky_paths) - 8} more' if len(risky_paths) > 8 else ''}",
         )
     if "autonomy:admitted" in labels:
@@ -934,3 +939,4 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"::error::{exc}", file=sys.stderr)
         raise
+
