@@ -214,6 +214,7 @@ def test_premium_fallback_preserves_distinct_primary_secondary_models(settings, 
             {
                 "model_id": "anthropic/claude-opus-5",
                 "score": 1.0,
+                "evaluation_passed": True,
                 "approved_roles": ["primary", "secondary"],
             },
             {
