@@ -164,7 +164,6 @@ def test_missing_premium_approval_uses_qualified_nonpremium_fallback(settings, m
             {
                 "model_id": "openai/gpt-5.6-luna",
                 "score": 0.9,
-                "evaluation_passed": True,
             }
         ],
     }
@@ -183,13 +182,15 @@ def test_missing_premium_approval_uses_qualified_nonpremium_fallback(settings, m
     }
     assert result["assignments"][chair_key] == "openai/gpt-5.6-luna"
     assert result["premiumApprovals"] == {}
+    assert result["policy"]["premiumFallback"] is True
+    assert "eligible non-premium candidate" in result["policy"]["premiumFallbackDescription"]
     assert settings.rms_engineering_council_expert_enabled is False
     persisted = json.loads(mock_r2.put_object.call_args.args[2])
     assert persisted["assignments"][chair_key] == "openai/gpt-5.6-luna"
     assert persisted["premiumApprovals"] == {}
 
 
-def test_missing_premium_approval_rejects_unevaluated_fallback(settings, mock_r2) -> None:
+def test_explicitly_failed_fallback_evaluation_is_rejected(settings, mock_r2) -> None:
     registry = {
         "expert": [
             {
@@ -197,15 +198,57 @@ def test_missing_premium_approval_rejects_unevaluated_fallback(settings, mock_r2
                 "approved_roles": ["chair"],
             }
         ],
-        "coding": [{"model_id": "openai/gpt-5.6-luna", "score": 0.9}],
+        "coding": [
+            {
+                "model_id": "openai/gpt-5.6-luna",
+                "score": 0.9,
+                "evaluation_passed": False,
+            }
+        ],
     }
 
     with pytest.raises(TypeError, match="structured premium_justification"):
         apply_rams_model_governance(
-            settings, mock_r2, registry=registry, source_run_id="council-unevaluated"
+            settings, mock_r2, registry=registry, source_run_id="council-evaluation-failed"
         )
 
     mock_r2.put_object.assert_not_called()
+
+
+def test_nonpremium_fallback_cost_excludes_unusable_premium_models(settings, mock_r2) -> None:
+    registry = {
+        "expert": [
+            {
+                "model_id": "anthropic/claude-opus-5",
+                "score": 1.0,
+                "evaluation_passed": True,
+                "estimated_cost_per_task": 0.01,
+                "approved_roles": ["chair"],
+            }
+        ],
+        "coding": [
+            {
+                "model_id": "openai/gpt-5.6-luna",
+                "score": 0.9,
+                "evaluation_passed": True,
+                "estimated_cost_per_task": 0.03,
+            },
+            {
+                "model_id": "openai/gpt-5.6-sol",
+                "score": 0.8,
+                "evaluation_passed": True,
+                "estimated_cost_per_task": 0.04,
+            },
+        ],
+    }
+
+    result = apply_rams_model_governance(
+        settings, mock_r2, registry=registry, source_run_id="council-cost-fallback"
+    )
+
+    chair_key = "RMS_ENGINEERING_COUNCIL_CHAIR_MODEL"
+    assert result["assignments"][chair_key] == "openai/gpt-5.6-luna"
+    assert result["decisions"][chair_key]["premium"] is False
 
 
 def test_premium_fallback_preserves_distinct_primary_secondary_models(settings, mock_r2) -> None:
