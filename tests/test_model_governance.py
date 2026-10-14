@@ -143,7 +143,6 @@ def test_premium_selection_without_justification_is_rejected(settings, mock_r2) 
                 "approved_roles": ["chair"],
             }
         ],
-        "coding": [{"model_id": "openai/gpt-5.6-luna", "score": 1.0}],
     }
 
     with pytest.raises(TypeError, match="structured premium_justification"):
