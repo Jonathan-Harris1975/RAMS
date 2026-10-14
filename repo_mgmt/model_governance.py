@@ -568,7 +568,8 @@ def apply_rams_model_governance(
 
     premium_approvals: dict[str, dict[str, object]] = {}
     decisions: dict[str, dict[str, object]] = {}
-    for env_name, initial_item in list(selections.items()):
+    for env_name in list(selections):
+        initial_item = selections[env_name]
         role = next(
             role_name
             for role_name, candidate_env in _ROLE_ENV_NAMES.items()
@@ -585,19 +586,47 @@ def apply_rams_model_governance(
             try:
                 approval = _normalise_premium_justification(item, now=now)
             except (TypeError, ValueError):
-                paired_env = {
-                    "OPENROUTER_PRIMARY_MODEL": "OPENROUTER_SECONDARY_MODEL",
-                    "OPENROUTER_SECONDARY_MODEL": "OPENROUTER_PRIMARY_MODEL",
-                    "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL": "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL",
-                    "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL": "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL",
-                }.get(env_name)
-                paired_model = _model_id(selections.get(paired_env or "", {}))
+                paired_roles = {
+                    "OPENROUTER_PRIMARY_MODEL": (
+                        "OPENROUTER_SECONDARY_MODEL",
+                        "secondary",
+                    ),
+                    "OPENROUTER_SECONDARY_MODEL": (
+                        "OPENROUTER_PRIMARY_MODEL",
+                        "primary",
+                    ),
+                    "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL": (
+                        "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL",
+                        "specialist",
+                    ),
+                    "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL": (
+                        "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL",
+                        "architect",
+                    ),
+                }
+                paired = paired_roles.get(env_name)
+                paired_env, paired_role = paired or ("", "")
+                paired_model = _model_id(selections.get(paired_env, {}))
+                # Primary/architect owns the best qualified fallback. If the
+                # existing paired role chose that same model, refresh it to the
+                # next evaluated candidate. Secondary/specialist retains the
+                # primary/architect choice and must select a distinct fallback.
+                exclude = (
+                    frozenset({paired_model})
+                    if paired_model
+                    and env_name
+                    in {
+                        "OPENROUTER_SECONDARY_MODEL",
+                        "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL",
+                    }
+                    else frozenset()
+                )
                 fallback_item = _nonpremium_fallback(
                     registry,
                     role=role,
                     selected=item,
                     now=now,
-                    exclude=frozenset({paired_model}) if paired_model else frozenset(),
+                    exclude=exclude,
                 )
                 if fallback_item is None:
                     raise
@@ -607,6 +636,23 @@ def apply_rams_model_governance(
                 }
                 item = fallback_item
                 selections[env_name] = item
+                if (
+                    paired_env
+                    and env_name
+                    in {
+                        "OPENROUTER_PRIMARY_MODEL",
+                        "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL",
+                    }
+                    and paired_model.casefold() == _model_id(item).casefold()
+                ):
+                    next_paired = _nonpremium_fallback(
+                        registry,
+                        role=paired_role,
+                        selected=item,
+                        now=now,
+                    )
+                    if next_paired is not None:
+                        selections[paired_env] = next_paired
                 alternatives = _role_candidates(registry, role, now)
                 premium = is_premium_model(_model_id(item), item) or _cost_requires_justification(
                     item, alternatives
