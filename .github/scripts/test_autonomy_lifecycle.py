@@ -151,38 +151,31 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         hold = self.enterContext(patch.object(automation, "place_human_hold"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
         self.enterContext(
-            patch.object(
-                automation,
-                "pr_files",
-                return_value=[".github/workflows/security.yml"],
-            )
+            patch.object(automation, "pr_files", return_value=[".github/workflows/security.yml"])
         )
-        self.enterContext(patch.object(automation, "has_current_approval", return_value=False))
+        self.enterContext(patch.object(automation, "has_operator_risk_approval", return_value=False))
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
-        hold.a        self.enterContext(patch.object(automation, "add_labels"))
-        self.enterContext(patch.object(automation, "comment"))
-ssert_called_once()
+        hold.assert_not_called()
         admit.assert_not_called()
         risk_label.assert_called_once_with(self.pr["number"], [automation.RISK_APPROVAL_LABEL])
 
     def test_managed_branch_pr_cannot_rewrite_admission_controller(self):
+        risk_label = self.enterContext(patch.object(automation, "add_labels"))
+        self.enterContext(patch.object(automation, "comment"))
         hold = self.enterContext(patch.object(automation, "place_human_hold"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
         self.enterContext(
-            patch.object(
-                automation,
-                "pr_files",
-                return_value=[".github/scripts/trusted_automation.py"],
-            )
+            patch.object(automation, "pr_files", return_value=[".github/scripts/trusted_automation.py"])
         )
-        self.enterContext(patch.object(automation, "has_current_approval", return_value=False))
+        self.enterContext(patch.object(automation, "has_operator_risk_approval", return_value=False))
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
-        hold.assert_called_once()
+        hold.assert_not_called()
         admit.assert_not_called()
+        risk_label.assert_called_once_with(self.pr["number"], [automation.RISK_APPROVAL_LABEL])
 
     def test_exact_head_human_approval_clears_governance_hold(self):
         pr = copy.deepcopy(self.pr)
