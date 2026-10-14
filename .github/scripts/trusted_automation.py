@@ -560,6 +560,7 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
             review for review in chunk
             if review.get("user", {}).get("login") == owner_login
             and review.get("state") != "PENDING"
+            and review.get("commit_id") == sha
         )
         if len(chunk) < 100:
             break

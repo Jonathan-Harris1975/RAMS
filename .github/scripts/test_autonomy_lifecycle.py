@@ -462,6 +462,23 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
             side_effect=lambda endpoint: [owner_review] if "/reviews?" in endpoint else [],
         ):
             self.assertTrue(automation.has_operator_risk_approval(int(self.pr['number']), self.sha))
+
+        later_other_head_review = dict(owner_review, commit_id="b" * 40, state="CHANGES_REQUESTED")
+        owner_comment = {
+            "body": f"/risk-approve {self.sha}",
+            "created_at": "2026-10-14T00:01:00Z",
+            "user": {"login": "owner"},
+        }
+        with patch.object(
+            automation,
+            "get",
+            side_effect=lambda endpoint: (
+                [later_other_head_review] if "/reviews?" in endpoint
+                else [owner_comment] if "/comments?" in endpoint
+                else []
+            ),
+        ):
+            self.assertTrue(automation.has_operator_risk_approval(int(self.pr['number']), self.sha))
             self.assertFalse(automation.has_operator_risk_approval(int(self.pr["number"]), "b" * 40))
 
         rejected_review = dict(owner_review, state="CHANGES_REQUESTED")
