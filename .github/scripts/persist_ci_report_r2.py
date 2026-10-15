@@ -57,7 +57,7 @@ def request(method, endpoint, key, body=b"", ctype=None, expected_length=None):
         raise RuntimeError(f"R2 {method} failed with HTTP {e.code}") from e
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument("phase",choices=("dast","council"))
+    p.add_argument("phase",choices=("dast","council","lifecycle"))
     p.add_argument("sha")
     p.add_argument("source",type=Path)
     a=p.parse_args()
