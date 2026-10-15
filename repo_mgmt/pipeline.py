@@ -196,7 +196,7 @@ def _apply_audit_remediation_routing(
         and str(routing.get("plannedEngineeringAgent", "")).lower() == "cto.new"
         and routing.get("ownershipTransferRequired") is True
         and str(routing.get("dependencyVersionOwner", "")).lower() == "renovate"
-        and str(routing.get("mergeAuthority", "")).lower() == "mergify"
+        and str(routing.get("mergeAuthority", "")).lower() == "github_native_auto_merge"
     )
     if not valid:
         return _mark_code_fixes_manual(
