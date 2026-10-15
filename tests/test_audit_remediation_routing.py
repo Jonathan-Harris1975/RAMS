@@ -31,7 +31,7 @@ def _audit():
                 "plannedEngineeringAgent": "cto.new",
                 "ownershipTransferRequired": True,
                 "dependencyVersionOwner": "renovate",
-                "mergeAuthority": "mergify",
+                "mergeAuthority": "github_native_auto_merge",
                 "humanDecisionSurface": "hive-ui",
             }
         }
@@ -55,6 +55,17 @@ def test_code_fix_becomes_external_agent_routing_task():
 
 def test_missing_contract_refuses_direct_rams_code_write():
     routed = _apply_audit_remediation_routing([_issue()], {}, "website")
+    item = routed[0]
+    assert item["classification"] == "code_fix"
+    assert item["status"] == "manual_review"
+    assert item["patchAttempted"] is False
+    assert any("routing contract missing/invalid" in e for e in item["evidence"])
+
+
+def test_legacy_mergify_contract_is_rejected():
+    audit = _audit()
+    audit["operational"]["remediationRouting"]["mergeAuthority"] = "mergify"
+    routed = _apply_audit_remediation_routing([_issue()], audit, "website")
     item = routed[0]
     assert item["classification"] == "code_fix"
     assert item["status"] == "manual_review"
