@@ -166,6 +166,7 @@ class ModelGovernanceRequest(BaseModel):
 
     sourceRunId: str | None = None
     registry: dict[str, list[dict[str, object]]]
+    requireTaskEvaluation: bool = True
 
 
 class AdmissionError(Exception):
@@ -848,6 +849,7 @@ async def apply_model_governance(
             r2,
             registry=body.registry,
             source_run_id=body.sourceRunId,
+            require_task_evaluation=body.requireTaskEvaluation,
         )
     except (TypeError, ValueError) as exc:
         logger.warning("rms-api: model governance selection rejected: %s", exc)

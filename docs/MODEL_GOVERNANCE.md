@@ -96,9 +96,10 @@
    `total request cost, including retries and fallbacks / validated successful tasks`
 
    Include input, output, reasoning, cache, retry and fallback usage. Use latency and reliability
-   as tie-breakers after cost. RAMS chooses the lowest-cost evaluated candidate within the best-fit
-   task category, then score and reliability. Where only legacy scores exist, RAMS keeps the old
-   score-first behaviour until HIVE supplies cost evidence.
+   as tie-breakers after cost. RAMS chooses only candidates with a passing task evaluation,
+   positive sample size and traceable evidence. A score-only legacy registry cannot replace the
+   last-known-good route. If no candidate meets the evidence bar, the apply is a no-op and the
+   current route stays in force.
 
    Spending is an optimisation signal, not a kill switch. RAMS records and reviews cost but does
    not stop authorised workloads merely because a budget target has been reached.

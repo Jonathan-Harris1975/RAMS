@@ -128,6 +128,16 @@ def _estimated_task_cost(item: Mapping[str, object]) -> float | None:
     return None
 
 
+def _has_passing_task_evaluation(item: Mapping[str, object]) -> bool:
+    sample_size = _number(item.get("evaluation_sample_size"))
+    return (
+        _optional_bool(item.get("evaluation_passed")) is True
+        and sample_size is not None
+        and sample_size >= 1
+        and bool(str(item.get("evaluation_evidence") or "").strip())
+    )
+
+
 def _model_id(item: Mapping[str, object]) -> str:
     return str(item.get("model_id") or item.get("id") or "").strip()
 
@@ -554,8 +564,25 @@ def apply_rams_model_governance(
     *,
     registry: Mapping[str, object],
     source_run_id: str | None,
+    require_task_evaluation: bool = False,
 ) -> dict[str, Any]:
     """Persist and activate HIVE selections, falling back when premium evidence is absent."""
+    if require_task_evaluation:
+        registry = {
+            category: [
+                item
+                for item in items
+                if isinstance(item, Mapping)
+                and item.get("available") is not False
+                and (
+                    str(item.get("provider") or "").lower() != "openrouter"
+                    or item.get("available") is True
+                )
+                and _has_passing_task_evaluation(item)
+            ]
+            for category, items in registry.items()
+            if isinstance(items, list)
+        }
     now = datetime.now(UTC)
     selections = _build_rams_model_selections(registry, now=now)
     clean_source_run_id = str(source_run_id or "").strip() or None
