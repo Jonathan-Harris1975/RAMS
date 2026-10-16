@@ -26,7 +26,7 @@ EXPECTED_IMAGE_DEFAULTS = {
     "OPENROUTER_APP_NAME": "RAMS",
     "OPENROUTER_HTTP_REFERER": "https://jonathan-harris.online",
     "OPENROUTER_PRIMARY_MODEL": "openai/gpt-5.6-sol",
-    "OPENROUTER_SECONDARY_MODEL": "anthropic/claude-sonnet-5.5",
+    "OPENROUTER_SECONDARY_MODEL": "anthropic/claude-sonnet-5",
     "OPENROUTER_TRIAGE_MODEL": "google/gemini-2.5-flash-lite",
     "PYTHONDONTWRITEBYTECODE": "1",
     "PYTHONHASHSEED": "random",
@@ -83,7 +83,7 @@ EXPECTED_IMAGE_DEFAULTS = {
     "RMS_ENGINEERING_COUNCIL_ENABLED": "true",
     "RMS_ENGINEERING_COUNCIL_EXPERT_ENABLED": "false",
     "RMS_ENGINEERING_COUNCIL_REVIEW_CONFIDENCE": "85",
-    "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL": "anthropic/claude-sonnet-5.5",
+    "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL": "anthropic/claude-sonnet-5",
     "RMS_PORT": "8000",
     "RMS_PRIMARY_MAX_TOKENS": "6144",
     "RMS_PRIMARY_TEMPERATURE": "0",
@@ -188,7 +188,7 @@ def test_image_defaults_plus_sensitive_bindings_form_complete_production_config(
     assert cfg.rms_create_pr is True
     assert cfg.rms_max_issues_per_run == 1
     assert cfg.openrouter_primary_model == "openai/gpt-5.6-sol"
-    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5.5"
+    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5"
     assert cfg.rms_engineering_council_expert_enabled is False
 
 

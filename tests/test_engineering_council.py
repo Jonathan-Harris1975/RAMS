@@ -39,7 +39,7 @@ def _settings(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "rms_engineering_council_enabled": True,
         "rms_engineering_council_architect_model": "openai/gpt-5.6-sol",
-        "rms_engineering_council_specialist_model": "anthropic/claude-sonnet-5.5",
+        "rms_engineering_council_specialist_model": "anthropic/claude-sonnet-5",
         "rms_engineering_council_chair_model": "anthropic/claude-opus-5",
         "rms_engineering_council_expert_enabled": False,
         "rms_engineering_council_expert_justification_id": "",
