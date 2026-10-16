@@ -36,13 +36,13 @@ def test_evaluated_candidates_are_selected_by_cost_before_score() -> None:
     registry = {
         "coding": [
             {
-                "model_id": "provider/high-score",
+                "model_id": "openai/gpt-5.6-sol",
                 "score": 0.99,
                 "evaluation_passed": True,
                 "estimated_cost_per_task": 0.09,
             },
             {
-                "model_id": "provider/qualified-low-cost",
+                "model_id": "openai/gpt-5.6-luna",
                 "score": 0.94,
                 "evaluation_passed": True,
                 "estimated_cost_per_task": 0.01,
@@ -52,8 +52,8 @@ def test_evaluated_candidates_are_selected_by_cost_before_score() -> None:
 
     assignments = build_rams_model_assignments(registry)
 
-    assert assignments["OPENROUTER_PRIMARY_MODEL"] == "provider/qualified-low-cost"
-    assert assignments["OPENROUTER_SECONDARY_MODEL"] == "provider/high-score"
+    assert assignments["OPENROUTER_PRIMARY_MODEL"] == "openai/gpt-5.6-luna"
+    assert assignments["OPENROUTER_SECONDARY_MODEL"] == "openai/gpt-5.6-sol"
 
 
 def test_legacy_score_only_registry_remains_compatible() -> None:
