@@ -2,7 +2,8 @@
 
 **Owner:** HIVE AI Council with the RAMS service owner  
 **Review cadence:** Monthly and immediately after a provider retirement notice  
-**Last OpenRouter check:** 13 September 2026
+**Last public OpenRouter catalogue check:** 16 October 2026  
+**Account-filtered `/models/user` check:** required before promotion; RAMS production credentials were not used for this review
 
 1. **Keep one governed inventory of every model RAMS may use.**
 
@@ -28,24 +29,34 @@
 
 2. **Use the current OpenRouter check as the baseline, not a permanent allow-list.**
 
-   The 13 September 2026 catalogue check supports this starting route:
+   The public catalogue check on 16 October 2026 supports this conservative starting route. Prices are public list prices and may change; HIVE must use the account-filtered model list and current evaluation data before it submits assignments:
 
    | RAMS role | Baseline model | Current input/output price per 1M tokens | Reason |
    |---|---|---:|---|
-   | Triage/classification | `google/gemini-2.5-flash-lite` | $0.10 / $0.40 | Low-cost structured classification |
-   | Primary repository work | `openai/gpt-5.6-sol` | $1.00 / $5.00 current API rate | Strong coding result, structured output and substantially cheaper than an expert chair |
-   | Independent fallback/reviewer | `anthropic/claude-sonnet-5` | $2.00 / $10.00 | Different provider family, structured output and strong coding/review fit |
+   | Triage/classification | `google/gemini-2.5-flash-lite` | $0.10 / $0.40 | Very low-cost classification; keep output bounded |
+   | Primary repository work | `openai/gpt-5.6-sol` | $4.00 / $20.00 | Current last-known-good coding baseline; retain until cheaper candidates pass RAMS evaluation |
+   | Independent fallback/reviewer | `anthropic/claude-sonnet-5.5` | $2.00 / $10.00 | Current Sonnet-family candidate; separate provider family and supports structured output |
    | Expert adjudication only | `anthropic/claude-opus-5` | $5.00 / $25.00 | Reserved for unresolved high-risk ambiguity |
 
-   The live catalogue reported `expiration_date: null` for the four baseline models. Null means
-   “no date currently advertised”, not “will never retire”. HIVE must repeat the check monthly.
+   OpenRouter also lists `openai/gpt-5.6-luna` at $0.20 / $1.20 per 1M tokens, with tool
+   calling and structured-output support. Treat it as a coding challenger, not an approved
+   replacement: first confirm it appears in the account-filtered catalogue, then run the versioned
+   RAMS AnchorPatch evaluation and compare cost per validated successful task, regression rate,
+   reliability and fallback rate against GPT-5.6 Sol. Promote it only when it passes the existing
+   quality and safety floor. The public price alone is not evidence of a production saving.
+
+   The prior September snapshot reported `expiration_date: null` for the baseline models. Null
+   means “no date currently advertised”, not “will never retire”. HIVE must repeat the check monthly.
+   OpenRouter lists Claude Sonnet 5.5 as the direct successor to Sonnet 5; RAMS defaults now use the
+   exact Sonnet 5.5 ID for the independent standard fallback and council specialist.
    OpenRouter marks `anthropic/claude-opus-5-fast` as deprecated from 1 September 2026; RAMS
    rejects that alias. If fast Opus capacity is ever justified, target regular
    `anthropic/claude-opus-5` through OpenRouter's fast service tier.
 
    Source pages:
    <https://openrouter.ai/openai/gpt-5.6-sol>,
-   <https://openrouter.ai/anthropic/claude-sonnet-5>,
+   <https://openrouter.ai/openai/gpt-5.6-luna>,
+   <https://openrouter.ai/anthropic/claude-sonnet-5.5>,
    <https://openrouter.ai/anthropic/claude-opus-5>, and
    <https://openrouter.ai/anthropic/claude-opus-5-fast>.
 
