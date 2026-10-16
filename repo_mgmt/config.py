@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str = ""
     openrouter_primary_model: str = "openai/gpt-5.6-sol"
-    openrouter_secondary_model: str = "anthropic/claude-sonnet-5.5"
+    openrouter_secondary_model: str = "anthropic/claude-sonnet-5"
     openrouter_triage_model: str = "google/gemini-2.5-flash-lite"
     openrouter_http_referer: str = "https://jonathan-harris.online"
     openrouter_app_name: str = "RAMS"
@@ -234,7 +234,7 @@ class Settings(BaseSettings):
     # Autonomous engineering council / micro-surgery guardrails.
     rms_engineering_council_enabled: bool = True
     rms_engineering_council_architect_model: str = "openai/gpt-5.6-sol"
-    rms_engineering_council_specialist_model: str = "anthropic/claude-sonnet-5.5"
+    rms_engineering_council_specialist_model: str = "anthropic/claude-sonnet-5"
     rms_engineering_council_chair_model: str = "anthropic/claude-opus-5"
     rms_engineering_council_expert_enabled: bool = False
     rms_engineering_council_expert_justification_id: str = ""
