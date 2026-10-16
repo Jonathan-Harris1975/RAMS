@@ -876,11 +876,15 @@ def test_model_governance_apply_is_authenticated_persisted_and_reloads_router(
     api_mod._model_router = old_router
     registry = {
         "coding": [
-            {"model_id": "openai/gpt-5.2-codex", "score": 0.98},
-            {"model_id": "anthropic/claude-sonnet-4.6", "score": 0.90},
+            {"model_id": "openai/gpt-5.2-codex", "score": 0.98, "evaluation_passed": True,
+             "evaluation_sample_size": 24, "evaluation_evidence": "eval/codex.json"},
+            {"model_id": "anthropic/claude-sonnet-4.6", "score": 0.90, "evaluation_passed": True,
+             "evaluation_sample_size": 24, "evaluation_evidence": "eval/sonnet.json"},
         ],
-        "reasoning": [{"model_id": "openai/gpt-5.2", "score": 0.97}],
-        "fast": [{"model_id": "google/gemini-2.5-flash-lite", "score": 0.95}],
+        "reasoning": [{"model_id": "openai/gpt-5.2", "score": 0.97, "evaluation_passed": True,
+                       "evaluation_sample_size": 24, "evaluation_evidence": "eval/reasoning.json"}],
+        "fast": [{"model_id": "google/gemini-2.5-flash-lite", "score": 0.95, "evaluation_passed": True,
+                  "evaluation_sample_size": 24, "evaluation_evidence": "eval/triage.json"}],
     }
     with TestClient(api_mod.app) as client:
         unauthorised = client.post(
@@ -909,6 +913,27 @@ def test_model_governance_apply_is_authenticated_persisted_and_reloads_router(
     assert api_mod._model_router is None
 
 
+def test_model_governance_apply_keeps_last_known_good_for_unmeasured_candidates(
+    monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
+) -> None:
+    settings = make_settings(repo_dirs, RMS_API_KEY="test-key")
+    mock_r2 = install_valid_api(monkeypatch, settings)
+    with TestClient(api_mod.app) as client:
+        response = client.post(
+            "/ops/model-governance/apply",
+            headers={"Authorization": "Bearer test-key"},
+            json={
+                "sourceRunId": "council-untested",
+                "registry": {"coding": [{"model_id": "model/no-evaluation", "score": 0.99}]},
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["applied"] is False
+    assert response.json()["reason"] == "no-qualified-active-models"
+    mock_r2.put_object.assert_not_called()
+
+
 def test_model_governance_rejects_unjustified_premium_selection(
     monkeypatch: pytest.MonkeyPatch, repo_dirs: tuple[Path, Path]
 ) -> None:
@@ -919,6 +944,9 @@ def test_model_governance_rejects_unjustified_premium_selection(
             {
                 "model_id": "anthropic/claude-opus-5",
                 "score": 1.0,
+                    "evaluation_passed": True,
+                    "evaluation_sample_size": 24,
+                    "evaluation_evidence": "eval/opus.json",
                 "approved_roles": ["chair"],
             }
         ],
