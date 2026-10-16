@@ -305,3 +305,5 @@ def test_eligible_request_uses_headroom_output_and_accounts_savings(settings) ->
     assert headroom["compressedRequests"] == 1
     assert headroom["tokensSaved"] == 400
     assert headroom["transforms"] == {"smartcrusher": 1}
+    assert headroom["byModel"]["anthropic/claude-3-5-sonnet"]["tokensSaved"] == 400
+    assert headroom["byContextProvider"]["headroom"]["tokensSaved"] == 400

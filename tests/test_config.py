@@ -243,3 +243,13 @@ def test_default_model_route_uses_cost_effective_standard_models() -> None:
         cfg = Settings()
     assert cfg.openrouter_primary_model == "openai/gpt-5.6-sol"
     assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5"
+
+
+def test_headroom_protect_recent_defaults_to_one_and_accepts_override() -> None:
+    env = _complete_env()
+    with patch.dict(os.environ, env, clear=True):
+        assert Settings().rms_headroom_protect_recent == 1
+
+    env["RMS_HEADROOM_PROTECT_RECENT"] = "2"
+    with patch.dict(os.environ, env, clear=True):
+        assert Settings().rms_headroom_protect_recent == 2

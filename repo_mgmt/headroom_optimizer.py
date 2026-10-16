@@ -82,7 +82,7 @@ class HeadroomOptimizer:
                 compress_user_messages=True,
                 compress_system_messages=False,
                 target_ratio=self._cfg.rms_headroom_target_ratio,
-                protect_recent=0,
+                protect_recent=self._cfg.rms_headroom_protect_recent,
                 protect_analysis_context=True,
                 min_tokens_to_compress=self._cfg.rms_headroom_min_tokens_to_compress,
                 kompress_model=self._cfg.rms_headroom_kompress_model,

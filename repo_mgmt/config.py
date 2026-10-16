@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     # JSON compression remains available without a runtime model download.
     rms_headroom_enabled: bool = True
     rms_headroom_target_ratio: float = Field(default=0.7, ge=0.5, le=0.95)
+    rms_headroom_protect_recent: int = Field(default=1, ge=0, le=20)
     rms_headroom_min_tokens_to_compress: int = Field(default=250, ge=64, le=4096)
     rms_headroom_max_input_chars: int = Field(default=262_144, ge=16_384, le=1_048_576)
     rms_headroom_kompress_model: str = "disabled"

@@ -6,6 +6,12 @@ Default order:
 
 `LeanCTX -> Context Gateway -> Headroom -> OpenRouter context-compression -> deterministic local compaction -> direct OpenRouter`
 
+Headroom uses a 0.7 target ratio and protects the most recent message by
+default. Per-run AI usage reports include Headroom token savings by model and
+context provider so saved tokens can be reviewed alongside the corresponding
+OpenRouter usage and cost. Set `RMS_HEADROOM_PROTECT_RECENT` to override the
+recent-message protection count.
+
 ## Primary selection
 
 Set `RMS_CONTEXT_PRIMARY_PROVIDER` to one of:

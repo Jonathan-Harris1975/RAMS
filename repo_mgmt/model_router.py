@@ -140,6 +140,8 @@ class ModelRouter:
                 "skippedOversize": 0,
                 "rejectedRetrievalMarkers": 0,
                 "transforms": {},
+                "byModel": {},
+                "byContextProvider": {},
             },
         }
 
@@ -185,6 +187,14 @@ class ModelRouter:
             data["headroom"] = dict(headroom) if isinstance(headroom, Mapping) else {}
             if isinstance(data["headroom"].get("transforms"), Mapping):
                 data["headroom"]["transforms"] = dict(data["headroom"]["transforms"])
+            for breakdown in ("byModel", "byContextProvider"):
+                values = data["headroom"].get(breakdown)
+                if isinstance(values, Mapping):
+                    data["headroom"][breakdown] = {
+                        str(name): dict(value)
+                        for name, value in values.items()
+                        if isinstance(value, Mapping)
+                    }
             data["runId"] = self._run_id
             return data
 
@@ -661,7 +671,7 @@ class ModelRouter:
                 outcome = self._headroom.optimise(
                     messages, model=model, exact_context=exact_context
                 )
-                self._record_headroom(outcome)
+                self._record_headroom(outcome, model=model, route_name=route_name)
                 if outcome.failed or (
                     outcome.skipped_reason and outcome.skipped_reason != "exact_context"
                 ):
@@ -761,7 +771,9 @@ class ModelRouter:
         """Protect AnchorPatch planning/repair prompts from any lossy transform."""
         return "AnchorPatch/v1" in system
 
-    def _record_headroom(self, outcome: HeadroomOutcome) -> None:
+    def _record_headroom(
+        self, outcome: HeadroomOutcome, *, model: str, route_name: str
+    ) -> None:
         """Add Headroom savings/skips to the per-run OpenRouter usage summary."""
         with self._usage_lock:
             headroom = self._usage.get("headroom")
@@ -800,9 +812,29 @@ class ModelRouter:
             if isinstance(transforms, dict):
                 for transform in outcome.transforms:
                     transforms[transform] = int(transforms.get(transform, 0)) + 1
+            for breakdown_name, key in (
+                ("byModel", model),
+                ("byContextProvider", route_name),
+            ):
+                breakdown = headroom.get(breakdown_name)
+                if not isinstance(breakdown, dict):
+                    continue
+                bucket = breakdown.setdefault(
+                    str(key),
+                    {"attempts": 0, "compressedRequests": 0, "tokensSaved": 0, "failures": 0},
+                )
+                if outcome.attempted:
+                    bucket["attempts"] = int(bucket.get("attempts", 0)) + 1
+                if outcome.compressed:
+                    bucket["compressedRequests"] = int(bucket.get("compressedRequests", 0)) + 1
+                bucket["tokensSaved"] = int(bucket.get("tokensSaved", 0)) + outcome.tokens_saved
+                if outcome.failed:
+                    bucket["failures"] = int(bucket.get("failures", 0)) + 1
         if self._cfg.rms_headroom_log_savings and outcome.tokens_saved > 0:
             logger.info(
-                "model_router: headroom saved=%d tokens before=%d after=%d transforms=%s",
+                "model_router: headroom savings route=%s model=%s saved=%d before=%d after=%d transforms=%s",
+                route_name,
+                model,
                 outcome.tokens_saved,
                 outcome.tokens_before,
                 outcome.tokens_after,
