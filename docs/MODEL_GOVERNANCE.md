@@ -45,8 +45,8 @@
    reliability and fallback rate against GPT-5.6 Sol. Promote it only when it passes the existing
    quality and safety floor. The public price alone is not evidence of a production saving.
 
-   The live catalogue reported `expiration_date: null` for the four baseline models. Null means
-   “no date currently advertised”, not “will never retire”. HIVE must repeat the check monthly.
+   The prior September snapshot reported `expiration_date: null` for the baseline models. Null
+   means “no date currently advertised”, not “will never retire”. HIVE must repeat the check monthly.
    OpenRouter lists Claude Sonnet 5.5 as the direct successor to Sonnet 5; RAMS defaults now use the
    exact Sonnet 5.5 ID for the independent standard fallback and council specialist.
    OpenRouter marks `anthropic/claude-opus-5-fast` as deprecated from 1 September 2026; RAMS
