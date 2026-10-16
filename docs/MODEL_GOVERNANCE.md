@@ -35,7 +35,7 @@
    |---|---|---:|---|
    | Triage/classification | `google/gemini-2.5-flash-lite` | $0.10 / $0.40 | Very low-cost classification; keep output bounded |
    | Primary repository work | `openai/gpt-5.6-sol` | $4.00 / $20.00 | Current last-known-good coding baseline; retain until cheaper candidates pass RAMS evaluation |
-   | Independent fallback/reviewer | `anthropic/claude-sonnet-5.5` | $2.00 / $10.00 | Current Sonnet-family candidate; separate provider family and supports structured output |
+   | Independent fallback/reviewer | `anthropic/claude-sonnet-5` | $2.00 / $10.00 | Existing last-known-good fallback; retain until Sonnet 5.5 is account-verified and evaluated |
    | Expert adjudication only | `anthropic/claude-opus-5` | $5.00 / $25.00 | Reserved for unresolved high-risk ambiguity |
 
    OpenRouter also lists `openai/gpt-5.6-luna` at $0.20 / $1.20 per 1M tokens, with tool
@@ -47,8 +47,10 @@
 
    The prior September snapshot reported `expiration_date: null` for the baseline models. Null
    means “no date currently advertised”, not “will never retire”. HIVE must repeat the check monthly.
-   OpenRouter lists Claude Sonnet 5.5 as the direct successor to Sonnet 5; RAMS defaults now use the
-   exact Sonnet 5.5 ID for the independent standard fallback and council specialist.
+   OpenRouter lists Claude Sonnet 5.5 as the direct successor to Sonnet 5 at the same public
+   $2.00 / $10.00 per 1M token rate. Keep Sonnet 5 as the last-known-good independent fallback
+   and council specialist. Treat Sonnet 5.5 as an upgrade candidate until HIVE verifies it in the
+   account-filtered catalogue and RAMS passes its role evaluation; only then promote the new ID.
    OpenRouter marks `anthropic/claude-opus-5-fast` as deprecated from 1 September 2026; RAMS
    rejects that alias. If fast Opus capacity is ever justified, target regular
    `anthropic/claude-opus-5` through OpenRouter's fast service tier.
