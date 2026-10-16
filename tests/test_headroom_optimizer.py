@@ -77,7 +77,7 @@ def test_compression_preserves_system_and_records_savings(settings) -> None:
     assert calls[0]["model"] == "openai/test"
     assert calls[0]["compress_user_messages"] is True
     assert calls[0]["compress_system_messages"] is False
-    assert calls[0]["protect_recent"] == 0
+    assert calls[0]["protect_recent"] == 1
     assert calls[0]["protect_analysis_context"] is True
     assert calls[0]["kompress_model"] == "disabled"
 
