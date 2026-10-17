@@ -12,14 +12,14 @@ concurrency:
 
 env:
   DAST_ENABLED: ${{ vars.DAST_ENABLED || 'false' }}
-  DAST_TARGET_URL: ${{ vars.DAST_TARGET_URL || '' }}
+  DAST_TARGET_URL: ${{ secrets.DAST_TARGET_URL || vars.DAST_TARGET_URL || '' }}
   R2_ENDPOINT: ${{ vars.R2_ENDPOINT || 'https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com' }}
   EVIDENCE_BUCKET: hive-repositories
 
 jobs:
   zap-full-scan:
     name: OWASP ZAP full active scan
-    if: ${{ vars.DAST_ENABLED == 'true' && vars.DAST_TARGET_URL != '' }}
+    if: ${{ vars.DAST_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 105
     steps:
