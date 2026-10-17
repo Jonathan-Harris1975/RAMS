@@ -107,7 +107,9 @@ def merge_method() -> str:
     ):
         if settings.get(setting):
             return method
-    raise RuntimeError(f"Repository {REPO} allows no GitHub merge method")
+    # The installation token may not expose these repository settings. Prefer
+    # the controller's first choice; GitHub rejects the mutation if squash is disabled.
+    return "SQUASH"
 
 
 def enable(pr_node_id: str) -> None:
