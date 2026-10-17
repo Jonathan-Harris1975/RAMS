@@ -9,7 +9,7 @@
     "after 1:00am and before 3:30am on saturday"
   ],
   "rangeStrategy": "replace",
-  "platformAutomerge": true,
+  "platformAutomerge": false,
   "minimumReleaseAge": "2 days",
   "vulnerabilityAlerts": {
     "automerge": false,
@@ -37,7 +37,7 @@
         "minor",
         "digest"
       ],
-      "automerge": true,
+      "automerge": false,
       "addLabels": [
         "dependency:auto-eligible"
       ]
