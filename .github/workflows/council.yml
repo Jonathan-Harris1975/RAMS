@@ -24,13 +24,12 @@ env:
   R2_ENDPOINT: ${{ vars.R2_ENDPOINT || 'https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com' }}
   EVIDENCE_BUCKET: hive-repositories
   DAST_ENABLED: ${{ vars.DAST_ENABLED || 'false' }}
-  DAST_TARGET_URL: ${{ vars.DAST_TARGET_URL || '' }}
 
 jobs:
   council:
     runs-on: ubuntu-latest
     environment:
-      name: Koyeb
+      name: R2
       deployment: false
     timeout-minutes: 145
     steps:
@@ -111,14 +110,9 @@ jobs:
           fi
 
           if [ "$DAST_ENABLED" = "true" ]; then
-            if [ -z "$DAST_TARGET_URL" ]; then
-              dast_state="INVALID_CONFIGURATION"
-              failures="$(jq --arg v "DAST_ENABLED=true but DAST_TARGET_URL is empty" '. + [$v]' <<< "$failures")"
-            else
-              dast_state="$(jq -r '[.[] | select(.name == "DAST penetration test" and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
-              if [ "$dast_state" != "success" ]; then
-                failures="$(jq --arg v "DAST exact-SHA evidence is $dast_state" '. + [$v]' <<< "$failures")"
-              fi
+            dast_state="$(jq -r '[.[] | select(.name == "DAST penetration test" and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
+            if [ "$dast_state" != "success" ]; then
+              failures="$(jq --arg v "DAST exact-SHA evidence is $dast_state; inspect the DAST run for target configuration and scan details" '. + [$v]' <<< "$failures")"
             fi
           else
             dast_state="DAST_DISABLED"
