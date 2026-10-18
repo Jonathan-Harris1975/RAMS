@@ -80,7 +80,7 @@ jobs:
             \( -name 'report_json.json' -o -name 'report_html.html' -o -name 'report_md.md' \
                -o -name 'report_*.json' -o -name 'report_*.html' -o -name 'report_*.md' \
                -o -name 'zap*.log' \) \
-            -exec cp {} "$RUNNER_TEMP/dast-r2/" \
+            -exec cp {} "$RUNNER_TEMP/dast-r2/" \;
           jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
             --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg outcome "${ZAP_OUTCOME:-not-run}" \
