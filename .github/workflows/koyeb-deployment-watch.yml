@@ -20,6 +20,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Resolve Koyeb service from Environment or repository
+        env:
+          KOYEB_SERVICE_REPOSITORY: ${{ vars.KOYEB_SERVICE || '' }}
+          KOYEB_SERVICE_SECRET: ${{ secrets.KOYEB_SERVICE || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          service="${KOYEB_SERVICE:-${KOYEB_SERVICE_SECRET:-${KOYEB_SERVICE_REPOSITORY:-}}}"
+          if [ -z "$service" ]; then
+            echo "::error::KOYEB_SERVICE is required at the Koyeb Environment or repository scope."
+            exit 1
+          fi
+          printf 'KOYEB_SERVICE=%s\n' "$service" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -28,7 +41,6 @@ jobs:
         id: deployment_config
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE || secrets.KOYEB_SERVICE }}
         run: |
           set -euo pipefail
           missing=()
@@ -69,7 +81,6 @@ jobs:
         id: watch_deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE || secrets.KOYEB_SERVICE }}
           SERVICE_DISPLAY_NAME: RAMS
           OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
           OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}

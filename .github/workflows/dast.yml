@@ -10,53 +10,186 @@ concurrency:
   group: dast-${{ github.repository }}
   cancel-in-progress: false
 
-env:
-  DAST_ENABLED: ${{ vars.DAST_ENABLED || 'false' }}
-  DAST_TARGET_URL: ${{ secrets.DAST_TARGET_URL || vars.DAST_TARGET_URL || '' }}
-  R2_ENDPOINT: ${{ vars.R2_ENDPOINT || 'https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com' }}
-  EVIDENCE_BUCKET: hive-repositories
-
 jobs:
-  zap-full-scan:
+  scan:
     name: OWASP ZAP full active scan
-    if: ${{ vars.DAST_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 105
+    environment:
+      name: Koyeb
+    outputs:
+      enabled: ${{ steps.resolve.outputs.enabled }}
     steps:
-      - name: Check out trusted default branch
+      - name: Resolve DAST configuration from environment or repository
+        id: resolve
+        env:
+          # Step-level context resolution runs after the selected Environment is loaded.
+          DAST_ENABLED_SETTING: ${{ vars.DAST_ENABLED || 'false' }}
+          DAST_TARGET_URL_VARIABLE: ${{ vars.DAST_TARGET_URL || '' }}
+          DAST_TARGET_URL_SECRET: ${{ secrets.DAST_TARGET_URL || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          enabled="${DAST_ENABLED_SETTING:-false}"
+          if [[ "$enabled" != "true" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "DAST is disabled."
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          target="${DAST_TARGET_URL_SECRET:-${DAST_TARGET_URL_VARIABLE:-}}"
+          if [[ -z "$target" ]]; then
+            echo "::error::DAST is enabled but no authorised target URL is configured."
+            exit 1
+          fi
+          case "$target" in
+            https://*) ;;
+            *) echo "::error::DAST_TARGET_URL must be an authorised HTTPS endpoint."; exit 1;;
+          esac
+          printf '::add-mask::%s\n' "$target"
+          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
+
+      - name: Check out trusted evidence helper
+        if: ${{ steps.resolve.outputs.enabled == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - name: Refuse unauthorised/non-HTTPS remote target
-        shell: bash
-        run: |
-          set -euo pipefail
-          case "$DAST_TARGET_URL" in https://*) ;; *) echo "::error::DAST_TARGET_URL must be an authorised HTTPS endpoint."; exit 1;; esac
+
       - name: Run authorised ZAP full scan
+        id: zap
+        if: ${{ steps.resolve.outputs.enabled == 'true' }}
         uses: zaproxy/action-full-scan@3c58388149901b9a03b7718852c5ba889646c27c # v0.13.0
         with:
-          target: ${{ env.DAST_TARGET_URL }}
+          target: ${{ steps.resolve.outputs.target }}
           allow_issue_writing: false
           fail_action: true
           artifact_name: dast-zap-full-${{ github.run_id }}
-      - name: Persist and verify DAST evidence in canonical R2 layout
-        if: always()
+
+      - name: Package exact-run DAST evidence
+        if: ${{ always() && steps.resolve.outputs.enabled == 'true' }}
         env:
-          R2_ENDPOINT: ${{ vars.CF_R2_ENDPOINT_URL || vars.R2_ENDPOINT_URL || format('https://{0}.r2.cloudflarestorage.com', vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID) }}
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
-          EVIDENCE_STATUS: ${{ job.status }}
+          ZAP_OUTCOME: ${{ steps.zap.outcome }}
+          DAST_TARGET_URL_VALUE: ${{ steps.resolve.outputs.target }}
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/dast-r2"
-          for file in report_json.json report_md.md report_html.html; do
-            test ! -f "$file" || cp "$file" "$RUNNER_TEMP/dast-r2/$file"
-          done
+          find "$GITHUB_WORKSPACE" -maxdepth 4 -type f \
+            \( -name 'report_json.json' -o -name 'report_html.html' -o -name 'report_md.md' \
+               -o -name 'report_*.json' -o -name 'report_*.html' -o -name 'report_*.md' \
+               -o -name 'zap*.log' \) \
+            -exec cp {} "$RUNNER_TEMP/dast-r2/" \;
+          python3 - "$RUNNER_TEMP/dast-r2" "$DAST_TARGET_URL_VALUE" <<'PY'
+          import html
+          import pathlib
+          import re
+          import sys
+          from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
+
+          root = pathlib.Path(sys.argv[1])
+          target = sys.argv[2]
+          parsed_target = urlsplit(target)
+          target_host = (parsed_target.hostname or "").lower()
+          variants = {target, target.rstrip("/"), quote(target, safe=""), quote_plus(target)}
+          variants |= {value.replace("/", r"\/") for value in tuple(variants)}
+          variants |= {html.escape(value, quote=True) for value in tuple(variants)}
+          url_pattern = re.compile(r"""https?://[^ \t\r\n<>"'\\]+""")
+
+          def redact_url(match):
+              value = match.group(0)
+              try:
+                  parsed = urlsplit(value)
+                  host = (parsed.hostname or "").lower()
+                  if not host:
+                      return "[REDACTED_URL]"
+                  port = f":{parsed.port}" if parsed.port else ""
+                  netloc = host + port
+                  path = "/[REDACTED_TARGET]" if target_host and host == target_host else parsed.path
+                  return urlunsplit((parsed.scheme, netloc, path, "", ""))
+              except ValueError:
+                  return "[REDACTED_URL]"
+
+          for path in root.iterdir():
+              if not path.is_file():
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for value in sorted(variants, key=len, reverse=True):
+                  text = text.replace(value, "[REDACTED_DAST_TARGET]")
+              text = url_pattern.sub(redact_url, text)
+              path.write_text(text, encoding="utf-8")
+          PY
           jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
             --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
-            --arg status "$EVIDENCE_STATUS" \
-            '{repository:$repository,default_branch_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,dast_status:$status,scanner:"OWASP ZAP"}' \
+            --arg outcome "${ZAP_OUTCOME:-not-run}" \
+            '{repository:$repository,workflow_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,scanner:"OWASP ZAP",dast_status:$outcome}' \
             > "$RUNNER_TEMP/dast-r2/summary.json"
+
+      - name: Upload exact-run evidence for R2 persistence
+        if: ${{ always() && steps.resolve.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dast-r2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dast-r2/
+          if-no-files-found: error
+          retention-days: 7
+
+  persist:
+    name: Persist evidence with R2 environment credentials
+    needs: [scan]
+    if: ${{ always() && needs.scan.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: R2
+    steps:
+      - name: Check out trusted evidence helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Download exact-run DAST evidence
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v8.0.0
+        with:
+          name: dast-r2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dast-r2
+
+      - name: Resolve R2 credentials from environment or repository
+        env:
+          # Step-level contexts include the selected R2 Environment and repository fallback.
+          R2_ENDPOINT_REPOSITORY: ${{ vars.CF_R2_ENDPOINT_URL || vars.R2_ENDPOINT_URL || vars.R2_ENDPOINT || '' }}
+          R2_ENDPOINT_SECRET: ${{ secrets.R2_ENDPOINT || secrets.CF_R2_ENDPOINT_URL || secrets.R2_ENDPOINT_URL || '' }}
+          R2_ACCOUNT_ID_REPOSITORY: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || '' }}
+          R2_ACCOUNT_ID_SECRET: ${{ secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID || '' }}
+          R2_ACCESS_KEY_ID_REPOSITORY: ${{ vars.R2_ACCESS_KEY_ID || vars.CF_R2_ACCESS_KEY_ID || '' }}
+          R2_ACCESS_KEY_ID_SECRET: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID || '' }}
+          R2_SECRET_ACCESS_KEY_SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          account_id="${R2_ACCOUNT_ID_SECRET:-${R2_ACCOUNT_ID_REPOSITORY:-}}"
+          endpoint="${R2_ENDPOINT_SECRET:-${R2_ENDPOINT_REPOSITORY:-}}"
+          access_key="${R2_ACCESS_KEY_ID_SECRET:-${R2_ACCESS_KEY_ID_REPOSITORY:-}}"
+          secret_key="${R2_SECRET_ACCESS_KEY_SECRET:-}"
+          if [[ -z "$endpoint" && -n "$account_id" ]]; then
+            endpoint="https://${account_id}.r2.cloudflarestorage.com"
+          fi
+          [[ -n "$endpoint" ]] || { echo "::error::R2 endpoint or account ID is required at Environment or repository scope."; exit 1; }
+          [[ -n "$access_key" ]] || { echo "::error::R2 access key ID is required at Environment or repository scope."; exit 1; }
+          [[ -n "$secret_key" ]] || { echo "::error::R2 secret access key is required as a GitHub secret."; exit 1; }
+          printf 'R2_ENDPOINT=%s\nR2_ACCESS_KEY_ID=%s\nR2_SECRET_ACCESS_KEY=%s\n' \
+            "$endpoint" "$access_key" "$secret_key" >> "$GITHUB_ENV"
+
+      - name: Persist and verify DAST evidence in hive-repositories
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_STATUS="$(jq -r '.dast_status // "UNKNOWN"' "$RUNNER_TEMP/dast-r2/summary.json")"
+          export EVIDENCE_STATUS
           python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"
