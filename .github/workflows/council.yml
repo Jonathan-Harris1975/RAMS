@@ -31,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: Koyeb
+      deployment: false
     timeout-minutes: 145
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,8 +76,9 @@ jobs:
           done
 
           blockers="$(gh pr list --state open --limit 1000 --json number,labels,url --jq '[.[] | select(any(.labels[]?; .name == "autonomy:human-hold") or (any(.labels[]?; .name == "autonomy:repair") and (any(.labels[]?; .name == "autonomy:obsolete" or .name == "autonomy:superseded") | not)))]')"
-          blocker_count="$(jq length <<< "$blockers")"
-          evidence="$(jq --argjson n "$blocker_count" --argjson items "$blockers" '.autonomyBlockerCount=$n | .autonomyBlockers=$items' <<< "$evidence")"
+          printf '%s\n' "$blockers" | jq '[.[] | {number, url}]' > "$RUNNER_TEMP/autonomy-blockers.json"
+          blocker_count="$(jq length < "$RUNNER_TEMP/autonomy-blockers.json")"
+          evidence="$(jq --argjson n "$blocker_count" --slurpfile items "$RUNNER_TEMP/autonomy-blockers.json" '.autonomyBlockerCount=$n | .autonomyBlockers=$items[0]' <<< "$evidence")"
           if [ "$blocker_count" -ne 0 ]; then
             failures="$(jq --arg v "unresolved autonomy state exists" '. + [$v]' <<< "$failures")"
           fi
