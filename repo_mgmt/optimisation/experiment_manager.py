@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 from repo_mgmt.optimisation.history import OptimisationHistoryStore
 from repo_mgmt.optimisation.models import OptimisationAction, OptimisationOutcome, new_id
-from repo_mgmt.optimisation.rollback_manager import RollbackManager
+from repo_mgmt.optimisation.rollback_manager import RollbackError, RollbackManager
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +110,10 @@ class ExperimentManager:
     ) -> ExperimentRecord:
         """Apply, time, verify, and durably record one optimisation action.
 
-        On verification failure the change is rolled back automatically via
-        the Rollback Manager and the experiment is recorded with outcome
-        ``rolled_back``; the caller does not need to handle rollback itself.
+        On verification failure the manager requests a rollback through the
+        Rollback Manager. If no trusted, action-specific approval is available,
+        the failed state is preserved and the experiment is recorded for
+        ``manual_review``; it is never silently restored.
 
         If the cooldown or oscillation guard blocks this signature, the
         change is never applied and the returned record has outcome
@@ -163,17 +164,24 @@ class ExperimentManager:
 
         t0 = time.monotonic()
         apply_fn(after)
-        verified, rolled_back_snapshot = self._rollback.verify_and_maybe_rollback(
-            action_id=action.action_id,
-            verify_fn=verify_fn,
-            apply_fn=apply_fn,
-        )
+        rollback_blocked = None
+        try:
+            verified, rolled_back_snapshot = self._rollback.verify_and_maybe_rollback(
+                action_id=action.action_id,
+                verify_fn=verify_fn,
+                apply_fn=apply_fn,
+            )
+        except RollbackError as error:
+            verified, rolled_back_snapshot = False, None
+            rollback_blocked = str(error)
         duration = time.monotonic() - t0
         finished = datetime.now(timezone.utc)
 
         record.finished_at = finished.isoformat()
         record.duration_seconds = round(duration, 3)
-        record.outcome = "verified" if verified else "rolled_back"
+        record.outcome = "verified" if verified else "rolled_back" if rolled_back_snapshot else "manual_review"
+        if rollback_blocked:
+            record.detail = rollback_blocked
 
         self._history.append(action.pipeline, record.to_dict())
         return record
