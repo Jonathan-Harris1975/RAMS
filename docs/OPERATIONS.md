@@ -24,6 +24,20 @@ Runtime, bootstrap, build and development dependencies have separate source file
 
 The admission lock and idempotency replay cache are process-local. `RMS_SINGLE_WORKER_MODE=true`, worker count `1` and `RMS_DEPLOYMENT_INSTANCE_COUNT=1` are therefore correctness requirements, not tuning hints. `/readiness` exposes `single_worker_mode`, `single_instance_mode`, `process_local_idempotency_safe` and idempotency metadata. `/ops/excellence` declares `horizontalScalingSupported=false`. RAMS rejects dry-run and live-run admission with HTTP 409 when the contract is unsafe. Add a shared durable admission/idempotency store before any horizontal scale-out.
 
+## Durable live-operation admission
+
+Live API runs require a stable `X-Idempotency-Key` (or the existing `X-Trigger-Run-Key`), reused for the same incident, including after a timeout or process restart. RAMS writes a create-once claim in the existing audits bucket before background execution using R2's atomic `PutObject / If-None-Match: *` contract. The key is hashed; claims record the pipeline, target worktree and exact source SHA, request digest, run ID, observation time and a single admitted attempt. The single-worker/single-instance restriction remains required; this does not enable horizontal scaling.
+
+Live run IDs include the operation digest so distinct incidents cannot overwrite reports created in the same second. Legacy timestamp run IDs remain readable.
+
+Results are create-only and become terminal only after the exact run report is readable from R2. Repeated completed requests return the original run/report reference. An interrupted, abandoned, conflicting or uncertain operation remains UNKNOWN and cannot automatically replay repository writes. No claim expires or is deleted to admit a retry; use the retained run report and repository/PR state to reconcile uncertain acceptance. A new key is a new operation, never a retry key.
+
+The admission response includes `operationId`, `claimKey`, `resultKey`, `targetSha` and `attempt`. Authenticated `GET /operations/<operationId>` reads reconciliation state without running a pipeline; missing or unreadable evidence remains non-terminal. Dry-run admission keeps its existing process-local replay cache. Direct CLI invocation is not covered by the API incident ledger.
+
+The retired in-process scheduler stays disabled. Existing external dispatchers must supply the stable incident/run key; live requests without one fail visibly. No new scheduler, notification destination, storage bucket, credentials or recurring job is required.
+
+R2 contract reference: https://developers.cloudflare.com/r2/reference/consistency/#conditional-writes
+
 ## R2 readiness, reads and recovery
 
 R2 uses the S3-compatible endpoint and governed `audits` bucket configured by `R2_ENDPOINT`, `R2_REGION` and `R2_BUCKET_AUDITS`; access-key and secret-key values must come from Koyeb Secrets. Never paste live credential values into operator commands, tickets or logs.
@@ -87,10 +101,11 @@ curl -fsS -X POST \
 curl -fsS -X POST \
   -H "Authorization: Bearer $RMS_API_KEY" \
   -H "Content-Type: application/json" \
+  -H "X-Idempotency-Key: website-remediation-SESSION_ID" \
   -d '{"audit_json_key":"audits/website/2026-07/SESSION_ID/website-audit.json","audit_session_id":"SESSION_ID"}' \
   "$BASE_URL/rebuild/website/run"
 
-AIMS normally sends this request automatically after final report publication and temporary cleanup. Operators should use it manually only for recovery/replay with the same exact JSON key.
+AIMS normally sends this request automatically after final report publication and temporary cleanup. Operators should use it manually only for recovery/replay with the same exact JSON key. Replace `SESSION_ID` with the audit's existing session ID in both the body and idempotency header; keep that header unchanged on retries.
 
 The current JSON contract is `website-audit-report/v2` with remediation contract `rams-website/v1`; RAMS also accepts retained `website-audit-report/v1` reports for backward compatibility. Version 2 is accepted only when `reportStatus` is `complete`, `operational.ramsDispatchPermitted` is true, and its retention policy matches the governed post-acceptance contract. RAMS consumes the council `masterIssueLedger` as the governed work queue. A row can become an autonomous code fix only when it explicitly carries `classification: code_fix`, `confidence: Confirmed`, an approved `fixClass`, exact `affectedPaths`, deterministic remediation, evidence, and non-empty `sourceFindingIds`; everything else fails closed to review/guidance.
 

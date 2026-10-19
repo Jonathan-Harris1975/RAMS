@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import hmac
 import logging
@@ -734,15 +735,121 @@ def _admit_request(pipeline_id: PipelineId, requested: bool | None) -> bool:
     return False
 
 
+def _claim_live_operation(
+    pipeline_id: PipelineId, run_id: str, operation_key: str, audit_json_key: str | None,
+) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+    """Reserve a live incident once in the existing audits bucket before execution."""
+    cfg, r2 = _get_cfg(), _get_r2()
+    if cfg is None or r2 is None:
+        raise AdmissionError(503, "durable operation storage unavailable", {})
+    if not operation_key or len(operation_key) > 256:
+        raise AdmissionError(422, "live runs require a stable X-Idempotency-Key of at most 256 characters",
+                             {"retryable": False})
+    operation_id = hashlib.sha256(operation_key.encode()).hexdigest()
+    prefix = f"{cfg.rms_report_prefix}/operations/v1/{operation_id}"
+    request_digest = hashlib.sha256(json.dumps(
+        {"pipeline": pipeline_id, "auditJsonKey": audit_json_key, "dryRun": False},
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    manager = GitManager(cfg.repo_path_for(pipeline_id), cfg.rms_qa_branch_prefix,
+                         cfg.rms_push_enabled, cfg.github_token_value,
+                         cfg.rms_git_timeout_seconds, cfg.rms_git_output_max_bytes)
+    source_sha = manager.current_head().strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        raise AdmissionError(503, "target repository SHA unavailable", {"retryable": False})
+    claim: dict[str, Any] = {
+        "schemaVersion": 1, "operationId": operation_id, "requestDigest": request_digest,
+        "pipeline": pipeline_id, "runId": run_id, "targetRepo": str(cfg.repo_path_for(pipeline_id)),
+        "targetSha": source_sha, "attempt": 1, "maxAttempts": 1,
+        "claimedAt": datetime.now(timezone.utc).isoformat(), "status": "claimed",
+        "auditJsonKey": audit_json_key, "replayAllowed": False,
+        "claimKey": f"{prefix}/claim.json", "resultKey": f"{prefix}/result.json",
+    }
+    try:
+        created = r2.put_object_if_absent(cfg.r2_bucket_audits, claim["claimKey"],
+                                         json.dumps(claim, sort_keys=True).encode())
+        if created is True:
+            return claim, None
+        if created is not False:
+            raise R2Error("Create-once storage did not return an explicit outcome")
+        previous = json.loads(r2.get_object_limited(cfg.r2_bucket_audits, claim["claimKey"], 64 * 1024))
+        if (not isinstance(previous, dict) or previous.get("operationId") != operation_id
+                or previous.get("requestDigest") != request_digest
+                or previous.get("pipeline") != pipeline_id):
+            raise AdmissionError(409, "operation key belongs to a different request",
+                                 {"operationId": operation_id, "retryable": False})
+        saved_run_id = previous.get("runId")
+        if not isinstance(saved_run_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", saved_run_id):
+            raise R2Error("Durable operation record has an invalid run identity")
+        details = {
+            "operationId": operation_id, "runId": saved_run_id, "pipeline": pipeline_id,
+            "targetSha": previous.get("targetSha"), "attempt": previous.get("attempt"),
+            "claimKey": claim["claimKey"], "resultKey": claim["resultKey"],
+            "retryable": False, "idempotentReplay": True,
+        }
+        try:
+            terminal = json.loads(r2.get_object_limited(cfg.r2_bucket_audits, claim["resultKey"], 64 * 1024))
+        except R2Error:
+            terminal = None
+        if (isinstance(terminal, dict) and terminal.get("operationId") == operation_id
+                and terminal.get("runId") == saved_run_id
+                and terminal.get("requestDigest") == request_digest
+                and terminal.get("targetSha") == previous.get("targetSha")
+                and terminal.get("terminalResult") in {"completed", "failed"}):
+            return None, JSONResponse(status_code=202, content={
+                **details, "dryRun": False, "terminalResult": terminal["terminalResult"],
+                "reportKey": terminal["reportKey"],
+            }, headers={"X-Run-Id": saved_run_id})
+        raise AdmissionError(409, "operation requires reconciliation; execution will not be replayed",
+                             {**details, "state": "UNKNOWN"})
+    except AdmissionError:
+        raise
+    except (R2Error, ValueError, OSError) as exc:
+        raise AdmissionError(503, "durable operation outcome unavailable; execution was not admitted",
+                             {"operationId": operation_id, "claimKey": claim["claimKey"],
+                              "resultKey": claim["resultKey"], "retryable": False,
+                              "failureClass": type(exc).__name__}) from exc
+
+
+def _record_live_operation_result(operation: dict[str, Any], report: Any) -> None:
+    """Persist a terminal receipt only after the exact run report can be read back."""
+    cfg, r2 = _get_cfg(), _get_r2()
+    if cfg is None or r2 is None:
+        raise R2Error("Durable operation storage unavailable")
+    report_key = f"{cfg.rms_report_prefix}/{operation['pipeline']}/{operation['runId']}/report.json"
+    result: dict[str, Any] = {
+        "schemaVersion": 1, "operationId": operation["operationId"],
+        "requestDigest": operation["requestDigest"], "runId": operation["runId"],
+        "pipeline": operation["pipeline"], "targetRepo": operation["targetRepo"],
+        "targetSha": operation["targetSha"], "attempt": 1,
+        "recordedAt": datetime.now(timezone.utc).isoformat(),
+        "terminalResult": "unknown", "reportKey": report_key, "replayAllowed": False,
+    }
+    if report is not None:
+        try:
+            persisted = json.loads(r2.get_object_limited(cfg.r2_bucket_audits, report_key, cfg.rms_report_max_bytes))
+            if (isinstance(persisted, dict) and persisted.get("runId") == operation["runId"]
+                    and persisted.get("pipeline") == operation["pipeline"]):
+                result["terminalResult"] = "failed" if report.error else "completed"
+        except (R2Error, ValueError):
+            pass
+    created = r2.put_object_if_absent(cfg.r2_bucket_audits, operation["resultKey"],
+                                     json.dumps(result, sort_keys=True).encode())
+    if created is not True:
+        raise R2Error("Terminal receipt was not confirmed; the claim remains non-replayable")
+
+
 async def _run_pipeline_bg(
     pipeline_id: PipelineId,
     dry_run: bool,
     run_id: str,
     audit_json_key: str | None = None,
+    operation: dict[str, Any] | None = None,
 ) -> None:
     """Await a pipeline run and clear global eMicro admission state safely."""
     global _active_pipeline, _active_run_id
     _running[pipeline_id] = True
+    report = None
     try:
         pipeline = _get_pipeline(pipeline_id)
         if pipeline is None:
@@ -764,6 +871,12 @@ async def _run_pipeline_bg(
     except Exception:
         logger.exception("api: unhandled error in pipeline %r", pipeline_id)
     finally:
+        if operation is not None:
+            try:
+                await asyncio.to_thread(_record_live_operation_result, operation, report)
+            except Exception:
+                logger.error("api: terminal receipt unconfirmed operation=%s runId=%s; replay remains blocked",
+                             operation["operationId"], run_id)
         with _admission_lock:
             _running[pipeline_id] = False
             if _active_run_id == run_id:
@@ -1167,8 +1280,8 @@ def _live_report_key(
 
 
 def _valid_run_id(run_id: str) -> bool:
-    """Return True when *run_id* has the RAMS timestamp shape."""
-    return re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z", run_id) is not None
+    """Accept legacy timestamps and exact live-operation hash suffixes."""
+    return re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:-[0-9a-f]{64})?", run_id) is not None
 
 
 def _read_r2_json_report(
@@ -1502,6 +1615,60 @@ async def get_live_report(
     return JSONResponse(status_code=200, content=payload)
 
 
+
+@app.get("/operations/{operation_id}")
+async def live_operation_status(
+    operation_id: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Read durable live-operation state without retrying a repository mutation."""
+    auth_error = _auth_error_response(authorization, request)
+    if auth_error is not None:
+        return auth_error
+    cfg, r2 = _get_cfg(), _get_r2()
+    if cfg is None or r2 is None:
+        return JSONResponse(status_code=503, content={"error": "operation storage unavailable"})
+    prefix = f"{cfg.rms_report_prefix}/operations/v1/{operation_id}"
+
+    def read() -> JSONResponse:
+        unknown: dict[str, Any] = {"operationId": operation_id, "state": "UNKNOWN", "retryable": False,
+                   "claimKey": f"{prefix}/claim.json", "resultKey": f"{prefix}/result.json"}
+        try:
+            if not r2.object_exists(cfg.r2_bucket_audits, unknown["claimKey"]):
+                return JSONResponse(status_code=202, content={
+                    **unknown, "reason": "claim not observed; a prior uncertain write may still commit",
+                })
+            claim = json.loads(r2.get_object_limited(cfg.r2_bucket_audits, unknown["claimKey"], 64 * 1024))
+            if not isinstance(claim, dict) or claim.get("operationId") != operation_id:
+                raise ValueError("Operation identity mismatch")
+            details = {**unknown, **{key: claim.get(key) for key in (
+                "runId", "pipeline", "targetRepo", "targetSha", "attempt", "maxAttempts", "claimedAt",
+            )}}
+            try:
+                terminal = json.loads(r2.get_object_limited(cfg.r2_bucket_audits, unknown["resultKey"], 64 * 1024))
+            except R2Error:
+                terminal = None
+            if (isinstance(terminal, dict) and terminal.get("operationId") == operation_id
+                    and terminal.get("runId") == claim.get("runId")
+                    and terminal.get("requestDigest") == claim.get("requestDigest")
+                    and terminal.get("targetSha") == claim.get("targetSha")
+                    and terminal.get("terminalResult") in {"completed", "failed"}):
+                return JSONResponse(status_code=200, content={
+                    **details, "state": terminal["terminalResult"].upper(),
+                    "recordedAt": terminal.get("recordedAt"), "reportKey": terminal.get("reportKey"),
+                })
+            return JSONResponse(status_code=202, content={
+                **details, "reason": "terminal result unconfirmed; repository mutation will not be replayed",
+            })
+        except (R2Error, ValueError, OSError):
+            return JSONResponse(status_code=503, content={
+                **unknown, "error": "operation evidence unavailable",
+            })
+
+    return await asyncio.to_thread(read)
+
+
 @app.post("/rebuild/{pipeline_id}/run", status_code=202)
 async def trigger_run(
     pipeline_id: Annotated[PipelineIdLiteral, Path()],
@@ -1568,7 +1735,9 @@ async def trigger_run(
             },
         )
 
-    idem_key = (x_idempotency_key or x_trigger_run_key or "").strip()[:256]
+    operation_key = (x_idempotency_key or x_trigger_run_key or "").strip()
+    idem_key = operation_key[:256]
+    requested_dry_run = cfg.rms_dry_run if body.dry_run is None else body.dry_run
     if lifecycle.is_in_maintenance():
         return JSONResponse(
             status_code=503,
@@ -1579,9 +1748,9 @@ async def trigger_run(
             },
         )
     with _admission_lock:
-        if idem_key and idem_key in _idempotency:
+        if requested_dry_run and idem_key and idem_key in _idempotency:
             saved_pipeline, saved_run_id, saved_dry_run = _idempotency[idem_key]
-            if saved_pipeline != typed_pipeline_id:
+            if saved_pipeline != typed_pipeline_id or not saved_dry_run:
                 return JSONResponse(
                     status_code=409,
                     content={
@@ -1625,10 +1794,21 @@ async def trigger_run(
         _active_run_id = run_id
         _running[typed_pipeline_id] = True
 
+    operation: dict[str, Any] | None = None
+    replay: JSONResponse | None = None
     try:
         dry_run = await asyncio.to_thread(
             _admit_request, typed_pipeline_id, body.dry_run
         )
+        if not dry_run:
+            unique_run_id = f"{run_id}-{hashlib.sha256(operation_key.encode()).hexdigest()}"
+            with _admission_lock:
+                if _active_run_id == run_id:
+                    _active_run_id = unique_run_id
+            run_id = unique_run_id
+            operation, replay = await asyncio.to_thread(
+                _claim_live_operation, typed_pipeline_id, run_id, operation_key, audit_json_key
+            )
     except AdmissionError as exc:
         with _admission_lock:
             _running[typed_pipeline_id] = False
@@ -1648,10 +1828,19 @@ async def trigger_run(
         logger.exception("api: admission failed")
         return JSONResponse(status_code=503, content={"error": "admission failed"})
 
+    if replay is not None:
+        with _admission_lock:
+            _running[typed_pipeline_id] = False
+            if _active_run_id == run_id:
+                _active_pipeline = None
+                _active_run_id = None
+        return replay
+
     with _admission_lock:
         _remember_idempotency(idem_key, (typed_pipeline_id, run_id, dry_run), cfg)
     background_tasks.add_task(
-        _run_pipeline_bg, typed_pipeline_id, dry_run, run_id, audit_json_key
+        _run_pipeline_bg, typed_pipeline_id, dry_run, run_id, audit_json_key,
+        **({"operation": operation} if operation is not None else {}),
     )
 
     return JSONResponse(
@@ -1660,6 +1849,7 @@ async def trigger_run(
             "runId": run_id,
             "pipeline": typed_pipeline_id,
             "dryRun": dry_run,
+            **({key: operation[key] for key in ("operationId", "targetSha", "claimKey", "resultKey", "attempt")} if operation else {}),
             **({"auditJsonKey": audit_json_key} if audit_json_key else {}),
         },
         headers={"X-Run-Id": run_id},
