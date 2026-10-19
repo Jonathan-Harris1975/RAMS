@@ -49,6 +49,63 @@ def test_old_sha_cannot_match():
     assert not watcher._matches_expected_deployment({"id": "d1", "status": "healthy", "commit_sha": "b" * 40}, "a" * 40, None)
 
 
+def test_successful_provider_deploy_with_unhealthy_runtime_cannot_close_release():
+    watcher = _load()
+    expected = "a" * 40
+    deployment = {
+        "id": "deployment-unhealthy",
+        "status": "unhealthy",
+        "commit_sha": expected,
+        "image_digest": "sha256:" + "c" * 64,
+    }
+    with patch.dict(os.environ, {
+        "KOYEB_TOKEN": "synthetic",
+        "KOYEB_SERVICE": "service-123",
+        "EXPECTED_DEPLOYMENT_SHA": expected,
+        "DEPLOYMENT_ATTESTATION_PATH": "must-not-exist.json",
+        "GITHUB_RUN_ID": "7654",
+    }), patch.object(watcher, "_deployments", return_value=[deployment]), \
+         patch.object(watcher, "send_event", return_value=True) as alert:
+        assert watcher.main() == 1
+
+    event = alert.call_args.args[0]
+    assert event["event_type"] == "deployment_failed"
+    assert event["release_id"] == expected
+    assert event["details"]["status"] == "unhealthy"
+    assert event["details"]["expectedSha"] == expected
+    assert event["details"]["partialState"] == "deployment-visible-unhealthy"
+    assert event["details"]["workflowRunId"] == "7654"
+
+
+def test_timeout_preserves_partial_or_missing_deployment_state():
+    watcher = _load()
+    expected = "a" * 40
+    deployment = {
+        "id": "deployment-starting",
+        "status": "deploying",
+        "commit_sha": expected,
+        "created_at": "2026-10-19T00:00:00Z",
+    }
+    with patch.dict(os.environ, {
+        "KOYEB_TOKEN": "synthetic",
+        "KOYEB_SERVICE": "service-123",
+        "EXPECTED_DEPLOYMENT_SHA": expected,
+        "KOYEB_DEPLOYMENT_MAX_ATTEMPTS": "1",
+        "GITHUB_REPOSITORY": "Jonathan-Harris1975/RAMS",
+        "GITHUB_RUN_ID": "7655",
+    }), patch.object(watcher, "_deployments", return_value=[deployment]), \
+         patch.object(watcher.time, "sleep"), patch.object(watcher, "send_event", return_value=True) as alert:
+        assert watcher.main() == 1
+
+    event = alert.call_args.args[0]
+    assert event["event_type"] == "deployment_watch_timeout"
+    assert event["release_id"] == expected
+    assert event["url"].endswith("/actions/runs/7655")
+    assert event["details"]["expectedSha"] == expected
+    assert event["details"]["partialState"] == "deployment-visible-incomplete"
+    assert event["details"]["attempt"] == event["details"]["maxAttempts"] == 1
+
+
 def test_image_digest_requires_immutable_sha256():
     watcher = _load()
     assert watcher._image_digest({"image_digest": "sha256:" + "a" * 64}) == "sha256:" + "a" * 64

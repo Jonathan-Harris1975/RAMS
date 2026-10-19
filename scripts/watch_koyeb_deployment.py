@@ -377,18 +377,33 @@ def main() -> int:
                 time.sleep(poll_seconds)
                 continue
         if status in FAILURE or degraded_seen >= 4:
+            run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+            run_url = (
+                f"{os.getenv('GITHUB_SERVER_URL', 'https://github.com').rstrip('/')}/"
+                f"{os.getenv('GITHUB_REPOSITORY', '')}/actions/runs/{run_id}"
+            )
             send_event(
                 {
-                    "event_id": f"koyeb:{display_name}:{deployment_id}",
+                    "event_id": f"koyeb:{display_name}:{expected_sha}:{deployment_id}:{run_id}",
                     "source": "koyeb_deployment_watcher",
                     "service": display_name,
                     "severity": "critical" if status != "degraded" else "warning",
                     "event_type": "deployment_failed" if status != "degraded" else "deployment_sustained_degradation",
                     "title": f"{display_name} Koyeb deployment did not become healthy",
                     "summary": f"Deployment {deployment_id} reached status {status}.",
-                    "release_id": os.getenv("GITHUB_SHA") or None,
-                    "url": f"{os.getenv('GITHUB_SERVER_URL', 'https://github.com')}/{os.getenv('GITHUB_REPOSITORY', '')}/actions/runs/{os.getenv('GITHUB_RUN_ID', '')}",
-                    "details": {"deploymentId": deployment_id, "status": status, "serviceReference": service},
+                    "release_id": expected_sha,
+                    "url": run_url,
+                    "details": {
+                        "deploymentId": deployment_id,
+                        "status": status,
+                        "serviceReference": service,
+                        "expectedSha": expected_sha,
+                        "workflowRunId": run_id,
+                        "attempt": attempt,
+                        "maxAttempts": attempts,
+                        "partialState": "deployment-visible-unhealthy",
+                        "recoveryGuidance": "Keep release closure blocked; inspect this deployment and use the approved operator rollback procedure if recovery is required.",
+                    },
                 }
             )
             return 1
@@ -398,17 +413,35 @@ def main() -> int:
 
     deployment_id = str((last or {}).get("id") or "not-found")
     status = _status(last or {})
+    run_id = os.getenv("GITHUB_RUN_ID", "unknown")
+    run_url = (
+        f"{os.getenv('GITHUB_SERVER_URL', 'https://github.com').rstrip('/')}/"
+        f"{os.getenv('GITHUB_REPOSITORY', '')}/actions/runs/{run_id}"
+    )
+    last_observed = _created(last) if last else ""
     send_event(
         {
-            "event_id": f"koyeb:{display_name}:timeout:{os.getenv('GITHUB_RUN_ID', datetime.now(UTC).isoformat())}",
+            "event_id": f"koyeb:{display_name}:{expected_sha}:timeout:{run_id}",
             "source": "koyeb_deployment_watcher",
             "service": display_name,
             "severity": "warning",
             "event_type": "deployment_watch_timeout",
             "title": f"{display_name} Koyeb deployment confirmation timed out",
             "summary": f"The watcher ended before deployment {deployment_id} became healthy. Last status: {status}.",
-            "release_id": os.getenv("GITHUB_SHA") or None,
-            "details": {"deploymentId": deployment_id, "status": status, "serviceReference": service},
+            "release_id": expected_sha,
+            "url": run_url,
+            "details": {
+                "deploymentId": deployment_id,
+                "status": status,
+                "serviceReference": service,
+                "expectedSha": expected_sha,
+                "workflowRunId": run_id,
+                "attempt": attempts,
+                "maxAttempts": attempts,
+                "lastObservedAt": last_observed or None,
+                "partialState": "deployment-visible-incomplete" if last else "deployment-not-visible-or-provider-unavailable",
+                "recoveryGuidance": "Keep release closure blocked; verify Koyeb service, environment and deployment state before a bounded retry. Do not infer success or roll back automatically.",
+            },
         }
     )
     return 1
