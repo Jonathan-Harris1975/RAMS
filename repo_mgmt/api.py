@@ -827,7 +827,7 @@ def _record_live_operation_result(operation: dict[str, Any], report: Any) -> Non
     }
     if report is not None:
         try:
-            persisted = json.loads(r2.get_object_limited(cfg.r2_bucket_audits, report_key, 2 * 1024 * 1024))
+            persisted = json.loads(r2.get_object_limited(cfg.r2_bucket_audits, report_key, cfg.rms_report_max_bytes))
             if (isinstance(persisted, dict) and persisted.get("runId") == operation["runId"]
                     and persisted.get("pipeline") == operation["pipeline"]):
                 result["terminalResult"] = "failed" if report.error else "completed"
