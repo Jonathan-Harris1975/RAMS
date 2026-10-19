@@ -65,7 +65,7 @@ def test_verified_experiment_records_full_lifecycle(tmp_path) -> None:
     assert "verified" in outcomes
 
 
-def test_failed_verification_rolls_back_and_records_outcome(tmp_path) -> None:
+def test_failed_verification_without_approval_is_recorded_for_review(tmp_path) -> None:
     manager, _ = _managers(tmp_path)
     action = _action(action_id="act-2")
     state = {"value": "old"}
@@ -81,8 +81,9 @@ def test_failed_verification_rolls_back_and_records_outcome(tmp_path) -> None:
         verify_fn=lambda: False,
     )
 
-    assert record.outcome == "rolled_back"
-    assert state["value"] == "old"
+    assert record.outcome == "manual_review"
+    assert "trusted approval" in record.detail
+    assert state["value"] == "new"
 
 
 def test_audit_ids_are_deduplicated_and_sorted() -> None:
