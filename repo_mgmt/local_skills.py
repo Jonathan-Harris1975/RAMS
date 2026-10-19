@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCAL_SKILLS_DIR = REPO_ROOT / "config" / "skills"
+if not LOCAL_SKILLS_DIR.is_dir():
+    LOCAL_SKILLS_DIR = Path(sys.prefix) / "share" / "rams" / "config" / "skills"
 LOCAL_SKILL_SCHEMA = "2026-09-15.repository-skill.v1"
 LOCAL_SKILL_ID = re.compile(r"^RAMS-sk\d{3}$")
 
@@ -64,7 +67,7 @@ def load_local_skills() -> tuple[dict[str, Any], ...]:
             raise LocalSkillConfigurationError(f"Invalid local origin in {path.name}")
         if origin.get("external_skill_content_copied") is not False:
             raise LocalSkillConfigurationError(f"External content provenance is unsafe: {path.name}")
-        relative_path = path.relative_to(REPO_ROOT).as_posix()
+        relative_path = f"config/skills/{path.name}"
         record["source_path"] = relative_path
         record["source_uri"] = f"repo://{relative_path}"
         records.append(record)

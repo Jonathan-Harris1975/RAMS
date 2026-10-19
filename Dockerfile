@@ -54,6 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml requirements.in requirements-runtime.lock requirements-build.txt ./
 COPY repo_mgmt/ ./repo_mgmt/
+COPY config/skills/ ./config/skills/
 
 RUN pip install --disable-pip-version-check --no-cache-dir \
         --require-hashes -r requirements-build.txt \

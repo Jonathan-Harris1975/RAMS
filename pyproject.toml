@@ -29,6 +29,9 @@ dev = [
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.in"]}
 
+[tool.setuptools.data-files]
+"share/rams/config/skills" = ["config/skills/RAMS-sk*.local.json"]
+
 [tool.setuptools.packages.find]
 include = ["repo_mgmt*"]
 
