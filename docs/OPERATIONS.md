@@ -101,10 +101,11 @@ curl -fsS -X POST \
 curl -fsS -X POST \
   -H "Authorization: Bearer $RMS_API_KEY" \
   -H "Content-Type: application/json" \
+  -H "X-Idempotency-Key: website-remediation-SESSION_ID" \
   -d '{"audit_json_key":"audits/website/2026-07/SESSION_ID/website-audit.json","audit_session_id":"SESSION_ID"}' \
   "$BASE_URL/rebuild/website/run"
 
-AIMS normally sends this request automatically after final report publication and temporary cleanup. Operators should use it manually only for recovery/replay with the same exact JSON key.
+AIMS normally sends this request automatically after final report publication and temporary cleanup. Operators should use it manually only for recovery/replay with the same exact JSON key. Replace `SESSION_ID` with the audit's existing session ID in both the body and idempotency header; keep that header unchanged on retries.
 
 The current JSON contract is `website-audit-report/v2` with remediation contract `rams-website/v1`; RAMS also accepts retained `website-audit-report/v1` reports for backward compatibility. Version 2 is accepted only when `reportStatus` is `complete`, `operational.ramsDispatchPermitted` is true, and its retention policy matches the governed post-acceptance contract. RAMS consumes the council `masterIssueLedger` as the governed work queue. A row can become an autonomous code fix only when it explicitly carries `classification: code_fix`, `confidence: Confirmed`, an approved `fixClass`, exact `affectedPaths`, deterministic remediation, evidence, and non-empty `sourceFindingIds`; everything else fails closed to review/guidance.
 
