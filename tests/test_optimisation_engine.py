@@ -106,7 +106,7 @@ def test_auto_configure_action_applies_and_verifies(tmp_path) -> None:
     assert result.experiment.outcome == "verified"
 
 
-def test_auto_configure_action_rolls_back_on_failed_verification(tmp_path) -> None:
+def test_auto_configure_action_requires_manual_review_without_rollback_approval(tmp_path) -> None:
     engine = _build_engine(tmp_path)
     evs = [
         AuditEvidence(
@@ -137,8 +137,10 @@ def test_auto_configure_action_rolls_back_on_failed_verification(tmp_path) -> No
         apply_fn=apply_fn,
         verify_fn=lambda: False,
     )
-    assert result.routed_to == "rolled_back"
-    assert state["value"] == "old"
+    assert result.routed_to == "manual_review"
+    assert result.experiment is not None
+    assert result.experiment.outcome == "manual_review"
+    assert state["value"] == "new"
 
 
 def test_patch_candidate_tier_is_never_reached_by_default_policy(tmp_path) -> None:
