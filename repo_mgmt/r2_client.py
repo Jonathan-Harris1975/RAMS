@@ -10,6 +10,7 @@ Raises R2Error on boto3 failures so callers never need to import boto3 directly.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit
 from typing import TYPE_CHECKING
 
 import boto3
@@ -51,6 +52,7 @@ class R2Client:
         lightweight live readiness check.
         """
         self._bucket_audits = cfg.r2_bucket_audits
+        self._endpoint = cfg.r2_endpoint
         self._client = boto3.client(
             "s3",
             endpoint_url=cfg.r2_endpoint,
@@ -173,6 +175,33 @@ class R2Client:
             raise R2Error(
                 f"R2 put_object failed for bucket={bucket!r} key={key!r}: {_error_summary(exc)}"
             ) from exc
+
+
+    def put_object_if_absent(
+        self, bucket: str, key: str, body: bytes, content_type: str = "application/json",
+    ) -> bool:
+        """Atomically create one R2 record; never fall back to an unconditional PUT.
+
+        R2 evaluates If-None-Match atomically against committed bucket state.
+        A timeout is uncertain and raises: a negative read cannot prove a prior
+        in-flight write failed. Only an explicit 412 means another claim won.
+        """
+        endpoint = urlsplit(self._endpoint)
+        if endpoint.scheme != "https" or not (endpoint.hostname or "").endswith(".r2.cloudflarestorage.com"):
+            raise R2Error("Create-once admission requires the documented Cloudflare R2 endpoint")
+        try:
+            self._client.put_object(
+                Bucket=bucket, Key=key, Body=body, ContentType=content_type,
+                IfNoneMatch="*",
+            )
+            return True
+        except ClientError as exc:
+            metadata = exc.response.get("ResponseMetadata", {})
+            if metadata.get("HTTPStatusCode") == 412 or exc.response.get("Error", {}).get("Code") in {"412", "PreconditionFailed"}:
+                return False
+            raise R2Error(f"R2 create-once write failed: {_error_summary(exc)}") from exc
+        except (EndpointConnectionError, BotoCoreError) as exc:
+            raise R2Error(f"R2 create-once outcome is uncertain: {_error_summary(exc)}") from exc
 
     def list_objects(self, bucket: str, prefix: str, *, max_keys: int = 1000) -> list[str]:
         """
