@@ -8,7 +8,7 @@ from repo_mgmt.optimisation.rollback_manager import RollbackError, RollbackManag
 
 
 def test_snapshot_and_restore_round_trip(tmp_path) -> None:
-    manager = RollbackManager(tmp_path / "rollback")
+    manager = RollbackManager(tmp_path / "rollback", rollback_authorizer=lambda action_id, snapshot_id: action_id == "act-1" and snapshot_id == "snap-act-1")
     state = {"value": "before"}
 
     manager.snapshot(action_id="act-1", target="scheduler.interval", before=dict(state))
@@ -45,7 +45,7 @@ def test_verify_and_maybe_rollback_success_leaves_state_unchanged(tmp_path) -> N
     assert state["value"] == "after"
 
 
-def test_verify_and_maybe_rollback_failure_restores_state(tmp_path) -> None:
+def test_verify_and_maybe_rollback_failure_requires_approval(tmp_path) -> None:
     manager = RollbackManager(tmp_path / "rollback")
     state = {"value": "before"}
     manager.snapshot(action_id="act-3", target="prompts.system", before=dict(state))
@@ -54,12 +54,11 @@ def test_verify_and_maybe_rollback_failure_restores_state(tmp_path) -> None:
     def apply_fn(target_state):
         state.update(target_state)
 
-    verified, snap = manager.verify_and_maybe_rollback(
-        action_id="act-3", verify_fn=lambda: False, apply_fn=apply_fn
-    )
-    assert verified is False
-    assert snap is not None
-    assert state["value"] == "before"
+    with pytest.raises(RollbackError, match="trusted approval"):
+        manager.verify_and_maybe_rollback(
+            action_id="act-3", verify_fn=lambda: False, apply_fn=apply_fn
+        )
+    assert state["value"] == "after"
 
 
 def test_verify_fn_exception_triggers_rollback(tmp_path) -> None:
@@ -74,11 +73,11 @@ def test_verify_fn_exception_triggers_rollback(tmp_path) -> None:
     def broken_verify():
         raise RuntimeError("verification blew up")
 
-    verified, snap = manager.verify_and_maybe_rollback(
-        action_id="act-4", verify_fn=broken_verify, apply_fn=apply_fn
-    )
-    assert verified is False
-    assert state["value"] == "before"
+    with pytest.raises(RollbackError, match="trusted approval"):
+        manager.verify_and_maybe_rollback(
+            action_id="act-4", verify_fn=broken_verify, apply_fn=apply_fn
+        )
+    assert state["value"] == "after"
 
 
 def test_prune_keeps_only_configured_snapshot_count(tmp_path) -> None:
