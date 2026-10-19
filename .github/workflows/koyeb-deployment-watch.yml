@@ -37,6 +37,19 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Reject stale source revision before release verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
+          if [ "$EXPECTED_SOURCE_SHA" != "$current_sha" ]; then
+            echo "::error::Refusing stale deployment evidence: workflow SHA $EXPECTED_SOURCE_SHA is no longer the default-branch head $current_sha."
+            exit 1
+          fi
+          printf 'Verified current release source SHA %s.\n' "$EXPECTED_SOURCE_SHA"
       - name: Check Koyeb deployment-watch configuration
         id: deployment_config
         env:

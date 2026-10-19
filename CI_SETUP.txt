@@ -13,7 +13,7 @@ CI-specific secrets
 
 Existing deployment/operations configuration (not introduced by this CI work)
 - KOYEB_TOKEN and KOYEB_SERVICE are required by the production deployment watcher.
-- ECOSYSTEM_SMOKE_DISPATCH_TOKEN and ECOSYSTEM_SMOKE_REPOSITORY support the central ecosystem smoke dispatch.
+- OIDC readiness is a GitHub token/claim smoke test only. Cloud-provider federation requires a separate ecosystem-wide trust policy with a narrow repository, workflow, branch/environment and audience binding; verify that policy with the service owner. Do not use a MAST-only smoke as evidence of provider trust.
 - OPS_ALERT_WEBHOOK_URL and OPS_ALERT_WEBHOOK_TOKEN support failure notifications.
 
 Dependency management
