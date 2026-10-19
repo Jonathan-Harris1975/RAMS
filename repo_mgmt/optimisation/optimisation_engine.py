@@ -159,10 +159,14 @@ class OptimisationEngine:
             )
             if experiment.outcome == "verified":
                 routed = "applied"
+            elif experiment.outcome == "rolled_back":
+                routed = "rolled_back"
+            elif experiment.outcome == "manual_review":
+                routed = "manual_review"
             elif experiment.outcome == "rejected":
                 routed = "not_eligible"
             else:
-                routed = "rolled_back"
+                routed = "manual_review"
             return RoutingResult(action=action, routed_to=routed, experiment=experiment, detail=experiment.detail)
 
         if action.tier == "patch_candidate":
