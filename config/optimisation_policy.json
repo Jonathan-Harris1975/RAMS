@@ -41,7 +41,7 @@
 
   "rollback": {
     "verify_timeout_seconds": 300,
-    "auto_rollback_on_verification_failure": true,
+    "auto_rollback_on_verification_failure": false,
     "keep_snapshots": 50
   },
 
