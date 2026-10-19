@@ -143,19 +143,19 @@ jobs:
           fi
 
           dispatch_kilo() {
-            local repair_pr="$1" marker marker_rows latest_state rejected_attempts payload status
+            local repair_pr="$1" marker marker_rows latest_state failed_attempts payload status outcome handoff_state handoff_guidance
             marker="<!-- kilo-main-repair:${RUN_ID} -->"
             marker_rows="$(gh api --paginate "repos/${REPO}/issues/${repair_pr}/comments" \
-              --jq ".[] | select(.user.login == \"${REPAIR_APP_LOGIN}\" and (.body | contains(\"${marker}\"))) | [.id, (if (.body | contains(\"dispatch-state: rejected-http-\")) then \"rejected\" else \"pending\" end)] | @tsv")"
+              --jq ".[] | select(.user.login == \"${REPAIR_APP_LOGIN}\" and (.body | contains(\"${marker}\"))) | [.id, (if ((.body | contains(\"dispatch-state: rejected-http-\")) or (.body | contains(\"dispatch-state: retryable-http-\"))) then \"retryable\" else \"pending\" end)] | @tsv")"
             if [ -n "$marker_rows" ]; then
               latest_state="$(printf '%s\n' "$marker_rows" | tail -n1 | cut -f2)"
-              if [ "$latest_state" != "rejected" ]; then
+              if [ "$latest_state" != "retryable" ]; then
                 echo "Kilo already has a pending or accepted handoff for run $RUN_ID."
                 return
               fi
-              rejected_attempts="$(printf '%s\n' "$marker_rows" | awk '$2 == "rejected" { count++ } END { print count + 0 }')"
-              if [ "$rejected_attempts" -ge 2 ]; then
-                echo "::warning::Kilo repair handoff for run $RUN_ID exhausted its two rejected attempts."
+              failed_attempts="$(printf '%s\n' "$marker_rows" | awk '$2 == "retryable" { count++ } END { print count + 0 }')"
+              if [ "$failed_attempts" -ge 2 ]; then
+                echo "::warning::Kilo repair handoff for run $RUN_ID exhausted its two bounded attempts; owner follow-up is required."
                 return
               fi
             fi
@@ -184,15 +184,17 @@ jobs:
             status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 30 \
               --request POST \
               --header 'Content-Type: application/json' --data "$payload" \
-              "$KILO_REPAIR_TRIGGER_URL")"
-            if [[ "$status" != 2?? ]]; then
-              if [[ "$status" =~ ^4[0-9]{2}$ ]]; then
-                if ! gh api --method PATCH "repos/${REPO}/issues/comments/${reservation_id}" \
-                  --field body="$marker dispatch-state: rejected-http-$status Kilo explicitly rejected this handoff; a bounded retry is available." >/dev/null; then
-                  echo "::warning::Could not mark the rejected Kilo handoff retryable; the pending reservation remains fail-closed."
-                fi
+              "$KILO_REPAIR_TRIGGER_URL" || true)"
+            [[ "$status" =~ ^[0-9]{3}$ ]] || status="000"
+            outcome="$(python3 .github/scripts/kilo_handoff_result.py "$status")"
+            handoff_state="$(jq -r '.state' <<< "$outcome")"
+            handoff_guidance="$(jq -r '.guidance' <<< "$outcome")"
+            if [ "$handoff_state" != "accepted" ]; then
+              if ! gh api --method PATCH "repos/${REPO}/issues/comments/${reservation_id}" \
+                --field body="$marker dispatch-state: $handoff_state Kilo handoff failed for $RUN_URL (source SHA $HEAD_SHA). $handoff_guidance" >/dev/null; then
+                echo "::warning::Could not update the Kilo incident marker; the original pending reservation remains fail-closed."
               fi
-              echo "::error::Kilo main repair trigger returned HTTP $status for run $RUN_ID."
+              echo "::error::Kilo main repair trigger failed with HTTP $status for run $RUN_ID. Incident details are retained on carrier PR #$repair_pr."
               exit 1
             fi
             if ! gh api --method PATCH "repos/${REPO}/issues/comments/${reservation_id}" \

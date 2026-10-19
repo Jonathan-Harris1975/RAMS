@@ -17,7 +17,7 @@ This is an evidence ledger, not an assertion of successful provider verification
 | Safeguards | Immutable deployment identity | blocked | `scripts/watch_koyeb_deployment.py` checks commit SHA and timestamp; workflow emits `deployment-attestation.json` | New watcher emits observed image digest and deployment ID and configured environment; actual Koyeb payload and environment provenance unverified | Verify actual provider payload shape, environment identity, and mismatch handling in staging | RAMS release |
 | Safeguards | Local release checks | blocked | `scripts/release_gate.sh`, `scripts/verify_hash_enforcement.py` | Full checks not run for baseline SHA in this review | Execute checks in clean runner | RAMS CI |
 | Safeguards | Branch rules and required checks | blocked | GitHub repository settings | Rules and required-check names not verified | Inspect repository rules | Repository owner |
-| Coordination | OIDC and MAST/HIVE evidence contracts | blocked | `.github/workflows/oidc-readiness.yml` | No verified cross-repo consumption or freshness evidence | Inspect MAST/HIVE and provider trust | Ecosystem maintainers |
+| Coordination | Ecosystem-wide OIDC provider trust | blocked | `.github/workflows/oidc-readiness.yml` verifies GitHub-issued JWT signature and claims only | This is a token/claim smoke test; no provider federation or cross-repository trust was exercised | Provider owner verifies a narrow shared policy and controlled identity exchange; do not treat MAST-only smoke as proof | Ecosystem maintainers |
 | Coordination | PR reconciliation | blocked | PR #345 | PR #345 merged; PR #346 remains draft; reviews and checks not yet validated | Review and merge under branch protection | Repository maintainers |
 
 ## Safe live-test runbook
@@ -34,6 +34,12 @@ This is an evidence ledger, not an assertion of successful provider verification
 
 **No live failure injection or deployment mutation is authorised by this document.**
 
+## OIDC trust boundary
+
+The repository workflow checks that GitHub issued a valid token with the expected repository identity, default-branch ref, audience, commit and run claims. It does not exchange the token with a cloud or service provider and cannot prove that the provider trusts the token.
+
+Where a provider supports GitHub OIDC, its owner must configure and verify the ecosystem-wide trust policy using the provider's supported claim conditions. Bind the GitHub issuer, a dedicated audience, immutable repository identity, the specific identity-consuming workflow, and the intended protected branch or deployment environment. Reject wildcard repository/workflow subjects and unrelated branches. Use sanitised claim names and outcomes in evidence; never record JWTs or credentials. Providers that do not support federation remain on their existing narrowly scoped credential path until an approved migration exists.
+
 ## 2026-10-10 implementation update
 
 - PR #345 was merged into main at `b91884cf899261caba4a58552348673956aebfe3`.
@@ -44,6 +50,8 @@ This is an evidence ledger, not an assertion of successful provider verification
 **Verdict remains NOT READY until mandatory evidence is verified.**
 
 ## Subsequent hardening and validation status
+
+- On 19 October 2026, the RAMS repository added a current-head check before deployment verification, correlated timeout/unhealthy incident fields, and explicit Kilo 4xx/transport failure states with owner guidance. These source changes require the focused local tests and protected-branch checks before adoption; no live Koyeb or Kilo verification is implied.
 
 - Commit `f6f56e2aaa6e92ed0d8070a9da983a9772d2ca5a` rejects contradictory provider-supplied service IDs; commit `e6dace8f3f8f80ce523e75ff940c64bca10a49b8` adds the corresponding regression test. Absence of a provider service ID is **not** proof of service provenance.
 - Commit `c7cabd2d93470e804c7c02c48a63fa06992a1766` restricts manually dispatched production deployment verification to `main`; commit `02362bcf28a4709544597617c2ba3d7dbfde24d4` adds the workflow regression test.

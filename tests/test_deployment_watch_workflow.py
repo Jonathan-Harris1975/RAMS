@@ -31,6 +31,18 @@ def test_automatic_production_watcher_fails_closed_without_koyeb_configuration()
     assert "skipped" not in config.lower()
 
 
+def test_stale_source_sha_is_rejected_before_provider_access() -> None:
+    text = _workflow()
+    stale_check = text.index("- name: Reject stale source revision before release verification")
+    provider_config = text.index("- name: Check Koyeb deployment-watch configuration")
+    body = _step(text, "Reject stale source revision before release verification")
+
+    assert stale_check < provider_config
+    assert "commits/${DEFAULT_BRANCH}" in body
+    assert '"$EXPECTED_SOURCE_SHA" != "$current_sha"' in body
+    assert "exit 1" in body
+
+
 def test_exact_sha_watch_gates_attestation_and_retained_evidence() -> None:
     text = _workflow()
     watch = text.index("- name: Watch production deployment")

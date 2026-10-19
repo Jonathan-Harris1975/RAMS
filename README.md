@@ -149,7 +149,7 @@ Canonical runtime/deployment guidance is in `docs/OPERATIONS.md`, `docs/PRODUCTI
 
 Logs and operational events must remain redacted. Secret scanning, dependency-lock verification, dependency vulnerability auditing, Bandit, linting, typing, tests/coverage and Docker/API smoke checks are release gates.
 
-The automatic post-CI production watcher also fails closed: GitHub Actions must provide `KOYEB_TOKEN` and `KOYEB_SERVICE`, the bounded Koyeb watch must observe the expected source SHA, and only then may the workflow retain a production deployment attestation and dispatch the required ecosystem smoke. Missing watcher configuration is a release-verification failure, not an optional skip. The credential-free contract is covered by `tests/test_deployment_watch_workflow.py` and runs with the normal pytest suite.
+The automatic post-CI production watcher also fails closed: GitHub Actions must provide `KOYEB_TOKEN` and `KOYEB_SERVICE`, the triggering SHA must still be the current default-branch head, and the bounded Koyeb watch must observe that exact source SHA with healthy runtime status, deployment ID and immutable image digest before it retains a production attestation. Missing, stale or inconclusive evidence fails release verification. The separate OIDC readiness workflow is a GitHub token and claim smoke test; it does not prove cloud-provider federation or replace the ecosystem-wide trust policy. The credential-free contracts are covered by `tests/test_deployment_watch_workflow.py` and watcher fixture tests.
 
 ## Production evidence and roadmap status
 
