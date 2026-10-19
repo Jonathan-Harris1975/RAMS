@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -148,7 +149,7 @@ class OptimisationPolicy(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: int
+    version: Literal[1]
     confidence_tiers: list[ConfidenceTierBand]
     confidence_weights: ConfidenceWeights
     trend_analysis: TrendAnalysisPolicy
