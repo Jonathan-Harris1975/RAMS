@@ -2,10 +2,9 @@
 Rollback Manager for the RAMS Optimisation Subsystem.
 
 Every applied optimisation action captures a snapshot of the exact
-configuration state it changed *before* changing it. If post-change
-verification fails (or is never confirmed), the manager restores that
-snapshot automatically -- this is what makes ``auto_configure``-tier
-actions safe to apply without a human in the loop.
+configuration state it changed *before* changing it. Restoring a snapshot
+is a consequential configuration change and requires a trusted approval
+callback bound to that action and snapshot. No callback means fail closed.
 
 Snapshots are content-addressed and persisted to disk so a restore is
 possible even across a process restart (e.g. RAMS is redeployed between an
@@ -45,10 +44,17 @@ class ConfigSnapshot:
 class RollbackManager:
     """Captures and restores configuration snapshots for optimisation actions."""
 
-    def __init__(self, state_dir: str | Path | None = None, *, keep_snapshots: int = 50) -> None:
+    def __init__(
+        self,
+        state_dir: str | Path | None = None,
+        *,
+        keep_snapshots: int = 50,
+        rollback_authorizer: Callable[[str, str], bool] | None = None,
+    ) -> None:
         self._state_dir = Path(state_dir) if state_dir else _DEFAULT_STATE_DIR
         self._state_dir.mkdir(parents=True, exist_ok=True)
         self._keep_snapshots = keep_snapshots
+        self._rollback_authorizer = rollback_authorizer
         self._lock = threading.Lock()
 
     def _path_for(self, action_id: str) -> Path:
@@ -115,6 +121,10 @@ class RollbackManager:
         snap = self.load(action_id)
         if snap is None:
             raise RollbackError(f"no snapshot found for action {action_id!r}; cannot roll back")
+        if self._rollback_authorizer is None or not self._rollback_authorizer(action_id, snap.snapshot_id):
+            raise RollbackError(
+                "rollback requires trusted approval for this exact action and snapshot"
+            )
         apply_fn(snap.before)
         logger.info("rolled back action %s target=%s", action_id, snap.target)
         return snap
@@ -126,7 +136,7 @@ class RollbackManager:
         verify_fn: Callable[[], bool],
         apply_fn: Callable[[dict[str, Any]], None],
     ) -> tuple[bool, ConfigSnapshot | None]:
-        """Run ``verify_fn``; on failure, restore the snapshot automatically.
+        """Run ``verify_fn``; on failure, restore only with trusted approval.
 
         Returns ``(verified, snapshot_if_rolled_back)``.
         """
