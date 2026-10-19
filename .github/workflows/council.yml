@@ -24,11 +24,12 @@ env:
   R2_ENDPOINT: ${{ vars.R2_ENDPOINT || 'https://3fb60a7136e950a7ec74959b45e4635e.r2.cloudflarestorage.com' }}
   EVIDENCE_BUCKET: hive-repositories
   DAST_ENABLED: ${{ vars.DAST_ENABLED || 'false' }}
-  DAST_TARGET_URL: ${{ vars.DAST_TARGET_URL || '' }}
 
 jobs:
   council:
     runs-on: ubuntu-latest
+    environment:
+      name: R2
     timeout-minutes: 145
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,13 +74,16 @@ jobs:
           done
 
           blockers="$(gh pr list --state open --limit 1000 --json number,labels,url --jq '[.[] | select(any(.labels[]?; .name == "autonomy:human-hold") or (any(.labels[]?; .name == "autonomy:repair") and (any(.labels[]?; .name == "autonomy:obsolete" or .name == "autonomy:superseded") | not)))]')"
-          blocker_count="$(jq length <<< "$blockers")"
-          evidence="$(jq --argjson n "$blocker_count" '.autonomyBlockerCount=$n' <<< "$evidence")"
+          printf '%s\n' "$blockers" | jq '[.[] | {number, url}]' > "$RUNNER_TEMP/autonomy-blockers.json"
+          blocker_count="$(jq length < "$RUNNER_TEMP/autonomy-blockers.json")"
+          evidence="$(jq --argjson n "$blocker_count" --slurpfile items "$RUNNER_TEMP/autonomy-blockers.json" '.autonomyBlockerCount=$n | .autonomyBlockers=$items[0]' <<< "$evidence")"
           if [ "$blocker_count" -ne 0 ]; then
             failures="$(jq --arg v "unresolved autonomy state exists" '. + [$v]' <<< "$failures")"
           fi
 
-          mergify_ok="$(python3 - <<'PY'
+          mergify_ok="false"
+          if [ -f .mergify.yml ]; then
+            mergify_ok="$(python3 - <<'PY'
           from pathlib import Path
           text = Path(".mergify.yml").read_text()
           checks = [
@@ -91,10 +95,11 @@ jobs:
           ]
           print("true" if all(item in text for item in checks) else "false")
           PY
-          )"
-          evidence="$(jq --argjson ok "$mergify_ok" '.mergifyPolicy=$ok' <<< "$evidence")"
+            )"
+          fi
+          evidence="$(jq --argjson ok "$mergify_ok" --arg state "$([ -f .mergify.yml ] && echo PRESENT || echo MISSING)" '.mergifyPolicy=$ok | .mergifyPolicyFile=$state' <<< "$evidence")"
           if [ "$mergify_ok" != "true" ]; then
-            failures="$(jq --arg v "Mergify policy does not prove admitted squash-merge authority" '. + [$v]' <<< "$failures")"
+            failures="$(jq --arg v "$([ -f .mergify.yml ] && echo 'Mergify policy does not prove admitted squash-merge authority' || echo 'Mergify policy file .mergify.yml is missing; merge authority is unverified')" '. + [$v]' <<< "$failures")"
           fi
 
           koyeb_state="$(gh api "repos/${REPO}/commits/${TARGET_SHA}/status" --jq '[.statuses[] | select(.context | startswith("Koyeb - "))] | sort_by(.updated_at) | last | .state // "missing"')"
@@ -104,14 +109,9 @@ jobs:
           fi
 
           if [ "$DAST_ENABLED" = "true" ]; then
-            if [ -z "$DAST_TARGET_URL" ]; then
-              dast_state="INVALID_CONFIGURATION"
-              failures="$(jq --arg v "DAST_ENABLED=true but DAST_TARGET_URL is empty" '. + [$v]' <<< "$failures")"
-            else
-              dast_state="$(jq -r '[.[] | select(.name == "DAST penetration test" and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
-              if [ "$dast_state" != "success" ]; then
-                failures="$(jq --arg v "DAST exact-SHA evidence is $dast_state" '. + [$v]' <<< "$failures")"
-              fi
+            dast_state="$(jq -r '[.[] | select(.name == "DAST penetration test" and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
+            if [ "$dast_state" != "success" ]; then
+              failures="$(jq --arg v "DAST exact-SHA evidence is $dast_state; inspect the DAST run for target configuration and scan details" '. + [$v]' <<< "$failures")"
             fi
           else
             dast_state="DAST_DISABLED"
@@ -137,7 +137,63 @@ jobs:
             }' > council-report.json
 
           echo "disposition=$disposition" >> "$GITHUB_OUTPUT"
-          cat council-report.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path("council-report.json").read_text(encoding="utf-8"))
+          evidence = report.get("evidence", {})
+          lines = [
+              "# RAMS weekend Council report",
+              "",
+              f"**Disposition:** {report.get('disposition', 'UNKNOWN')}",
+              f"**Target:** {report.get('repository', 'unknown')}@{report.get('targetSha', 'unknown')}",
+              f"**Run:** https://github.com/{report.get('repository', '')}/actions/runs/{report.get('workflowRunId', '')}",
+              "",
+              "## Gate results",
+              "",
+              "| Gate | Result |",
+              "|---|---|",
+          ]
+          workflows = evidence.get("workflows", {})
+          for name, result in workflows.items():
+              lines.append(f"| {name} | {result} |")
+          lines.extend([
+              f"| Mergify policy | {'PASS' if evidence.get('mergifyPolicy') else 'FAIL'} ({evidence.get('mergifyPolicyFile', 'unknown')} file) |",
+              f"| Koyeb deployment | {evidence.get('koyebDeployment', 'unknown')} |",
+              f"| DAST | {evidence.get('dast', 'unknown')} |",
+              f"| Open autonomy blockers | {evidence.get('autonomyBlockerCount', 'unknown')} |",
+              "",
+              "## Open autonomy blockers",
+              "",
+          ])
+          blockers = evidence.get("autonomyBlockers", [])
+          if blockers:
+              for item in blockers:
+                  lines.append(f"- PR #{item.get('number', '?')} — {item.get('url', 'URL unavailable')}")
+          else:
+              lines.append("- None found.")
+          failures = report.get("failures", [])
+          lines.extend(["", "## Required follow-up", ""])
+          if failures:
+              for item in failures:
+                  lines.append(f"- {item}")
+          else:
+              lines.append("- None; all recorded gates passed.")
+          lines.extend([
+              "",
+              "Evidence is bound to the target SHA and this workflow run. Missing or disabled checks are reported as such; they are not inferred as passes.",
+              "",
+          ])
+          markdown = "\n".join(lines)
+          Path("council-report.md").write_text(markdown, encoding="utf-8")
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as output:
+                  output.write(markdown)
+          print(markdown)
+          PY
           if [ "$disposition" != "READY_FOR_COUNCIL_ACCEPTANCE" ]; then
             echo "::error::Repository Council disposition: $disposition"
             exit 1
@@ -156,5 +212,5 @@ jobs:
           EVIDENCE_KIND: council
           EVIDENCE_STATUS: ${{ job.status }}
           CERTIFICATION_STATE: ${{ steps.certify.outputs.disposition || 'NOT_READY' }}
-          EVIDENCE_FILES: council-report.json
+          EVIDENCE_FILES: council-report.json,council-report.md
         run: python .github/scripts/persist_r2_evidence.py
