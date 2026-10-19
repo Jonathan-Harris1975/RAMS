@@ -314,7 +314,7 @@ class ProductionGovernanceProtectionTests(unittest.TestCase):
         self.assertIn("dispatch-state: accepted", dispatch)
         self.assertIn('outcome="$(python3 .github/scripts/kilo_handoff_result.py "$status")"', dispatch)
         self.assertIn("dispatch-state: $handoff_state", dispatch)
-        self.assertIn('rejected_attempts" -ge 2', dispatch)
+        self.assertIn('failed_attempts" -ge 2', dispatch)
 
 
 
