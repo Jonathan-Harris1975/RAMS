@@ -193,6 +193,7 @@ def test_build_log_digest_queries_exact_deployment_only():
     command = run.call_args.args[0]
     assert command[:4] == ["koyeb", "deployments", "logs", deployment_id]
     assert command[command.index("--type") + 1] == "build"
+    assert command[command.index("--text-search") + 1] == "pushing manifest for "
     assert command[-2:] == ["--token", "token"]
 
 

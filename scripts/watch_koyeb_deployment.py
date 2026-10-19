@@ -184,6 +184,7 @@ def _deployment_build_digest(token: str, item: dict[str, Any]) -> str:
     command = [
         "koyeb", "deployments", "logs", deployment_id,
         "--type", "build",
+        "--text-search", "pushing manifest for ",
         "--start-time", (created - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S"),
         "--end-time", end.strftime("%Y-%m-%d %H:%M:%S"),
         "--order", "asc", "--full", "-o", "json", "--token", token,
