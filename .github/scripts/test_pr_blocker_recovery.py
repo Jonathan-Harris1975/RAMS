@@ -628,8 +628,7 @@ class Recovery(unittest.TestCase):
         ))
 
 
-if __name__ == "__main__":
-    unittest.main()
+
 
 class CurrentHeadFailureCoverage(unittest.TestCase):
     def setUp(self):
@@ -692,3 +691,6 @@ class CurrentHeadFailureCoverage(unittest.TestCase):
         self.assertEqual(result["state"], "check-requested")
         self.assertEqual(dispatch.call_args.args[1], "check")
 
+
+if __name__ == "__main__":
+    unittest.main()
