@@ -616,6 +616,17 @@ class Recovery(unittest.TestCase):
         self.assertEqual(events, ["reserve", "mark-rejected", "reserve", "ack"])
         self.assertIn("dispatch-state: accepted", comments[1]["body"])
         self.assertEqual(len(comments), 2)
+    def test_scans_failed_checks_when_only_human_threads_remain(self):
+        self.assertTrue(m.should_scan_current_head_failures(
+            {"state": "review-recovery", "request_status": None}
+        ))
+        self.assertFalse(m.should_scan_current_head_failures(
+            {"state": "review-recovery", "request_status": "requested"}
+        ))
+        self.assertTrue(m.should_scan_current_head_failures(
+            {"state": "no-conflict-or-review-blocker"}
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()
