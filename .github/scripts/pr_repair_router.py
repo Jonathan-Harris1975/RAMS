@@ -298,8 +298,10 @@ def machine_contract() -> str:
 
 
 def trigger_secret_for(kind: str) -> str:
-    """Route failed commit checks to Debug while preserving Code for other requests."""
-    return "KILO_DEBUG_TRIGGER_URL" if kind == "check" else "KILO_REPAIR_TRIGGER_URL"
+    """Route failed checks and branch-state repairs to Debug; keep review fixes on Code."""
+    if kind == "check" or kind.startswith(("merge-conflict-", "branch-behind-")):
+        return "KILO_DEBUG_TRIGGER_URL"
+    return "KILO_REPAIR_TRIGGER_URL"
 
 
 def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
