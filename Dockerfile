@@ -40,8 +40,8 @@ RUN printf '%s\n' 'deb-src [signed-by=/usr/share/keyrings/debian-archive-keyring
     && apt-get update \
     && apt-get install -y --no-install-recommends build-essential dpkg-dev \
     && apt-get build-dep -y --no-install-recommends expat \
-    && apt-get source --compile expat=2.5.0-1+deb12u4 \
-    && test "$(dpkg-deb --field libexpat1_*.deb Version)" = '2.5.0-1+deb12u4'
+    && apt-get source --compile expat=2.5.0-1+deb12u5 \
+    && test "$(dpkg-deb --field libexpat1_*.deb Version)" = '2.5.0-1+deb12u5'
 
 FROM python:3.14.8-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS builder
 
@@ -85,7 +85,7 @@ RUN apt-get update \
 
 COPY --from=expat-security /security-build/libexpat1_*.deb /tmp/libexpat1-security.deb
 RUN dpkg -i /tmp/libexpat1-security.deb \
-    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libexpat1)" ge '2.5.0-1+deb12u4' \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libexpat1)" ge '2.5.0-1+deb12u5' \
     && rm /tmp/libexpat1-security.deb
 
 # Bring in Node.js 24.x and npm without relying on distro packages that may lag
