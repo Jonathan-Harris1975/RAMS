@@ -142,7 +142,7 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
     pr = request("GET", f"/repos/{REPO}/pulls/{number}")
     current_labels = {label["name"] for label in pr.get("labels", [])}
     sha = str((pr.get("head") or {}).get("sha") or "")
-    exact_admission, has_admission_evidence = admission_check(number, sha) if sha else (False, False)
+    exact_admission, _has_admission_evidence = admission_check(number, sha) if sha else (False, False)
     blocked = bool(current_labels.intersection(BLOCKING_LABELS))
     eligible_except_mergeability = (
         pr.get("state") == "open"
@@ -164,11 +164,9 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
             print(f"Enabled GitHub native auto-merge for admitted PR #{number} at {sha}.")
         return
 
-    # Only cancel requests associated with an autonomy admission label or
-    # exact-head admission evidence. This leaves unrelated user requests alone.
-    if active_request is not None and (
-        "autonomy:admitted" in current_labels or has_admission_evidence
-    ):
+    # Only cancel requests with an explicit controller ownership marker.
+    # A failed admission check alone must not cancel a user-owned request.
+    if active_request is not None and "autonomy:admitted" in current_labels:
         disable(node_id)
         print(f"Disabled GitHub native auto-merge for PR #{number}; admission or hold conditions no longer pass.")
 
