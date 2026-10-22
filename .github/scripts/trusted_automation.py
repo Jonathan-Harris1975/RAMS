@@ -802,9 +802,56 @@ def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
         log(f"Closed retired repair carrier PR #{number}.")
 
 
+def admit_manual_pr(pr: dict[str, Any]) -> None:
+    """Publish admission for a human PR only after current exact-head checks and risk approval."""
+    number = int(pr["number"])
+    sha = str(pr.get("head", {}).get("sha", ""))
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError(f"PR #{number} has no valid head SHA for admission")
+    if pr.get("base", {}).get("ref") != DEFAULT_BRANCH:
+        return
+
+    labels = issue_labels(pr)
+    blocking_labels = {
+        "autonomy:human-hold", "autonomy:council-freeze",
+        "autonomy:superseded", "autonomy:obsolete", "do-not-merge",
+        "do not merge", "hold", "needs-manual-review", "needs-human-review",
+    }
+    if labels.intersection(blocking_labels):
+        return
+
+    paths = pr_files(number)
+    if require_operator_risk_approval(pr, paths, "manual"):
+        return
+    green, reason = all_required_checks_green(pr)
+    if not green:
+        log(f"Manual PR #{number} not admitted: {reason}.")
+        return
+
+    current = current_head_unchanged(number, sha)
+    if current is None:
+        log(f"Manual PR #{number} changed during admission; waiting for reconciliation.")
+        return
+    current_labels = issue_labels(current)
+    if current_labels.intersection(blocking_labels):
+        return
+
+    set_admission_check(
+        number,
+        sha,
+        "success",
+        "The trusted default-branch workflow verified exact-head CI/security evidence, current holds, and required owner approval for any high-risk paths. Manual UI/API merges remain subject to the active server-side ruleset.",
+    )
+    VERIFIED_ADMISSION_HEADS.add((number, sha))
+    log(f"Published Trusted autonomy admission for manual PR #{number} at {sha[:12]}.")
+
+
 def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
     kind = automation_kind(pr)
-    if kind is None or pr.get("draft"):
+    if pr.get("draft"):
+        return
+    if kind is None:
+        admit_manual_pr(pr)
         return
     labels = issue_labels(pr)
     if kind in {"kilo", "cto", "branch-pr", "renovate", "codex"}:
@@ -870,7 +917,23 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     sha = str(pr.get("head", {}).get("sha", ""))
     key = (number, sha)
     VERIFIED_ADMISSION_HEADS.discard(key)
+    labels = issue_labels(pr)
+    preflight_attempted = False
     try:
+        if (
+            os.environ.get("ADMISSION_TOKEN")
+            and is_same_repo(pr)
+            and not pr.get("draft")
+            and re.fullmatch(r"[0-9a-f]{40}", sha)
+        ):
+            preflight_attempted = True
+            set_admission_check(
+                number,
+                sha,
+                "failure",
+                "Trusted admission is being re-evaluated; merge remains blocked until current evidence passes.",
+                create_if_missing="autonomy:admitted" in labels,
+            )
         _reconcile_pr_candidate(pr)
     finally:
         labels = issue_labels(pr)
@@ -880,13 +943,19 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
                 remove_label(number, "autonomy:admitted")
         elif key not in VERIFIED_ADMISSION_HEADS:
             try:
-                set_admission_check(
-                    number,
-                    sha,
-                    "failure",
-                    "Trusted automation did not verify this PR as eligible for autonomous merging. A label alone cannot grant admission.",
-                    create_if_missing="autonomy:admitted" in labels,
-                )
+                if (
+                    not preflight_attempted
+                    and is_same_repo(pr)
+                    and not pr.get("draft")
+                    and re.fullmatch(r"[0-9a-f]{40}", sha)
+                ):
+                    set_admission_check(
+                        number,
+                        sha,
+                        "failure",
+                        "Trusted automation did not verify this PR as eligible for autonomous merging. A label alone cannot grant admission.",
+                        create_if_missing="autonomy:admitted" in labels,
+                    )
             finally:
                 if "autonomy:admitted" in labels:
                     remove_label(number, "autonomy:admitted")
@@ -928,8 +997,10 @@ def main() -> int:
     # Reconcile current trusted PRs. Runs admitted above will normally become ready on a later
     # workflow_run completion or scheduled reconciliation.
     for pr in open_prs:
-        if automation_kind(pr) is not None or "autonomy:admitted" in issue_labels(pr):
+        try:
             reconcile_pr(pr)
+        except Exception as exc:
+            log(f"Unable to reconcile PR #{pr.get('number')} ({type(exc).__name__}); continuing the sweep.")
     return 0
 
 
