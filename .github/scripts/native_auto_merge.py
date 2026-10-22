@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -70,6 +71,9 @@ def pages(path: str) -> list[dict[str, Any]]:
 
 def admission_check(number: int, sha: str) -> tuple[bool, bool]:
     """Return (exact successful admission exists, any admission check exists)."""
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return False, False
+    sha = sha.lower()
     name = urllib.parse.quote(ADMISSION_CHECK, safe="")
     runs = request(
         "GET",
@@ -80,6 +84,7 @@ def admission_check(number: int, sha: str) -> tuple[bool, bool]:
         run for run in runs
         if (run.get("app") or {}).get("slug") == "github-actions"
         and run.get("name") == ADMISSION_CHECK
+        and run.get("head_sha") == sha
         and run.get("external_id") == exact_id
     ]
     success = any(
@@ -163,11 +168,9 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
             print(f"Enabled GitHub native auto-merge for admitted PR #{number} at {sha}.")
         return
 
-    # Only cancel requests associated with an autonomy admission label or
-    # exact-head admission evidence. This leaves unrelated user requests alone.
-    if active_request is not None and (
-        "autonomy:admitted" in current_labels or has_admission_evidence
-    ):
+    # Only cancel requests explicitly marked as controller-managed.
+    # Admission evidence alone cannot distinguish a user request from ours.
+    if active_request is not None and "autonomy:admitted" in current_labels:
         disable(node_id)
         print(f"Disabled GitHub native auto-merge for PR #{number}; admission or hold conditions no longer pass.")
 
