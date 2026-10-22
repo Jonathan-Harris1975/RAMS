@@ -355,7 +355,14 @@ class TrustedAdmissionProofTests(unittest.TestCase):
         request.side_effect = [
             {"check_runs": [
                 {"id": 11, "app": {"slug": "other-app"}, "started_at": "2026-01-01T00:00:00Z"},
-                {"id": 12, "app": {"slug": "github-actions"}, "name": "Trusted autonomy admission", "head_sha": "b" * 40, "external_id": "trusted-autonomy-admission:18:" + "b" * 40, "started_at": "2026-01-02T00:00:00Z"},
+                {
+                    "id": 12,
+                    "app": {"slug": "github-actions"},
+                    "name": "Trusted autonomy admission",
+                    "head_sha": "b" * 40,
+                    "external_id": "trusted-autonomy-admission:18:" + "b" * 40,
+                    "started_at": "2026-01-02T00:00:00Z",
+                },
             ]},
             {},
         ]
@@ -389,6 +396,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
         pr = {"number": number, "head": {"sha": sha, "repo": {"full_name": "owner/repo"}}, "labels": [{"name": "autonomy:admitted"}]}
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "REPO", "owner/repo"),
             patch.object(automation, "_reconcile_pr_candidate"),
             patch.object(automation, "set_admission_check") as set_check,
             patch.object(automation, "remove_label") as remove_label,
@@ -409,6 +417,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
             automation.set_admission_check(number, sha, "success", "current trusted evidence passed")
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "REPO", "owner/repo"),
             patch.object(automation, "_reconcile_pr_candidate", side_effect=verified),
             patch.object(automation, "set_admission_check") as set_check,
             patch.object(automation, "remove_label") as remove_label,
