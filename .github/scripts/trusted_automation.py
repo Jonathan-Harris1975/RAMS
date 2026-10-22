@@ -997,7 +997,10 @@ def main() -> int:
     # Reconcile current trusted PRs. Runs admitted above will normally become ready on a later
     # workflow_run completion or scheduled reconciliation.
     for pr in open_prs:
-        reconcile_pr(pr)
+        try:
+            reconcile_pr(pr)
+        except Exception as exc:
+            log(f"Unable to reconcile PR #{pr.get('number')} ({type(exc).__name__}); continuing the sweep.")
     return 0
 
 
