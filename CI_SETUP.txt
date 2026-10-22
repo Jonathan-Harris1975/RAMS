@@ -3,7 +3,7 @@ RAMS CI setup
 Schedule
 - Authoritative RAMS weekend window uses Europe/London and is dispatched by weekend-phase-launcher.yml:
   - CI: Saturday 03:30-06:00.
-  - DAST: Saturday 18:00-20:00.
+  - DAST: monthly on the 1st at 18:00 Europe/London.
   - Repository Council: Sunday 08:30-11:00.
 - The launcher carries paired UTC cron expressions so the named local slots remain correct across BST/GMT changes.
 - Renovate has its own committed dependency schedule and remains independent of the CI/DAST/Council phase launcher.
