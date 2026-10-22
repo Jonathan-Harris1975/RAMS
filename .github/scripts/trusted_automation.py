@@ -813,7 +813,7 @@ def admit_manual_pr(pr: dict[str, Any]) -> None:
 
     labels = issue_labels(pr)
     blocking_labels = {
-        "autonomy:human-hold", RISK_APPROVAL_LABEL, "autonomy:council-freeze",
+        "autonomy:human-hold", "autonomy:council-freeze",
         "autonomy:superseded", "autonomy:obsolete", "do-not-merge",
         "do not merge", "hold", "needs-manual-review", "needs-human-review",
     }
@@ -917,11 +917,22 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     sha = str(pr.get("head", {}).get("sha", ""))
     key = (number, sha)
     VERIFIED_ADMISSION_HEADS.discard(key)
+    labels = issue_labels(pr)
+    preflight_attempted = False
     try:
-        if os.environ.get("ADMISSION_TOKEN") and re.fullmatch(r"[0-9a-f]{40}", sha):
+        if (
+            os.environ.get("ADMISSION_TOKEN")
+            and is_same_repo(pr)
+            and not pr.get("draft")
+            and re.fullmatch(r"[0-9a-f]{40}", sha)
+        ):
+            preflight_attempted = True
             set_admission_check(
-                number, sha, "failure",
+                number,
+                sha,
+                "failure",
                 "Trusted admission is being re-evaluated; merge remains blocked until current evidence passes.",
+                create_if_missing="autonomy:admitted" in labels,
             )
         _reconcile_pr_candidate(pr)
     finally:
@@ -932,13 +943,19 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
                 remove_label(number, "autonomy:admitted")
         elif key not in VERIFIED_ADMISSION_HEADS:
             try:
-                set_admission_check(
-                    number,
-                    sha,
-                    "failure",
-                    "Trusted automation did not verify this PR as eligible for autonomous merging. A label alone cannot grant admission.",
-                    create_if_missing="autonomy:admitted" in labels,
-                )
+                if (
+                    not preflight_attempted
+                    and is_same_repo(pr)
+                    and not pr.get("draft")
+                    and re.fullmatch(r"[0-9a-f]{40}", sha)
+                ):
+                    set_admission_check(
+                        number,
+                        sha,
+                        "failure",
+                        "Trusted automation did not verify this PR as eligible for autonomous merging. A label alone cannot grant admission.",
+                        create_if_missing="autonomy:admitted" in labels,
+                    )
             finally:
                 if "autonomy:admitted" in labels:
                     remove_label(number, "autonomy:admitted")
