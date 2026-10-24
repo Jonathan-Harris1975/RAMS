@@ -33,7 +33,7 @@ RUN set -eux; \
 # Debian publishes the fixed source before all architecture binaries. Build the
 # signed Debian security source for this image's architecture; do not suppress
 # the six HIGH findings in libexpat1 2.5.0-1+deb12u3.
-FROM python:3.14.8-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS expat-security
+FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS expat-security
 WORKDIR /security-build
 # hadolint ignore=DL3008,DL3009
 RUN printf '%s\n' 'deb-src [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://security.debian.org/debian-security bookworm-security main' > /etc/apt/sources.list.d/expat-security.list \
@@ -43,7 +43,7 @@ RUN printf '%s\n' 'deb-src [signed-by=/usr/share/keyrings/debian-archive-keyring
     && apt-get source --compile expat=2.5.0-1+deb12u5 \
     && test "$(dpkg-deb --field libexpat1_*.deb Version)" = '2.5.0-1+deb12u5'
 
-FROM python:3.14.8-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS builder
+FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS builder
 
 WORKDIR /build
 
@@ -66,7 +66,7 @@ RUN pip install --disable-pip-version-check --no-cache-dir \
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
 
-FROM python:3.14.8-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS runtime
+FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS runtime
 
 WORKDIR /app
 
