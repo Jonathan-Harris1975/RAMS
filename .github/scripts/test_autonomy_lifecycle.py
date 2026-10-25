@@ -322,7 +322,7 @@ class TrustedAdmissionProofTests(unittest.TestCase):
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
     def test_success_proof_is_created_for_exact_head(self, request):
-        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        request.side_effect = [{"check_runs": []}, {"id": 1}, [], {}]
         sha = "a" * 40
         self.assertTrue(
             admission_check.set_admission_check(17, sha, "success", "verified")
@@ -333,11 +333,19 @@ class TrustedAdmissionProofTests(unittest.TestCase):
         self.assertEqual(payload["head_sha"], sha)
         self.assertEqual(payload["name"], "Trusted autonomy admission")
         self.assertEqual(payload["conclusion"], "success")
+        status_get_method, status_get_path = request.call_args_list[2].args
+        self.assertEqual(status_get_method, "GET")
+        self.assertEqual(status_get_path, f"/repos/owner/repo/commits/{sha}/statuses?per_page=100")
+        status_method, status_path, status_payload = request.call_args_list[3].args
+        self.assertEqual(status_method, "POST")
+        self.assertEqual(status_path, f"/repos/owner/repo/statuses/{sha}")
+        self.assertEqual(status_payload["context"], "Trusted autonomy admission")
+        self.assertEqual(status_payload["state"], "success")
 
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
     def test_uppercase_head_sha_is_normalized_before_publication(self, request):
-        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        request.side_effect = [{"check_runs": []}, {"id": 1}, [], {}]
         sha = "A" * 40
         self.assertTrue(
             admission_check.set_admission_check(20, sha, "success", "verified")
@@ -365,6 +373,8 @@ class TrustedAdmissionProofTests(unittest.TestCase):
                 },
             ]},
             {},
+            [],
+            {},
         ]
         sha = "b" * 40
         self.assertTrue(
@@ -375,6 +385,14 @@ class TrustedAdmissionProofTests(unittest.TestCase):
         self.assertEqual(path, "/repos/owner/repo/check-runs/12")
         self.assertEqual(payload["head_sha"], sha)
         self.assertEqual(payload["conclusion"], "failure")
+        status_get_method, status_get_path = request.call_args_list[2].args
+        self.assertEqual(status_get_method, "GET")
+        self.assertEqual(status_get_path, f"/repos/owner/repo/commits/{sha}/statuses?per_page=100")
+        status_method, status_path, status_payload = request.call_args_list[3].args
+        self.assertEqual(status_method, "POST")
+        self.assertEqual(status_path, f"/repos/owner/repo/statuses/{sha}")
+        self.assertEqual(status_payload["context"], "Trusted autonomy admission")
+        self.assertEqual(status_payload["state"], "failure")
 
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
