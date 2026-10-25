@@ -16,7 +16,7 @@ RUN set -eux; \
     npm install --global --no-audit --no-fund npm@11.19.1; \
     test "$(npm --version)" = '11.19.1'; \
     npm_root="$(npm root -g)/npm/node_modules"; \
-    for spec in 'brace-expansion@5.0.12' 'undici@6.28.1'; do \
+    for spec in 'brace-expansion@5.0.12' 'undici@6.29.1'; do \
         pkg="${spec%@*}"; \
         work="$(mktemp -d)"; \
         npm pack --silent --pack-destination "$work" "$spec" >/dev/null; \
@@ -26,7 +26,7 @@ RUN set -eux; \
         rm -rf "${work:?}"; \
     done; \
     test "$(node -p "require('$npm_root/brace-expansion/package.json').version")" = '5.0.12'; \
-    test "$(node -p "require('$npm_root/undici/package.json').version")" = '6.28.1'; \
+    test "$(node -p "require('$npm_root/undici/package.json').version")" = '6.29.1'; \
     node -e "require('$npm_root/brace-expansion'); require('$npm_root/undici')"; \
     npm --version | grep -Fx '11.19.1'
 

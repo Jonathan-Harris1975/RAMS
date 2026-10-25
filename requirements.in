@@ -12,6 +12,9 @@ python-docx==1.2.0
 openpyxl==3.1.5
 beautifulsoup4==4.15.0
 headroom-ai==0.38.0
+# Keep the filelock vulnerability fix while selecting a LiteLLM release without a <4 constraint.
+filelock==4.2.1
+litellm==1.103.2
 # Tokenizers 0.23.2 requires huggingface-hub<2; keep the transitive hub
 # dependency pinned so lock regeneration cannot select an incompatible major.
 huggingface-hub==1.33.0
