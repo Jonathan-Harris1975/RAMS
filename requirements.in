@@ -15,6 +15,8 @@ headroom-ai==0.38.0
 # Keep the filelock vulnerability fix while selecting a LiteLLM release without a <4 constraint.
 filelock==4.2.1
 litellm==1.103.2
+# Apply the current upstream fix for CVE-2026-114603.
+opentelemetry-api==1.45.1
 # Tokenizers 0.23.2 requires huggingface-hub<2; keep the transitive hub
 # dependency pinned so lock regeneration cannot select an incompatible major.
 huggingface-hub==1.33.0
