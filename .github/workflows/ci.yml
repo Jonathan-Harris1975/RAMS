@@ -149,7 +149,7 @@ jobs:
       - name: Bandit security scan
         run: python -m bandit -q -r repo_mgmt -ll
       - name: Dependency audit
-        run: python -m pip_audit
+        run: python -m pip_audit --skip-editable
       - name: Exercise disposable branch rollback and recovery
         run: python scripts/disposable_live_branch_check.py
 
