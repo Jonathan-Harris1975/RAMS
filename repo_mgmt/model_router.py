@@ -8,6 +8,7 @@ secondary-model fallback.  No model request is made by :meth:`warmup`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import random
 import threading
@@ -869,6 +870,13 @@ class ModelRouter:
             raise ModelError(
                 f"Unexpected response shape from {requested_model}: {exc}"
             ) from exc
+        if not getattr(self, "_credential_logged", False):
+            fingerprint = hashlib.sha256(self._api_key.encode("utf-8")).hexdigest()[:12]
+            logger.info(
+                "ai.credential.verified repo=RAMS provider=openrouter key_env=OPENROUTER_API_KEY fingerprint=%s status=used-successfully",
+                fingerprint,
+            )
+            self._credential_logged = True
         self._record_usage(data, requested_model, duration)
         return content
 
