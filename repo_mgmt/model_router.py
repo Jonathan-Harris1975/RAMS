@@ -890,7 +890,7 @@ class ModelRouter:
             else "OPENROUTER_API_KEY"
         )
         credential_source = f"{route_name}:{key_env}"
-        logged_sources = getattr(self, "_logged_credential_sources", set())
+        logged_sources: set[str] = getattr(self, "_logged_credential_sources", set())
         if credential_source not in logged_sources:
             logged_sources.add(credential_source)
             self._logged_credential_sources = logged_sources
