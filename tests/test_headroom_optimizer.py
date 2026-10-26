@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -50,7 +51,8 @@ def test_oversize_context_passthrough(settings) -> None:
     assert outcome.skipped_reason == "oversize"
 
 
-def test_compression_preserves_system_and_records_savings(settings) -> None:
+def test_compression_preserves_system_and_records_savings(settings, caplog) -> None:
+    caplog.set_level(logging.INFO, logger="repo_mgmt.headroom_optimizer")
     optimizer = HeadroomOptimizer(settings)
     calls: list[dict[str, Any]] = []
 
@@ -71,6 +73,7 @@ def test_compression_preserves_system_and_records_savings(settings) -> None:
     outcome = optimizer.optimise(_messages(), model="openai/test")
 
     assert outcome.compressed is True
+    assert "headroom.inline_verified status=responded model=openai/test" in caplog.text
     assert outcome.tokens_saved == 360
     assert outcome.messages[0]["content"] == "Keep this instruction byte-for-byte."
     assert outcome.transforms == ("smartcrusher",)
