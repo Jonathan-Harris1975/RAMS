@@ -492,7 +492,9 @@ class ModelRouter:
                 response = self._get_sync_client().post(
                     url, headers=route_headers, json=route_payload
                 )
-                result = self._parse_response(response, model, time.monotonic() - started)
+                result = self._parse_response(
+                    response, model, time.monotonic() - started, route_name=route_name
+                )
                 self._record_context_route(route_name, success=True)
                 return result
             except (httpx.TimeoutException, httpx.RequestError) as exc:
@@ -842,7 +844,12 @@ class ModelRouter:
             )
 
     def _parse_response(
-        self, response: httpx.Response, requested_model: str, duration: float
+        self,
+        response: httpx.Response,
+        requested_model: str,
+        duration: float,
+        *,
+        route_name: str = "openrouter",
     ) -> str:
         if response.status_code in _RETRY_STATUSES:
             raise ModelError(
@@ -869,11 +876,29 @@ class ModelRouter:
             raise ModelError(
                 f"Unexpected response shape from {requested_model}: {exc}"
             ) from exc
-        if not getattr(self, "_credential_logged", False):
+        route_credentials = {
+            "leanctx": ("RMS_LEANCTX_API_KEY", self._cfg.rms_leanctx_api_key),
+            "context_gateway": (
+                "RMS_CONTEXT_GATEWAY_API_KEY",
+                self._cfg.rms_context_gateway_api_key,
+            ),
+        }
+        configured = route_credentials.get(route_name)
+        key_env = (
+            configured[0]
+            if configured and configured[1]
+            else "OPENROUTER_API_KEY"
+        )
+        credential_source = f"{route_name}:{key_env}"
+        logged_sources = getattr(self, "_logged_credential_sources", set())
+        if credential_source not in logged_sources:
+            logged_sources.add(credential_source)
+            self._logged_credential_sources = logged_sources
             logger.info(
-                "ai.credential.verified repo=RAMS provider=openrouter key_env=OPENROUTER_API_KEY status=used-successfully"
+                "ai.credential.verified repo=RAMS route=%s key_env=%s status=used-successfully",
+                route_name,
+                key_env,
             )
-            self._credential_logged = True
         self._record_usage(data, requested_model, duration)
         return content
 
