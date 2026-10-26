@@ -108,12 +108,21 @@ def merge_method() -> str:
     raise RuntimeError(f"Repository {REPO} allows no GitHub merge method")
 
 
-def enable(pr_node_id: str) -> None:
+def enable(pr_node_id: str) -> bool:
     method = merge_method()
-    graphql(
-        "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: " + method + "}) { pullRequest { number } } }",
-        {"id": pr_node_id},
-    )
+    try:
+        graphql(
+            "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: " + method + "}) { pullRequest { number } } }",
+            {"id": pr_node_id},
+        )
+    except RuntimeError as exc:
+        # GitHub can briefly report an otherwise mergeable PR as unstable while
+        # required checks settle. Let a later trusted reconciliation retry.
+        if "in unstable status" in str(exc):
+            print("GitHub reports an unstable PR status; deferring native auto-merge until a later reconciliation.")
+            return False
+        raise
+    return True
 
 
 def disable(pr_node_id: str) -> None:
@@ -157,8 +166,10 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
 
     if eligible:
         if active_request is None:
-            enable(node_id)
-            print(f"Enabled GitHub native auto-merge for admitted PR #{number} at {sha}.")
+            if enable(node_id):
+                print(f"Enabled GitHub native auto-merge for admitted PR #{number} at {sha}.")
+            else:
+                print(f"Deferred GitHub native auto-merge for admitted PR #{number} at {sha}; checks are still settling.")
         return
 
     # Only cancel requests explicitly marked as controller-managed.
