@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 import math
 from typing import Any
@@ -12,6 +15,19 @@ from repo_mgmt.model_policy import (
     is_premium_model,
     premium_approval_is_active,
 )
+
+_review_cache: ContextVar[dict[str, dict[str, Any]] | None] = ContextVar("council_review_cache", default=None)
+
+
+@contextmanager
+def council_review_scope():
+    """Reuse completed approvals only within one exact task's bounded meetings."""
+    token = _review_cache.set({})
+    try:
+        yield
+    finally:
+        _review_cache.reset(token)
+
 
 SEATS = (
     "Issue Verifier",
@@ -95,9 +111,14 @@ async def _review(
     *,
     justification_id: str | None = None,
 ) -> dict[str, Any]:
+    prompt = _payload(issue, patch, role)
+    key = json.dumps([model, governance_role, SYSTEM, prompt, justification_id])
+    cache = _review_cache.get()
+    if cache is not None and key in cache:
+        return {**copy.deepcopy(cache[key]), "reused": True}
     raw = await router.complete_with_model_async(
         model,
-        _payload(issue, patch, role),
+        prompt,
         SYSTEM,
         max_tokens=1400,
         json_mode=True,
@@ -105,7 +126,10 @@ async def _review(
         governance_role=governance_role,
         justification_id=justification_id,
     )
-    return {"role": role, "model": model, **_parse(raw)}
+    result = {"role": role, "model": model, **_parse(raw)}
+    if cache is not None and result["decision"] == "approve":
+        cache[key] = copy.deepcopy(result)
+    return result
 
 
 def _manual(reason: str, reviews: list[dict[str, Any]], route: str) -> dict[str, Any]:
@@ -175,14 +199,19 @@ async def run_engineering_council(
     review_margin = math.ceil(review_threshold * tolerance_percent / 100)
     effective_review_threshold = max(0, review_threshold - review_margin)
     try:
-        reviews = list(
+        results = list(
             await asyncio.gather(
                 *[
                     _review(router, model, role, governance_role, issue, patch)
                     for model, role, governance_role in standard_reviews
-                ]
+                ],
+                return_exceptions=True,
             )
         )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        reviews = [result for result in results if isinstance(result, dict)]
 
         confident_rejection = any(
             review["decision"] == "reject" and review["confidence"] >= review_threshold

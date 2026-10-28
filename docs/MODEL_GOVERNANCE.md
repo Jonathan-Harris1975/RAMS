@@ -49,7 +49,7 @@ claim that a new model has passed an evaluation or alter production credentials.
 
 2. **Use the current OpenRouter check as the baseline, not a permanent allow-list.**
 
-   The public catalogue check on 16 October 2026 supports this conservative starting route. Prices are public list prices and may change; HIVE must use the account-filtered model list and current evaluation data before it submits assignments:
+   The following 16 October 2026 catalogue baseline is historical; the 28 October shared-recovery package below supersedes its default role assignments. Prices are public list prices and may change; HIVE must use the account-filtered model list and current evaluation data before it submits assignments:
 
    | RAMS role | Baseline model | Current input/output price per 1M tokens | Reason |
    |---|---|---:|---|
@@ -266,3 +266,23 @@ claim that a new model has passed an evaluation or alter production credentials.
     that an unapproved premium call fails before any OpenRouter request. The release gate is complete
     only when the model assignment, evaluation evidence and runtime usage all refer to the same HIVE
     council run ID.
+
+### Targeted task recovery and council reuse (2026-10-28)
+
+Task planning uses the explicit Sonnet secondary role instead of starting on the
+Sol primary role. Triage defaults to Luna; self-improvement retains its governed
+Luna -> Sonnet -> Sol ladder and unchanged-patch duplicate suppression.
+The default engineering architect is Sonnet and specialist is Luna. Ambiguous
+cases can reach a narrowly scoped Sol chair; premium-role approval controls are
+still enforced if governance classifies any assignment as premium.
+
+One task shares two technical recoveries across planner JSON repair, transport
+retry/fallback, JSON-mode relaxation and a second council meeting. Exhaustion
+returns failure/manual review and cannot approve a patch. A second council is
+still technical-failure-only. Completed approving seats are reused only inside
+that task's council retry scope, keyed by exact model, role, system prompt,
+issue evidence, patch and justification. Changed patches/evidence rerun review;
+failed requests and rejection responses are not cached. All parallel seats finish
+before a technical meeting failure is retried, preserving completed evidence.
+Existing deterministic patch validation and transactional rollback remain required.
+Environment/HIVE governance assignments can override committed model defaults.
