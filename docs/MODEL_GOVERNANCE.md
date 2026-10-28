@@ -1,5 +1,15 @@
 # RAMS LLM model-selection governance plan
 
+## Repeated self-review — 28 October 2026
+
+Within one self-improvement run, a model that has already returned a valid review
+of the unchanged candidate is not called again just because another role resolves
+to that same model ID. Changed candidates are reviewed again, and failed or
+malformed responses do not suppress later attempts. Duplicate skips never count
+as acceptance; the existing threshold, deterministic validation and engineering
+council remain in force. The memo is local to the run and stores no data outside
+the process. This reduces redundant calls without promoting a new model.
+
 ## Economy selection adjustment — 28 October 2026
 
 Triage selection now compares successful-task costs across its eligible registry

@@ -149,3 +149,43 @@ async def test_exhausts_three_loops_then_requires_council(tmp_path: Path) -> Non
         "provider/standard",
         "provider/strong",
     ]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_model_skips_unchanged_review_and_still_escalates(tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<title>Old</title>", encoding="utf-8")
+    router = FakeRouter([_response("improve", 70), _response("accept", 84)])
+    result = await run_self_improvement(
+        _issue(), _patch(), tmp_path, "on-brand",
+        _settings(openrouter_secondary_model="provider/fast"), router,
+    )
+    assert [call["model"] for call in router.calls] == ["provider/fast", "provider/strong"]
+    assert result["loops"][1]["decision"] == "skipped_duplicate_model"
+    assert result["accepted"] is False
+    assert result["decision"] == "escalate_to_council"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_model_rechecks_changed_candidate(tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<title>Old</title>", encoding="utf-8")
+    improved = _patch("<title>Better</title>")
+    router = FakeRouter([_response("improve", 70, improved), _response("accept", 92, improved)])
+    result = await run_self_improvement(
+        _issue(), _patch(), tmp_path, "on-brand",
+        _settings(openrouter_secondary_model="provider/fast"), router,
+    )
+    assert len(router.calls) == 2
+    assert result["accepted"] is True
+    assert result["patch"] == improved
+
+
+@pytest.mark.asyncio
+async def test_failed_review_does_not_suppress_retry_through_same_model(tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<title>Old</title>", encoding="utf-8")
+    router = FakeRouter(["invalid JSON", _response("accept", 92)])
+    result = await run_self_improvement(
+        _issue(), _patch(), tmp_path, "on-brand",
+        _settings(openrouter_secondary_model="provider/fast"), router,
+    )
+    assert len(router.calls) == 2
+    assert result["accepted"] is True

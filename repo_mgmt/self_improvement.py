@@ -172,6 +172,7 @@ async def run_self_improvement(
     )
     task_id = str(issue.get("taskId", "<unknown>"))
     loop_reports: list[dict[str, Any]] = []
+    reviewed_inputs: set[tuple[str, str]] = set()
 
     for iteration, role_entry in enumerate(_ROLE_LADDER[:max_loops], start=1):
         role, governance_role, model = _role_model(cfg, role_entry)
@@ -184,6 +185,19 @@ async def run_self_improvement(
         }
         if not model:
             report.update(decision="error", confidence=0, reason="configured model is empty")
+            loop_reports.append(report)
+            continue
+
+        # Role aliases can resolve to the same model. Iteration alone supplies
+        # no new evidence, so do not buy the same completed review twice.
+        # Changed patches and failed requests remain eligible for another call.
+        review_key = (model, json.dumps(candidate, sort_keys=True, ensure_ascii=False))
+        if review_key in reviewed_inputs:
+            report.update(
+                decision="skipped_duplicate_model", confidence=0,
+                reason="same model already reviewed this unchanged candidate",
+                candidateChanged=False,
+            )
             loop_reports.append(report)
             continue
 
@@ -204,6 +218,7 @@ async def run_self_improvement(
                 affected_paths=affected_paths,
                 pipeline_id=pipeline_id,
             )
+            reviewed_inputs.add(review_key)
             previous = candidate
             candidate = parsed["patch"]
             accepted = parsed["decision"] == "accept" and parsed["confidence"] >= threshold
