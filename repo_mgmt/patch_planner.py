@@ -161,7 +161,7 @@ async def plan_async(
 def _complete_for_plan(model_router: "ModelRouter", prompt: str, system: str, settings=None) -> str:
     """Call a router for patch planning, requesting JSON mode when supported."""
     explicit = getattr(model_router, "complete_with_model", None)
-    if settings is not None and callable(getattr(type(model_router), "complete_with_model", None)):
+    if settings is not None and callable(explicit) and callable(getattr(type(model_router), "complete_with_model", None)):
         try:
             return str(explicit(settings.openrouter_secondary_model, prompt, system,
                                 max_tokens=4096, json_mode=True, governance_role="OPENROUTER_SECONDARY_MODEL"))
@@ -193,7 +193,7 @@ async def _complete_for_plan_async(
 ) -> str:
     """Async variant of _complete_for_plan with a sync-router fallback."""
     explicit = getattr(model_router, "complete_with_model_async", None)
-    if settings is not None and inspect.iscoroutinefunction(getattr(type(model_router), "complete_with_model_async", None)):
+    if settings is not None and callable(explicit) and inspect.iscoroutinefunction(getattr(type(model_router), "complete_with_model_async", None)):
         try:
             return str(await explicit(settings.openrouter_secondary_model, prompt, system,
                                       max_tokens=4096, json_mode=True, governance_role="OPENROUTER_SECONDARY_MODEL"))
