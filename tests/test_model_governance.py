@@ -72,6 +72,28 @@ def test_legacy_score_only_registry_remains_compatible() -> None:
     assert assignments["OPENROUTER_TRIAGE_MODEL"] == "provider/triage"
 
 
+def test_triage_compares_evaluated_cost_across_eligible_categories() -> None:
+    def candidate(model_id: str, cost: float, **extra: object) -> dict[str, object]:
+        return {
+            "model_id": model_id, "score": 0.95, "available": True,
+            "evaluation_passed": True, "evaluation_sample_size": 50,
+            "evaluation_evidence": "eval://rams/triage", "approved_roles": ["triage"],
+            "cost_per_successful_task": cost, **extra,
+        }
+
+    registry = {
+        "fast": [candidate("provider/fast", 0.05)],
+        "cheap": [candidate("provider/economy", 0.01)],
+        "reasoning": [candidate("provider/unapproved", 0.001, approved_roles=["primary"])],
+    }
+    assert build_rams_model_assignments(registry)["OPENROUTER_TRIAGE_MODEL"] == "provider/economy"
+    registry["cheap"][0]["evaluation_evidence"] = ""
+    assert build_rams_model_assignments(registry)["OPENROUTER_TRIAGE_MODEL"] == "provider/fast"
+    registry["cheap"][0]["evaluation_evidence"] = "eval://rams/triage"
+    registry["cheap"][0]["available"] = False
+    assert build_rams_model_assignments(registry)["OPENROUTER_TRIAGE_MODEL"] == "provider/fast"
+
+
 @pytest.mark.parametrize(
     ("metadata", "excluded"),
     [
