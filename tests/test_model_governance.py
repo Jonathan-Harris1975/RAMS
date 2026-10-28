@@ -94,6 +94,30 @@ def test_triage_compares_evaluated_cost_across_eligible_categories() -> None:
     assert build_rams_model_assignments(registry)["OPENROUTER_TRIAGE_MODEL"] == "provider/fast"
 
 
+def test_triage_tie_break_is_deterministic_when_costs_are_equal() -> None:
+    def candidate(model_id: str, cost: float, score: float = 0.95) -> dict[str, object]:
+        return {
+            "model_id": model_id, "score": score, "available": True,
+            "evaluation_passed": True, "evaluation_sample_size": 50,
+            "evaluation_evidence": "eval://rams/triage", "approved_roles": ["triage"],
+            "cost_per_successful_task": cost,
+        }
+
+    # Equal cost must not leave selection to dict iteration order; the
+    # higher-scoring, higher-reliability candidate wins, then model id.
+    registry = {
+        "cheap": [candidate("provider/economy", 0.01, score=0.90)],
+        "fast": [candidate("provider/fast", 0.01, score=0.95)],
+    }
+    assert build_rams_model_assignments(registry)["OPENROUTER_TRIAGE_MODEL"] == "provider/fast"
+
+    registry = {
+        "cheap": [candidate("provider/zeta", 0.01, score=0.95)],
+        "fast": [candidate("provider/alpha", 0.01, score=0.95)],
+    }
+    assert build_rams_model_assignments(registry)["OPENROUTER_TRIAGE_MODEL"] == "provider/alpha"
+
+
 @pytest.mark.parametrize(
     ("metadata", "excluded"),
     [
