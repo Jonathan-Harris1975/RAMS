@@ -275,6 +275,22 @@ def _first_selection(
     exclude: frozenset[str] = frozenset(),
     now: datetime,
 ) -> dict[str, object] | None:
+    if role == "triage":
+        # Category order is a legacy fallback, not a reason to ignore a cheaper
+        # candidate explicitly evaluated and approved for this same role.
+        evaluated: list[dict[str, object]] = []
+        for category in categories:
+            for item in _ranked_models(registry, category, role=role, now=now):
+                if (
+                    _model_id(item) not in exclude
+                    and _has_passing_task_evaluation(item)
+                    and _optional_bool(item.get("available")) is True
+                    and item.get("approved_roles", item.get("roles")) is not None
+                    and _estimated_task_cost(item) is not None
+                ):
+                    evaluated.append(item)
+        if evaluated:
+            return min(evaluated, key=lambda item: _estimated_task_cost(item) or 0.0)
     for category in categories:
         for item in _ranked_models(registry, category, role=role, now=now):
             if _model_id(item) not in exclude:

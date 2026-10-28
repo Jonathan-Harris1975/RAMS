@@ -1,5 +1,15 @@
 # RAMS LLM model-selection governance plan
 
+## Economy selection adjustment — 28 October 2026
+
+Triage selection now compares successful-task costs across its eligible registry
+categories when candidates have passing evaluation evidence, positive sample
+size, explicit role approval and confirmed availability. Existing privacy,
+retirement and role filters still apply. Without that evidence the existing
+category/rank order remains in force. Primary patch planning, independent council
+reviewers and expert adjudication defaults are unchanged. This change does not
+claim that a new model has passed an evaluation or alter production credentials.
+
 **Owner:** HIVE AI Council with the RAMS service owner  
 **Review cadence:** Monthly and immediately after a provider retirement notice  
 **Last public OpenRouter catalogue check:** 16 October 2026  
