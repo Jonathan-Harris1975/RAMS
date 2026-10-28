@@ -290,7 +290,15 @@ def _first_selection(
                 ):
                     evaluated.append(item)
         if evaluated:
-            return min(evaluated, key=lambda item: _estimated_task_cost(item) or 0.0)
+            return sorted(
+                evaluated,
+                key=lambda item: (
+                    _estimated_task_cost(item) or 0.0,
+                    -_score(item),
+                    -_reliability_score(item),
+                    _model_id(item),
+                ),
+            )[0]
     for category in categories:
         for item in _ranked_models(registry, category, role=role, now=now):
             if _model_id(item) not in exclude:
