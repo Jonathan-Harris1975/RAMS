@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from repo_mgmt.task_budget import claim_recovery
+
 import asyncio
 import inspect
 import json
@@ -99,7 +101,7 @@ def plan(
     task_id, affected_paths, prompt = _prepare_plan_inputs(
         issue, target_repo, pipeline_id, settings
     )
-    raw = _complete_for_plan(model_router, prompt, SYSTEM_PROMPT)
+    raw = _complete_for_plan(model_router, prompt, SYSTEM_PROMPT, settings)
     try:
         patch_doc = _parse_plan(raw, task_id)
     except PatchPlanError as first_err:
@@ -108,8 +110,9 @@ def plan(
             task_id,
             first_err,
         )
+        claim_recovery()
         repair_prompt = _build_repair_prompt(prompt, raw, str(first_err))
-        repaired = _complete_for_plan(model_router, repair_prompt, REPAIR_SYSTEM_PROMPT)
+        repaired = _complete_for_plan(model_router, repair_prompt, REPAIR_SYSTEM_PROMPT, settings)
         try:
             patch_doc = _parse_plan(repaired, task_id)
         except PatchPlanError as second_err:
@@ -131,7 +134,7 @@ async def plan_async(
     task_id, affected_paths, prompt = _prepare_plan_inputs(
         issue, target_repo, pipeline_id, settings
     )
-    raw = await _complete_for_plan_async(model_router, prompt, SYSTEM_PROMPT)
+    raw = await _complete_for_plan_async(model_router, prompt, SYSTEM_PROMPT, settings)
     try:
         patch_doc = _parse_plan(raw, task_id)
     except PatchPlanError as first_err:
@@ -140,9 +143,10 @@ async def plan_async(
             task_id,
             first_err,
         )
+        claim_recovery()
         repair_prompt = _build_repair_prompt(prompt, raw, str(first_err))
         repaired = await _complete_for_plan_async(
-            model_router, repair_prompt, REPAIR_SYSTEM_PROMPT
+            model_router, repair_prompt, REPAIR_SYSTEM_PROMPT, settings
         )
         try:
             patch_doc = _parse_plan(repaired, task_id)
@@ -154,8 +158,15 @@ async def plan_async(
     return patch_doc
 
 
-def _complete_for_plan(model_router: "ModelRouter", prompt: str, system: str) -> str:
+def _complete_for_plan(model_router: "ModelRouter", prompt: str, system: str, settings=None) -> str:
     """Call a router for patch planning, requesting JSON mode when supported."""
+    explicit = getattr(model_router, "complete_with_model", None)
+    if settings is not None and callable(explicit) and callable(getattr(type(model_router), "complete_with_model", None)):
+        try:
+            return str(explicit(settings.openrouter_secondary_model, prompt, system,
+                                max_tokens=4096, json_mode=True, governance_role="OPENROUTER_SECONDARY_MODEL"))
+        except Exception as exc:
+            raise PatchPlanError(f"LLM call failed: {exc}") from exc
     try:
         return str(
             model_router.complete(
@@ -178,9 +189,16 @@ def _complete_for_plan(model_router: "ModelRouter", prompt: str, system: str) ->
 
 
 async def _complete_for_plan_async(
-    model_router: "ModelRouter", prompt: str, system: str
+    model_router: "ModelRouter", prompt: str, system: str, settings=None
 ) -> str:
     """Async variant of _complete_for_plan with a sync-router fallback."""
+    explicit = getattr(model_router, "complete_with_model_async", None)
+    if settings is not None and callable(explicit) and inspect.iscoroutinefunction(getattr(type(model_router), "complete_with_model_async", None)):
+        try:
+            return str(await explicit(settings.openrouter_secondary_model, prompt, system,
+                                      max_tokens=4096, json_mode=True, governance_role="OPENROUTER_SECONDARY_MODEL"))
+        except Exception as exc:
+            raise PatchPlanError(f"LLM call failed: {exc}") from exc
     try:
         complete_async = getattr(model_router, "complete_async", None)
         if inspect.iscoroutinefunction(complete_async):

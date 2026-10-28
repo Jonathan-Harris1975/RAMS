@@ -149,3 +149,36 @@ async def test_near_threshold_standard_approval_is_accepted() -> None:
     assert result["threshold"] == 85
     assert result["effectiveThreshold"] == 80
     assert len(router.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_retry_reuses_only_completed_approval_and_changed_patch_invalidates():
+    from repo_mgmt.engineering_council import council_review_scope
+
+    cfg = _settings()
+    calls = []
+    fail_specialist = True
+
+    class PartialRouter:
+        async def complete_with_model_async(self, model, prompt, system, **kwargs):
+            nonlocal fail_specialist
+            role = json.loads(prompt)["role"]
+            calls.append(role)
+            if role.startswith("Security") and fail_specialist:
+                fail_specialist = False
+                raise RuntimeError("transient specialist failure")
+            return _response("approve", 95)
+
+    router = PartialRouter()
+    with council_review_scope():
+        first = await run_engineering_council({}, {"changes": []}, cfg, router)
+        assert first["route"] == "council-failure"
+        second = await run_engineering_council({}, {"changes": []}, cfg, router)
+        assert second["decision"] == "approve_micro_surgery"
+        assert len(calls) == 3
+        assert second["reviews"][0]["reused"] is True
+        await run_engineering_council({}, {"changes": ["different"]}, cfg, router)
+        assert len(calls) == 5
+    with council_review_scope():
+        await run_engineering_council({}, {"changes": []}, cfg, router)
+    assert len(calls) == 7

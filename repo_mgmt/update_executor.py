@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from repo_mgmt.task_budget import task_recovery_scope, claim_recovery, recovery_budget_snapshot
 
 import logging
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from repo_mgmt import patch_applier, patch_planner, self_improvement, validation_runner
 from repo_mgmt.automation_gate import evaluate_phase4c_auto_pr_gate
-from repo_mgmt.engineering_council import run_engineering_council
+from repo_mgmt.engineering_council import council_review_scope, run_engineering_council
 from repo_mgmt.git_manager import TaskRepoSnapshot
 from repo_mgmt.patch_protocol import (
     PathTraversalError,
@@ -135,17 +136,25 @@ async def _run_council_bounded(
         "route": "not-run",
         "reason": "engineering council did not run",
     }
-    for run_number in range(1, max_runs + 1):
-        result = await run_engineering_council(task, patch_doc, cfg, model_router)
-        runs.append({"run": run_number, **result})
-        if result.get("decision") == "approve_micro_surgery":
-            break
-        if result.get("route") != "council-failure":
-            break
+    with council_review_scope():
+        for run_number in range(1, max_runs + 1):
+            if run_number > 1:
+                try:
+                    claim_recovery()
+                except RuntimeError as exc:
+                    result = {"decision": "manual_review", "route": "budget-exhausted", "reason": str(exc)}
+                    break
+            result = await run_engineering_council(task, patch_doc, cfg, model_router)
+            runs.append({"run": run_number, **result})
+            if result.get("decision") == "approve_micro_surgery":
+                break
+            if result.get("route") != "council-failure":
+                break
+
     return result, runs
 
 
-async def run_task(
+async def _run_task(
     issue: dict[str, Any],
     target_repo: Path,
     pipeline_id: "PipelineId",
@@ -384,3 +393,10 @@ async def run_task(
         task["error"] = str(exc)
         task["evidence"] = task.get("evidence", []) + [str(exc)]
     return task
+
+
+async def run_task(*args, **kwargs):
+    with task_recovery_scope():
+        result = await _run_task(*args, **kwargs)
+        result["modelRecoveryBudget"] = recovery_budget_snapshot()
+        return result

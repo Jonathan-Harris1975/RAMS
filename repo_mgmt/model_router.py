@@ -12,6 +12,8 @@ import logging
 import random
 import threading
 import time
+from repo_mgmt.task_budget import claim_recovery
+
 from collections.abc import Mapping
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any
@@ -220,6 +222,7 @@ class ModelRouter:
         except ModelError as first_err:
             if not first_err.retryable:
                 raise
+            claim_recovery()
             self._mark_fallback()
             logger.warning("model_router: primary failed retryably; using secondary")
         secondary_tokens = min(max_tokens, self._cfg.rms_secondary_max_tokens)
@@ -263,6 +266,7 @@ class ModelRouter:
         except ModelError as first_err:
             if not first_err.retryable:
                 raise
+            claim_recovery()
             self._mark_fallback()
             logger.warning("model_router: primary failed retryably; using secondary")
         secondary_tokens = min(max_tokens, self._cfg.rms_secondary_max_tokens)
@@ -295,6 +299,13 @@ class ModelRouter:
             False,
             self._cfg.rms_triage_temperature,
         )
+
+    def complete_with_model(
+        self, model: str, prompt: str, system: str = "", max_tokens: int = 4096,
+        json_mode: bool = False, governance_role: str | None = None,
+    ) -> str:
+        self._require_premium_approval(model, governance_role or "")
+        return self._complete_model_sync(model, prompt, system, min(max_tokens, 4096), json_mode, 0.0)
 
     async def complete_with_model_async(
         self,
@@ -383,6 +394,7 @@ class ModelRouter:
             )
         except ModelError as exc:
             if json_mode and _json_mode_unsupported(exc):
+                claim_recovery()
                 self._mark_json_recovery()
                 logger.warning(
                     "model_router: JSON mode rejected; retrying same model without it"
@@ -407,6 +419,7 @@ class ModelRouter:
             )
         except ModelError as exc:
             if json_mode and _json_mode_unsupported(exc):
+                claim_recovery()
                 self._mark_json_recovery()
                 logger.warning(
                     "model_router: JSON mode rejected; retrying same model without it"
@@ -428,6 +441,8 @@ class ModelRouter:
         attempts = self._cfg.rms_openrouter_max_retries + 1
         last_error: ModelError | None = None
         for attempt in range(attempts):
+            if attempt:
+                claim_recovery()
             try:
                 return self._call_sync(
                     model, prompt, system, max_tokens, json_mode, temperature
@@ -451,6 +466,8 @@ class ModelRouter:
         attempts = self._cfg.rms_openrouter_max_retries + 1
         last_error: ModelError | None = None
         for attempt in range(attempts):
+            if attempt:
+                claim_recovery()
             try:
                 return await self._call_async(
                     model, prompt, system, max_tokens, json_mode, temperature

@@ -242,7 +242,7 @@ def test_default_model_route_uses_cost_effective_standard_models() -> None:
     with patch.dict(os.environ, env, clear=True):
         cfg = Settings()
     assert cfg.openrouter_primary_model == "openai/gpt-5.6-sol"
-    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5"
+    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5.5"
 
 
 def test_headroom_protect_recent_defaults_to_one_and_accepts_override() -> None:
