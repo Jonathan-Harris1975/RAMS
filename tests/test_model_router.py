@@ -223,12 +223,11 @@ def test_both_models_failure_reports_last_model_status(settings) -> None:
     assert router.usage_summary()["fallbacks"] == 1
 
 
-def test_unapproved_premium_primary_is_refused_before_request(settings) -> None:
-    settings.openrouter_primary_model = "anthropic/claude-opus-5"
+def test_unconfigured_premium_override_is_refused_before_request(settings) -> None:
     router, client = _router_with_sync(settings, [_success("must-not-run")])
 
     with pytest.raises(ModelError, match="active governance justification"):
-        router.complete("prompt")
+        router.complete_with_model("anthropic/claude-opus-5", "prompt", governance_role="OPENROUTER_PRIMARY_MODEL")
 
     assert client.calls == []
 
@@ -247,8 +246,7 @@ def test_governed_premium_primary_is_allowed_and_counted(settings) -> None:
     assert router.usage_summary()["premiumRequests"] == 1
 
 
-def test_expired_premium_approval_is_refused_before_request(settings) -> None:
-    settings.openrouter_primary_model = "anthropic/claude-opus-5"
+def test_expired_premium_approval_for_unconfigured_override_is_refused_before_request(settings) -> None:
     settings.rms_model_governance_premium_approvals = {
         "OPENROUTER_PRIMARY_MODEL": "approval-1"
     }
@@ -258,7 +256,7 @@ def test_expired_premium_approval_is_refused_before_request(settings) -> None:
     router, client = _router_with_sync(settings, [_success("must-not-run")])
 
     with pytest.raises(ModelError, match="justification is expired"):
-        router.complete("prompt")
+        router.complete_with_model("anthropic/claude-opus-5", "prompt", governance_role="OPENROUTER_PRIMARY_MODEL")
 
     assert client.calls == []
 

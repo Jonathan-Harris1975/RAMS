@@ -8,7 +8,7 @@ RAMS accepts governed audit evidence, turns eligible findings into tightly bound
 
 The main application surface is `repo_mgmt/api.py`, with CLI/direct execution support in `repo_mgmt/cli.py` and pipeline orchestration in `repo_mgmt/pipeline.py`. Repository bootstrap/indexing, issue normalisation, patch planning/application, validation, report publication, model governance and operational controls are split into focused modules under `repo_mgmt/`.
 
-Cloudflare R2 is the authenticated persistence layer for governed audit inputs, RAMS reports, selected operational evidence and persisted model-governance state. Target source repositories remain Git repositories; R2 is not used as a source-code store.
+Cloudflare R2 is the authenticated persistence layer for governed audit inputs, RAMS reports, selected operational evidence and pinned model-default configuration. Target source repositories remain Git repositories; R2 is not used as a source-code store.
 
 The historical in-process cron scheduler is intentionally retired. `repo_mgmt/scheduler.py` exists only as a compatibility guard and raises if code attempts to create an in-process scheduler. Production triggers work externally through `POST /rebuild/{pipeline_id}/run`.
 
@@ -50,7 +50,7 @@ Never put live credentials in repository examples, logs, API responses or test f
 
 `/health` and `/livez` remain process-liveness checks. R2 endpoint, credential, permission, network or bucket failures cause authenticated readiness/operational checks to report a degraded state rather than taking liveness down.
 
-R2 SDK/transport failures are translated to the domain-specific `R2Error`. Error text is reduced to a credential-safe exception/code/status summary rather than raw provider messages. Object-not-found codes remain distinguishable where callers need 404 behaviour. Bounded read paths use `get_object_limited()` and reject objects that exceed configured limits; response streams are closed on success and failure. Production report, audit-evidence and persisted model-governance reads use bounded paths. Compatibility fallbacks retained for older test/double interfaces apply their own post-read limit where relevant.
+R2 SDK/transport failures are translated to the domain-specific `R2Error`. Error text is reduced to a credential-safe exception/code/status summary rather than raw provider messages. Object-not-found codes remain distinguishable where callers need 404 behaviour. Bounded read paths use `get_object_limited()` and reject objects that exceed configured limits; response streams are closed on success and failure. Production report, audit-evidence and pinned model-default reads use bounded paths. Compatibility fallbacks retained for older test/double interfaces apply their own post-read limit where relevant.
 
 ## Main endpoints
 
@@ -60,7 +60,6 @@ R2 SDK/transport failures are translated to the domain-specific `R2Error`. Error
 | `GET /readiness` / `/readyz` | Bearer | dependency/repository/admission readiness |
 | `GET /ops/warmup` | Bearer | local warm-up without repository mutation or external work |
 | `GET /ops/excellence` | Bearer | production controls/evidence |
-| `POST /ops/model-governance/apply` | Bearer | validate, persist and activate HIVE model selections |
 | `GET /reports/*` | Bearer | bounded report access |
 | `POST /rebuild/{pipeline_id}/run` | Bearer | run a governed remediation pipeline |
 
