@@ -350,12 +350,6 @@ class ModelRouter:
         explicit_justification_id: str | None = None,
     ) -> None:
         """Refuse an unapproved premium route without imposing spend ceilings."""
-        configured_models = {self._primary, self._secondary, self._triage_model,
-            self._cfg.rms_engineering_council_architect_model,
-            self._cfg.rms_engineering_council_specialist_model,
-            self._cfg.rms_engineering_council_chair_model}
-        if model in configured_models:
-            return
         governed_premium = (
             governance_role in self._cfg.rms_model_governance_premium_roles
             or model in self._cfg.rms_model_governance_premium_models
