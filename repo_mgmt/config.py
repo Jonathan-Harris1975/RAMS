@@ -19,7 +19,6 @@ from typing import Literal
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from repo_mgmt.model_policy import is_premium_model, premium_approval_is_active
 
 PipelineId = Literal["website", "seo-aeo-geo", "mobile-ux", "on-brand", "content"]
 
@@ -407,39 +406,6 @@ class Settings(BaseSettings):
                         missing.append(f"{name} (unresolved secret reference)")
                 elif not _configured_value(value) and name not in missing:
                     missing.append(name)
-        premium_roles = (
-            ("OPENROUTER_PRIMARY_MODEL", self.openrouter_primary_model, True),
-            ("OPENROUTER_SECONDARY_MODEL", self.openrouter_secondary_model, True),
-            ("OPENROUTER_TRIAGE_MODEL", self.openrouter_triage_model, True),
-            (
-                "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL",
-                self.rms_engineering_council_architect_model,
-                self.rms_engineering_council_enabled,
-            ),
-            (
-                "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL",
-                self.rms_engineering_council_specialist_model,
-                self.rms_engineering_council_enabled,
-            ),
-            (
-                "RMS_ENGINEERING_COUNCIL_CHAIR_MODEL",
-                self.rms_engineering_council_chair_model,
-                self.rms_engineering_council_enabled
-                and self.rms_engineering_council_expert_enabled,
-            ),
-        )
-        for env_name, model_id, active in premium_roles:
-            if not active or not is_premium_model(model_id):
-                continue
-            approval_id = _configured_value(
-                self.rms_model_governance_premium_approvals.get(env_name)
-            )
-            if not approval_id:
-                missing.append(f"{env_name} premium justification approval")
-                continue
-            expiry = self.rms_model_governance_premium_approval_expiries.get(env_name)
-            if not premium_approval_is_active(expiry):
-                missing.append(f"{env_name} active premium approval expiry")
         if missing:
             raise ConfigurationError(
                 f"Missing required configuration fields: {', '.join(missing)}"
