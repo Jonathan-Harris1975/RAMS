@@ -104,3 +104,16 @@ def test_lease_operations_reject_invalid_owner(owner):
             client.record_event("a" * 64, "b" * 64, owner,
                                 "lease_renewed", now=100)
         query.assert_not_called()
+
+
+@pytest.mark.parametrize("payload", [
+    [], None, "unexpected", {"success": True, "result": [None]},
+    {"success": True, "result": [{"success": True, "results": [None]}]},
+    {"success": True, "result": [{"success": True, "results": "invalid"}]},
+])
+def test_query_rejects_malformed_response_shapes(payload):
+    client = D1Coordinator(ACCOUNT, DATABASE, "private-token")
+    body = json.dumps(payload).encode()
+    with patch("urllib.request.urlopen", return_value=io.BytesIO(body)):
+        with pytest.raises(D1CoordinationError):
+            client.query("SELECT 1")
