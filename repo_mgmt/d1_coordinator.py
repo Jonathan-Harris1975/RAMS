@@ -126,3 +126,17 @@ class D1Coordinator:
              attempt_key, owner, str(now)],
         )
         return len(rows) == 1 and rows[0].get("incident_key") == incident_key
+
+    def record_event(self, incident_key: str, attempt_key: str, owner: str,
+                     event: str, *, now: int) -> bool:
+        """Append a bounded, durable D1 audit event."""
+        if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
+            raise ValueError("invalid incident identity")
+        if not owner or len(owner) > 128 or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", event):
+            raise ValueError("invalid audit event")
+        rows = self.query(
+            "INSERT INTO incident_events (incident_key,attempt_key,event,owner,occurred_at) "
+            "VALUES (?,?,?,?,?) RETURNING id",
+            [incident_key, attempt_key, event, owner, str(now)],
+        )
+        return len(rows) == 1 and isinstance(rows[0].get("id"), int)
