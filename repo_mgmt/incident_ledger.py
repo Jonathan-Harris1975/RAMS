@@ -23,6 +23,15 @@ CREATE TABLE IF NOT EXISTS incidents (
     state TEXT NOT NULL DEFAULT 'pending',
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS incident_events (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ incident_key TEXT NOT NULL,
+ attempt_key TEXT NOT NULL,
+ event TEXT NOT NULL,
+ owner TEXT NOT NULL,
+ occurred_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS incident_events_key ON incident_events(incident_key, id);
 """
 
 
@@ -32,7 +41,7 @@ class IncidentLedger:
         if self.path == ":memory:":
             raise ValueError("persistent database path required")
         with self._connect() as db:
-            db.execute(_SCHEMA)
+            db.executescript(_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=15, isolation_level=None)
@@ -91,6 +100,7 @@ class IncidentLedger:
                      identity.repository, identity.head_sha.lower(), owner,
                      timestamp + lease_seconds, timestamp),
                 )
+            db.execute("INSERT INTO incident_events (incident_key, attempt_key, event, owner, occurred_at) VALUES (?, ?, ?, ?, ?)", (identity.incident_key, identity.attempt_key, "acquired", owner, timestamp))
             db.execute("COMMIT")
             return True
 
@@ -126,7 +136,17 @@ class IncidentLedger:
                 ("resolved" if resolved else "pending", timestamp,
                  identity.incident_key, identity.attempt_key, owner, timestamp),
             )
+            if cursor.rowcount == 1:
+                db.execute("INSERT INTO incident_events (incident_key, attempt_key, event, owner, occurred_at) VALUES (?, ?, ?, ?, ?)", (identity.incident_key, identity.attempt_key, "resolved" if resolved else "released", owner, timestamp))
             return cursor.rowcount == 1
+
+    def events(self, identity: IncidentIdentity, *, limit: int = 100) -> list[dict[str, object]]:
+        """Bounded chronological audit history for an incident."""
+        if not 1 <= limit <= 1000:
+            raise ValueError("invalid event limit")
+        with self._connect() as db:
+            rows = db.execute("SELECT attempt_key, event, owner, occurred_at FROM incident_events WHERE incident_key=? ORDER BY id DESC LIMIT ?", (identity.incident_key, limit)).fetchall()
+        return [dict(zip(("attempt_key", "event", "owner", "occurred_at"), row, strict=True)) for row in reversed(rows)]
 
     def status(self, identity: IncidentIdentity) -> dict[str, object] | None:
         with self._connect() as db:
