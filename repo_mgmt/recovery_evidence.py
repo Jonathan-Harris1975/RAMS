@@ -17,7 +17,8 @@ _KEY = re.compile(r"^[a-f0-9]{64}$")
 _TYPES = frozenset({"incidents", "attempts", "audit", "receipts"})
 
 
-def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str,\n                 receipt_id: str | None = None) -> str:
+def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str,
+                 receipt_id: str | None = None) -> str:
     """Build a path that cannot escape the repository's evidence prefix."""
     if not _REPO.fullmatch(repo) or repo in {".", ".."}:
         raise ValueError("invalid repository")
@@ -25,7 +26,10 @@ def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str,\n      
         raise ValueError("invalid evidence category")
     if not _KEY.fullmatch(incident_key) or not _SHA.fullmatch(head_sha):
         raise ValueError("invalid incident key or SHA")
-    if receipt_id is not None and not re.fullmatch(r"[a-f0-9]{32}", receipt_id):\n        raise ValueError("invalid receipt ID")\n    suffix = f"-{receipt_id}" if receipt_id else ""\n    return f"autonomous-recovery/{repo}/{kind}/{incident_key}/{head_sha.lower()}{suffix}.json"
+    if receipt_id is not None and not re.fullmatch(r"[a-f0-9]{32}", receipt_id):
+        raise ValueError("invalid receipt ID")
+    suffix = f"-{receipt_id}" if receipt_id else ""
+    return f"autonomous-recovery/{repo}/{kind}/{incident_key}/{head_sha.lower()}{suffix}.json"
 
 
 def write_evidence(
@@ -47,5 +51,8 @@ def write_evidence(
     }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     if len(payload) > 65536:
         raise ValueError("evidence record exceeds 64 KiB")
-    if not r2_client.put_object_if_absent(\n        bucket, key, payload, content_type="application/json",\n    ):\n        raise RuntimeError("recovery evidence receipt already exists")
+    if not r2_client.put_object_if_absent(
+        bucket, key, payload, content_type="application/json",
+    ):
+        raise RuntimeError("recovery evidence receipt already exists")
     return key
