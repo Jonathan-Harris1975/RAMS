@@ -17,10 +17,12 @@ def test_summary_filters_repository_and_reports_attempts():
          "head_sha": "f" * 40, "state": "resolved",
          "attempts": 1, "lease_until": 0, "updated_at": 40},
     ], [{"event": "claim_acquired", "total": 3}]]
-    result = recovery_summary(d1, "Jonathan-Harris1975/RAMS")
+    result = recovery_summary(d1, "Jonathan-Harris1975/RAMS", now=101)
     assert result["active"] == 1
     assert result["resolved"] == 1
     assert result["retry_attempts"] == 2
+    assert result["expired_leases"] == 1
+    assert result["retry_exhausted"] == 1
     assert result["event_totals"] == {"claim_acquired": 3}
     assert "owner" not in result["incidents"][0]
     sql, params = d1.query.call_args_list[0].args
@@ -89,3 +91,22 @@ def test_invalid_incident_metadata_is_never_reported(field, value):
     d1.query.side_effect = [[row], []]
     with pytest.raises(ValueError, match="invalid D1 incident"):
         recovery_summary(d1, "owner/RAMS")
+
+
+def test_active_lease_is_not_reported_as_expired():
+    d1 = Mock()
+    d1.query.side_effect = [[{"incident_key": "a" * 64,
+        "attempt_key": "b" * 64, "head_sha": "c" * 40,
+        "state": "repairing", "attempts": 1,
+        "lease_until": 500, "updated_at": 100}], []]
+    result = recovery_summary(d1, "owner/RAMS", now=200)
+    assert result["expired_leases"] == 0
+    assert result["retry_exhausted"] == 0
+
+
+@pytest.mark.parametrize("now", [-1, True, "200"])
+def test_invalid_report_timestamp_fails_before_query(now):
+    d1 = Mock()
+    with pytest.raises(ValueError, match="timestamp"):
+        recovery_summary(d1, "owner/RAMS", now=now)
+    d1.query.assert_not_called()
