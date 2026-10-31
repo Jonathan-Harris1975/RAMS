@@ -121,14 +121,14 @@ class D1Coordinator:
 
     def finish(self, incident_key: str, attempt_key: str, owner: str, *,
                resolved: bool, now: int) -> bool:
-        """Release only a live lease belonging to this owner and exact attempt."""
+        """Release only the exact owner and attempt, including accepted handoffs."""
         if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
             raise ValueError("invalid incident identity")
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", owner):
             raise ValueError("invalid owner")
         rows = self.query(
             "UPDATE incidents SET owner=NULL, lease_until=0, state=?, updated_at=? "
-            "WHERE incident_key=? AND attempt_key=? AND owner=? AND lease_until>? "
+            "WHERE incident_key=? AND attempt_key=? AND owner=? AND (lease_until>? OR state='handed_off') "
             "RETURNING incident_key",
             ["resolved" if resolved else "pending", now, incident_key,
              attempt_key, owner, now],
