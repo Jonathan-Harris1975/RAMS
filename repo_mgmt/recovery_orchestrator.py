@@ -74,7 +74,10 @@ class RecoveryOrchestrator:
             # incident. Passing CI or merging a PR is insufficient.
             verified_release_checks(identity.head_sha.lower(), evidence.get("checks"))
             merged_sha = verified_merge(identity.head_sha.lower(), evidence.get("merge"))
-            verified_deployment(merged_sha, evidence.get("deployment"))
+            deployment = evidence.get("deployment")
+            if not isinstance(deployment, dict):
+                raise ValueError("missing production deployment evidence")
+            verified_deployment(merged_sha, deployment)
         timestamp = int(time.time()) if now is None else now
         # A completion receipt is an attempted outcome, not proof that the
         # coordinator accepted a release. The exact-owner fence remains decisive.
