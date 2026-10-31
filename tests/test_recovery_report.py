@@ -13,8 +13,9 @@ def test_summary_filters_repository_and_reports_attempts():
          "head_sha": "c" * 40, "state": "repairing",
          "attempts": 3, "lease_until": 100, "updated_at": 50,
          "owner": "private-identity"},
-        {"incident_key": "d" * 64, "state": "resolved",
-         "attempts": 1, "updated_at": 40},
+        {"incident_key": "d" * 64, "attempt_key": "e" * 64,
+         "head_sha": "f" * 40, "state": "resolved",
+         "attempts": 1, "lease_until": 0, "updated_at": 40},
     ], [{"event": "claim_acquired", "total": 3}]]
     result = recovery_summary(d1, "Jonathan-Harris1975/RAMS")
     assert result["active"] == 1
@@ -55,7 +56,9 @@ def test_malformed_or_oversized_results_fail_closed(rows):
 @pytest.mark.parametrize("attempts", [None, "3", True, -1, 1000001, 1.5])
 def test_malformed_retry_counts_fail_closed(attempts):
     d1 = Mock()
-    d1.query.return_value = [{"state": "repairing", "attempts": attempts}]
+    d1.query.return_value = [{"incident_key": "a" * 64, "attempt_key": "b" * 64,
+                              "head_sha": "c" * 40, "state": "repairing",
+                              "lease_until": 100, "updated_at": 50, "attempts": attempts}]
     with pytest.raises(ValueError, match="retry count"):
         recovery_summary(d1, "owner/RAMS")
 
@@ -65,6 +68,24 @@ def test_malformed_retry_counts_fail_closed(attempts):
                                     [{"event": "claim_acquired", "total": -1}]])
 def test_malformed_event_totals_fail_closed(events):
     d1 = Mock()
-    d1.query.side_effect = [[{"state": "repairing", "attempts": 1}], events]
+    d1.query.side_effect = [[{"incident_key": "a" * 64, "attempt_key": "b" * 64,
+                              "head_sha": "c" * 40, "state": "repairing",
+                              "lease_until": 100, "updated_at": 50, "attempts": 1}], events]
     with pytest.raises(ValueError, match="invalid D1 recovery event"):
+        recovery_summary(d1, "owner/RAMS")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("incident_key", "not-a-key"), ("attempt_key", "not-a-key"),
+    ("head_sha", "invalid"), ("state", "invented"),
+    ("lease_until", -1), ("updated_at", True),
+])
+def test_invalid_incident_metadata_is_never_reported(field, value):
+    d1 = Mock()
+    row = {"incident_key": "a" * 64, "attempt_key": "b" * 64,
+           "head_sha": "c" * 40, "state": "repairing",
+           "attempts": 1, "lease_until": 100, "updated_at": 50}
+    row[field] = value
+    d1.query.side_effect = [[row], []]
+    with pytest.raises(ValueError, match="invalid D1 incident"):
         recovery_summary(d1, "owner/RAMS")
