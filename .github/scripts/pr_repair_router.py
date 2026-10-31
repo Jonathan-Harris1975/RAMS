@@ -471,7 +471,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     if handoff_recorded:
         try:
             api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
-                f"{marker}\\ndispatch-state: accepted\\nKilo accepted the repair request for {kind}. "
+                f"{marker}\ndispatch-state: accepted\nKilo accepted the repair request for {kind}. "
                 "The source PR remains governed by its normal checks."})
         except Exception:
             print("::warning::Kilo accepted repair, but the persisted reservation marker could not be updated.")
