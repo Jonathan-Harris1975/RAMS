@@ -59,3 +59,15 @@ def test_audit_failure_prevents_successful_claim():
     with pytest.raises(RuntimeError, match="audit unavailable"):
         RecoveryOrchestrator(coordinator, r2).claim(
             identity(), owner="worker", diagnosis={}, now=100)
+
+
+def test_heartbeat_requires_d1_renewal_and_audits_success():
+    coordinator, r2 = Mock(), Mock()
+    coordinator.renew.return_value = True
+    orchestrator = RecoveryOrchestrator(coordinator, r2)
+    assert orchestrator.renew(identity(), owner="worker", now=150)
+    assert coordinator.record_event.call_args.args[3] == "lease_renewed"
+    coordinator.renew.return_value = False
+    coordinator.record_event.reset_mock()
+    assert not orchestrator.renew(identity(), owner="worker", now=151)
+    coordinator.record_event.assert_not_called()
