@@ -119,6 +119,28 @@ class D1Coordinator:
             raise D1CoordinationError("D1 handoff returned invalid incident identity")
         return len(rows) == 1
 
+    def reconcile_failed_handoff(self, incident_key: str, attempt_key: str,
+                                 owner: str, *, now: int) -> bool:
+        """Release a definitively failed provider handoff for bounded retry.
+
+        Caller must independently verify provider terminal failure. The exact
+        handoff owner and attempt fence prevent unrelated incident releases.
+        An uncertain provider response must NEVER invoke this operation.
+        """
+        if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
+            raise ValueError("invalid incident identity")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", owner) or type(now) is not int or now < 0:
+            raise ValueError("invalid reconciliation owner or timestamp")
+        rows = self.query(
+            "UPDATE incidents SET state='pending', owner=NULL, lease_until=0, updated_at=? "
+            "WHERE incident_key=? AND attempt_key=? AND owner=? "
+            "AND state='handed_off' RETURNING incident_key",
+            [now, incident_key, attempt_key, owner],
+        )
+        if len(rows) > 1 or (rows and rows[0].get("incident_key") != incident_key):
+            raise D1CoordinationError("D1 reconciliation returned invalid incident identity")
+        return len(rows) == 1
+
     def finish(self, incident_key: str, attempt_key: str, owner: str, *,
                resolved: bool, now: int) -> bool:
         """Release only the exact owner and attempt, including accepted handoffs."""
