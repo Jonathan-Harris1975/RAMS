@@ -50,7 +50,7 @@ def test_changed_findings_do_not_reset_incident_retry_budget():
     assert first.incident_key != different_pr.incident_key
 
 
-@pytest.mark.parametrize("finding", ["bad\\x00payload", "bad\\x1bescape", "bad\\rreturn"])
+@pytest.mark.parametrize("finding", ["bad" + chr(0) + "payload", "bad" + chr(27) + "escape", "bad" + chr(13) + "return"])
 def test_control_character_findings_are_rejected(finding):
     orchestrator = Mock()
     with pytest.raises(ValueError, match="empty canonical finding"):
