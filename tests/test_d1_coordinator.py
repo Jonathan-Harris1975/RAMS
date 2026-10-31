@@ -87,3 +87,20 @@ def test_durable_audit_event_is_parameterised():
     with pytest.raises(ValueError):
         client.record_event("a" * 64, "b" * 64, "worker",
                             "'); DELETE FROM incidents;--", now=123)
+
+
+@pytest.mark.parametrize("owner", ["", " ", "worker\\nspoof", "x" * 129])
+def test_lease_operations_reject_invalid_owner(owner):
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query") as query:
+        with pytest.raises(ValueError):
+            client.acquire("a" * 64, "b" * 64, "owner/RAMS",
+                           "c" * 40, owner, now=100)
+        with pytest.raises(ValueError):
+            client.renew("a" * 64, "b" * 64, owner, now=100)
+        with pytest.raises(ValueError):
+            client.finish("a" * 64, "b" * 64, owner, resolved=False, now=100)
+        with pytest.raises(ValueError):
+            client.record_event("a" * 64, "b" * 64, owner,
+                                "lease_renewed", now=100)
+        query.assert_not_called()
