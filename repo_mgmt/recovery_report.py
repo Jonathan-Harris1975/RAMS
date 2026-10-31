@@ -53,6 +53,16 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         event_totals[event["event"]] = total
     allowed = {"incident_key", "attempt_key", "head_sha", "state",
                "attempts", "lease_until", "updated_at"}
+    for row in rows:
+        for field, width in (("incident_key", 64), ("attempt_key", 64), ("head_sha", 40)):
+            value = row.get(field)
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{" + str(width) + r"}", value):
+                raise ValueError("invalid D1 incident identity")
+        if row.get("state") not in {"pending", "repairing", "resolved"}:
+            raise ValueError("invalid D1 incident state")
+        for field in ("lease_until", "updated_at"):
+            if type(row.get(field)) is not int or row[field] < 0:
+                raise ValueError("invalid D1 incident timestamp")
     return {
         "repository": repository,
         "total_returned": len(rows),
