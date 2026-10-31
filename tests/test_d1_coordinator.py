@@ -149,3 +149,17 @@ def test_accepted_handoff_is_atomically_fenced_against_redelivery():
         assert not client.acquire("a" * 64, "b" * 64, "owner/RAMS", "c" * 40,
                                   "worker-2", now=500)
     assert "incidents.state IN ('resolved', 'handed_off')" in query.call_args.args[0]
+
+
+def test_terminal_failure_reconciliation_is_fenced_to_exact_handoff():
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query", return_value=[{"incident_key": "a" * 64}]) as query:
+        assert client.reconcile_failed_handoff("a" * 64, "b" * 64,
+                                               "worker", now=500)
+    sql, params = query.call_args.args
+    assert "state='handed_off'" in sql
+    assert "AND owner=?" in sql
+    assert params == [500, "a" * 64, "b" * 64, "worker"]
+    with patch.object(client, "query", return_value=[]):
+        assert not client.reconcile_failed_handoff("a" * 64, "b" * 64,
+                                                    "stale", now=501)
