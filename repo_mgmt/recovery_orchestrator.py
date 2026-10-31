@@ -12,7 +12,7 @@ from repo_mgmt.d1_coordinator import D1Coordinator
 from repo_mgmt.incident_identity import IncidentIdentity
 from repo_mgmt.recovery_evidence import write_evidence
 from repo_mgmt.deployment_receipt import verified_deployment
-from repo_mgmt.recovery_validation import verified_release_checks, verified_merge
+from repo_mgmt.recovery_validation import verified_release_checks, verified_merge, verified_provider_outcome
 
 
 class RecoveryOrchestrator:
@@ -69,13 +69,12 @@ class RecoveryOrchestrator:
         A timeout, missing task, or transport error is not terminal evidence.
         This is a trusted-runtime API; callers must authenticate provenance.
         """
-        if not isinstance(provider_evidence, dict) or provider_evidence.get("status") != "failed":
+        task_id = provider_evidence.get("task_id") if isinstance(provider_evidence, dict) else None
+        if not isinstance(task_id, str):
             raise ValueError("verified terminal provider failure is required")
-        task_id = provider_evidence.get("task_id")
-        if not isinstance(task_id, str) or not 1 <= len(task_id) <= 128 or not all(
-            c.isalnum() or c in "-_.:" for c in task_id
-        ):
-            raise ValueError("invalid provider task identity")
+        outcome = verified_provider_outcome(provider_evidence, expected_task_id=task_id)
+        if outcome["status"] != "failed":
+            raise ValueError("verified terminal provider failure is required")
         timestamp = int(time.time()) if now is None else now
         write_evidence(
             self.r2_client, repo=identity.repository.split("/")[1],
