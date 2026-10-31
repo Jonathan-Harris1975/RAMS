@@ -113,3 +113,26 @@ def test_resolved_incident_requires_verified_production_deployment(evidence):
             identity(), owner="worker", resolved=True, evidence=evidence, now=200)
     coordinator.finish.assert_not_called()
     r2.put_object_if_absent.assert_not_called()
+
+
+@pytest.mark.parametrize("evidence", [{}, {"status": "pending", "task_id": "t1"},
+                                      {"status": "failed"}, {"status": "failed", "task_id": "../bad"}])
+def test_uncertain_handoff_never_releases_lease(evidence):
+    coordinator, r2 = Mock(), Mock()
+    with pytest.raises(ValueError):
+        RecoveryOrchestrator(coordinator, r2).reconcile_failed_handoff(
+            identity(), owner="worker", provider_evidence=evidence, now=300)
+    coordinator.reconcile_failed_handoff.assert_not_called()
+    r2.put_object_if_absent.assert_not_called()
+
+
+def test_terminal_provider_failure_requires_receipt_and_exact_owner_release():
+    coordinator, r2 = Mock(), Mock()
+    coordinator.reconcile_failed_handoff.return_value = True
+    assert RecoveryOrchestrator(coordinator, r2).reconcile_failed_handoff(
+        identity(), owner="worker", provider_evidence={
+            "status": "failed", "task_id": "task-123"}, now=300)
+    assert coordinator.reconcile_failed_handoff.call_args.args == (
+        identity().incident_key, identity().attempt_key, "worker")
+    assert coordinator.record_event.call_args.args[3] == "provider_handoff_failed"
+    assert r2.put_object_if_absent.call_count == 1
