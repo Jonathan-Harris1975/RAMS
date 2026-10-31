@@ -29,6 +29,8 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         "ORDER BY updated_at DESC LIMIT ?",
         [repository, limit],
     )
+    if not isinstance(rows, list) or len(rows) > limit or any(not isinstance(row, dict) for row in rows):
+        raise ValueError("invalid D1 incident report response")
     allowed = {"incident_key", "attempt_key", "head_sha", "state",
                "attempts", "lease_until", "updated_at"}
     return {
