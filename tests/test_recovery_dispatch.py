@@ -39,3 +39,12 @@ def test_invalid_findings_never_claim(findings):
                        head_sha="a" * 40, kind="check", findings=findings,
                        owner="worker-1")
     orchestrator.claim.assert_not_called()
+
+
+def test_changed_findings_do_not_reset_incident_retry_budget():
+    first = repair_identity("owner/RAMS", 435, "a" * 40, "check", ["lint failed"])
+    changed = repair_identity("owner/RAMS", 435, "a" * 40, "check", ["tests failed"])
+    assert first.incident_key == changed.incident_key
+    assert first.attempt_key == changed.attempt_key
+    different_pr = repair_identity("owner/RAMS", 436, "a" * 40, "check", ["lint failed"])
+    assert first.incident_key != different_pr.incident_key
