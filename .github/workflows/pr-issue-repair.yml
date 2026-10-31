@@ -92,6 +92,7 @@ jobs:
     - name: Extract actionable PR findings and start Kilo repair
       env:
         GH_TOKEN: ${{ github.token }}
+        PYTHONPATH: ${{ github.workspace }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
         KILO_DEBUG_TRIGGER_URL: ${{ secrets.KILO_DEBUG_TRIGGER_URL }}
