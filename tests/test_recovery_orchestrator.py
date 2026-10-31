@@ -73,3 +73,21 @@ def test_heartbeat_requires_d1_renewal_and_audits_success():
     coordinator.record_event.reset_mock()
     assert not orchestrator.renew(identity(), owner="worker", now=151)
     coordinator.record_event.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["claim", "renew", "finish"])
+def test_false_audit_acknowledgement_fails_closed(operation):
+    coordinator, r2 = Mock(), Mock()
+    coordinator.acquire.return_value = True
+    coordinator.renew.return_value = True
+    coordinator.finish.return_value = True
+    coordinator.record_event.return_value = False
+    orchestrator = RecoveryOrchestrator(coordinator, r2)
+    with pytest.raises(RuntimeError, match="audit was not persisted"):
+        if operation == "claim":
+            orchestrator.claim(identity(), owner="worker", diagnosis={}, now=100)
+        elif operation == "renew":
+            orchestrator.renew(identity(), owner="worker", now=150)
+        else:
+            orchestrator.finish(identity(), owner="worker", resolved=False,
+                                evidence={"reason": "explicit rejection"}, now=200)
