@@ -31,6 +31,10 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
     )
     if not isinstance(rows, list) or len(rows) > limit or any(not isinstance(row, dict) for row in rows):
         raise ValueError("invalid D1 incident report response")
+    for row in rows:
+        attempts = row.get("attempts")
+        if isinstance(attempts, bool) or not isinstance(attempts, int) or not 0 <= attempts <= 1000000:
+            raise ValueError("invalid D1 incident retry count")
     allowed = {"incident_key", "attempt_key", "head_sha", "state",
                "attempts", "lease_until", "updated_at"}
     return {
@@ -38,6 +42,6 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         "total_returned": len(rows),
         "active": sum(row.get("state") == "repairing" for row in rows),
         "resolved": sum(row.get("state") == "resolved" for row in rows),
-        "retry_attempts": sum(max(0, int(row.get("attempts", 0)) - 1) for row in rows),
+        "retry_attempts": sum(max(0, row["attempts"] - 1) for row in rows),
         "incidents": [{key: row[key] for key in allowed if key in row} for row in rows],
     }
