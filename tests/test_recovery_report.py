@@ -40,3 +40,11 @@ def test_invalid_limit_never_queries(limit):
     with pytest.raises(ValueError):
         recovery_summary(d1, "owner/RAMS", limit=limit)
     d1.query.assert_not_called()
+
+
+@pytest.mark.parametrize("rows", [None, "invalid", [None], [{}] * 101])
+def test_malformed_or_oversized_results_fail_closed(rows):
+    d1 = Mock()
+    d1.query.return_value = rows
+    with pytest.raises(ValueError, match="invalid D1"):
+        recovery_summary(d1, "owner/RAMS")
