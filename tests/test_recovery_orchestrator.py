@@ -49,9 +49,11 @@ def test_finish_requires_receipt_before_releasing():
     coordinator.finish.return_value = True
     assert RecoveryOrchestrator(coordinator, r2).finish(
         identity(), owner="worker", resolved=True,
-        evidence={"checks": [{"name": name, "head_sha": "a" * 40,
+        evidence={"merge": {"merged": True, "source_head_sha": "a" * 40,
+            "merge_commit_sha": "b" * 40},
+            "checks": [{"name": name, "head_sha": "a" * 40,
             "status": "completed", "conclusion": "success"} for name in REQUIRED], "deployment": {
-            "sha": "a" * 40, "environment": "production", "status": "success",
+            "sha": "b" * 40, "environment": "production", "status": "success",
             "provider": "koyeb", "deployment_id": "deploy-123"}}, now=200)
     assert coordinator.finish.call_count == 1
     assert coordinator.record_event.call_args.args[3] == "repair_resolved"
