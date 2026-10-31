@@ -28,11 +28,11 @@ def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str) -> str:
 
 
 def write_evidence(
-    s3_client: Any, *, repo: str, kind: str, incident_key: str,
+    r2_client: Any, *, repo: str, kind: str, incident_key: str,
     head_sha: str, record: dict[str, Any],
     bucket: str = "hive-repositories",
 ) -> str:
-    """Persist a bounded JSON receipt, using the supplied S3-compatible client."""
+    """Persist a bounded JSON receipt, using the existing RAMS R2Client."""
     key = evidence_key(repo, kind, incident_key, head_sha)
     if not isinstance(record, dict):
         raise ValueError("record must be an object")
@@ -46,7 +46,5 @@ def write_evidence(
     }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     if len(payload) > 65536:
         raise ValueError("evidence record exceeds 64 KiB")
-    s3_client.put_object(
-        Bucket=bucket, Key=key, Body=payload, ContentType="application/json",
-    )
+    r2_client.put_object(bucket, key, payload, content_type="application/json")
     return key
