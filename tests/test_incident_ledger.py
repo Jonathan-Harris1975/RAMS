@@ -68,3 +68,15 @@ def test_invalid_bounds_and_memory_rejected(tmp_path):
         ledger.acquire(incident(), owner="", now=100)
     with pytest.raises(ValueError):
         ledger.acquire(incident(), owner="a", max_attempts=0, now=100)
+
+
+def test_lease_renewal_is_fenced_by_owner_and_expiry(tmp_path):
+    ledger = IncidentLedger(tmp_path / "incidents.sqlite3")
+    key = incident()
+    assert ledger.acquire(key, owner="a", now=100, lease_seconds=10)
+    assert not ledger.renew(key, owner="b", now=101)
+    assert ledger.renew(key, owner="a", now=105, lease_seconds=20)
+    assert not ledger.acquire(key, owner="b", now=124)
+    assert not ledger.renew(key, owner="a", now=126)
+    assert ledger.acquire(key, owner="b", now=126)
+    assert not ledger.finish(key, owner="a", resolved=True, now=127)
