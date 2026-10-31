@@ -63,16 +63,15 @@ class RecoveryOrchestrator:
 
     def reconcile_failed_handoff(self, identity: IncidentIdentity, *,
                                  owner: str, provider_evidence: dict[str, Any],
-                                 now: int | None = None) -> bool:
+                                 expected_task_id: str, now: int | None = None) -> bool:
         """Reopen a handed-off attempt only on definitive provider failure.
 
         A timeout, missing task, or transport error is not terminal evidence.
         This is a trusted-runtime API; callers must authenticate provenance.
         """
-        task_id = provider_evidence.get("task_id") if isinstance(provider_evidence, dict) else None
-        if not isinstance(task_id, str):
-            raise ValueError("verified terminal provider failure is required")
-        outcome = verified_provider_outcome(provider_evidence, expected_task_id=task_id)
+        # Expected identity must come from the original trusted dispatch receipt,
+        # never from the provider payload under examination.
+        outcome = verified_provider_outcome(provider_evidence, expected_task_id=expected_task_id)
         if outcome["status"] != "failed":
             raise ValueError("verified terminal provider failure is required")
         timestamp = int(time.time()) if now is None else now
@@ -82,7 +81,7 @@ class RecoveryOrchestrator:
             head_sha=identity.head_sha, record={
                 "attempt_key": identity.attempt_key, "owner": owner,
                 "reconciliation": "provider_terminal_failure",
-                "task_id": task_id,
+                "task_id": expected_task_id,
             },
         )
         released = self.coordinator.reconcile_failed_handoff(
