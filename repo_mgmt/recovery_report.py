@@ -75,7 +75,7 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         "resolved": sum(row.get("state") == "resolved" for row in rows),
         "expired_leases": sum(row["state"] == "repairing" and
                               row["lease_until"] <= timestamp for row in rows),
-        "retry_exhausted": sum(row["state"] != "resolved" and row["attempts"] >= 2
+        "retry_exhausted": sum(row["state"] != "resolved" and row["attempts"] >= 3
                                for row in rows),
         "retry_attempts": sum(max(0, row["attempts"] - 1) for row in rows),
         "event_totals": event_totals,
