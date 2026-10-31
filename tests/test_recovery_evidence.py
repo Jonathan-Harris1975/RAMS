@@ -15,7 +15,8 @@ def test_scoped_key_and_receipt():
         client, repo="RAMS", kind="receipts", incident_key=key,
         head_sha=sha, record={"state": "validated"},
     )
-    assert path.startswith(f"autonomous-recovery/RAMS/receipts/{key}/{sha}-")\n    assert path.endswith(".json")
+    assert path.startswith(f"autonomous-recovery/RAMS/receipts/{key}/{sha}-")
+    assert path.endswith(".json")
     call = client.put_object.call_args
     assert call.args[0] == "hive-repositories"
     assert call.args[1] == path
