@@ -73,3 +73,16 @@ def test_lease_renewal_requires_exact_owner_and_live_lease():
                                        "b" * 64, "worker", "100"]
     with patch.object(client, "query", return_value=[]):
         assert not client.renew("a" * 64, "b" * 64, "stale", now=101)
+
+
+def test_durable_audit_event_is_parameterised():
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query", return_value=[{"id": 12}]) as query:
+        assert client.record_event("a" * 64, "b" * 64, "worker",
+                                   "claim_acquired", now=123)
+    sql, params = query.call_args.args
+    assert "INSERT INTO incident_events" in sql
+    assert params == ["a" * 64, "b" * 64, "claim_acquired", "worker", "123"]
+    with pytest.raises(ValueError):
+        client.record_event("a" * 64, "b" * 64, "worker",
+                            "'); DELETE FROM incidents;--", now=123)
