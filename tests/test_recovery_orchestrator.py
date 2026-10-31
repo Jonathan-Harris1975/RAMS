@@ -121,7 +121,8 @@ def test_uncertain_handoff_never_releases_lease(evidence):
     coordinator, r2 = Mock(), Mock()
     with pytest.raises(ValueError):
         RecoveryOrchestrator(coordinator, r2).reconcile_failed_handoff(
-            identity(), owner="worker", provider_evidence=evidence, now=300)
+            identity(), owner="worker", provider_evidence=evidence,
+            expected_task_id="task-123", now=300)
     coordinator.reconcile_failed_handoff.assert_not_called()
     r2.put_object_if_absent.assert_not_called()
 
@@ -131,8 +132,20 @@ def test_terminal_provider_failure_requires_receipt_and_exact_owner_release():
     coordinator.reconcile_failed_handoff.return_value = True
     assert RecoveryOrchestrator(coordinator, r2).reconcile_failed_handoff(
         identity(), owner="worker", provider_evidence={
-            "status": "failed", "task_id": "task-123"}, now=300)
+            "status": "failed", "task_id": "task-123"},
+        expected_task_id="task-123", now=300)
     assert coordinator.reconcile_failed_handoff.call_args.args == (
         identity().incident_key, identity().attempt_key, "worker")
     assert coordinator.record_event.call_args.args[3] == "provider_handoff_failed"
     assert r2.put_object_if_absent.call_count == 1
+
+
+def test_reconciliation_rejects_task_id_from_another_dispatch():
+    coordinator, r2 = Mock(), Mock()
+    with pytest.raises(ValueError, match="does not match"):
+        RecoveryOrchestrator(coordinator, r2).reconcile_failed_handoff(
+            identity(), owner="worker",
+            provider_evidence={"status": "failed", "task_id": "other-task"},
+            expected_task_id="task-123", now=300)
+    coordinator.reconcile_failed_handoff.assert_not_called()
+    r2.put_object_if_absent.assert_not_called()
