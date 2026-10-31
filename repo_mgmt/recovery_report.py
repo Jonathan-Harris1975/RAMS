@@ -17,7 +17,7 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
     Its data is observational: a resolved ledger state alone never proves a
     production deployment or that the original defect stopped recurring.
     """
-    if not _REPOSITORY.fullmatch(repository) or any(
+    if not isinstance(repository, str) or not _REPOSITORY.fullmatch(repository) or any(
         part in {".", ".."} for part in repository.split("/")
     ):
         raise ValueError("invalid repository")
