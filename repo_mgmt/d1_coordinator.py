@@ -95,9 +95,9 @@ class D1Coordinator:
         rows = self.query(sql, [incident_key, attempt_key, repository, head_sha,
                                 owner, now + lease_seconds, now,
                                 now, max_attempts])
-        if len(rows) > 1:
-            raise D1CoordinationError("D1 conditional mutation returned multiple rows")
-        return len(rows) == 1 and rows[0].get("incident_key") == incident_key
+        if len(rows) > 1 or (rows and rows[0].get("incident_key") != incident_key):
+            raise D1CoordinationError("D1 conditional mutation returned an invalid claim")
+        return len(rows) == 1
 
     def finish(self, incident_key: str, attempt_key: str, owner: str, *,
                resolved: bool, now: int) -> bool:
@@ -113,7 +113,9 @@ class D1Coordinator:
             ["resolved" if resolved else "pending", now, incident_key,
              attempt_key, owner, now],
         )
-        return len(rows) == 1 and rows[0].get("incident_key") == incident_key
+        if len(rows) > 1 or (rows and rows[0].get("incident_key") != incident_key):
+            raise D1CoordinationError("D1 mutation returned an invalid incident identity")
+        return len(rows) == 1
 
     def renew(self, incident_key: str, attempt_key: str, owner: str, *,
               now: int, lease_seconds: int = 300) -> bool:
