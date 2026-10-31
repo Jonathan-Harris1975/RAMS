@@ -148,7 +148,7 @@ def test_accepted_handoff_is_atomically_fenced_against_redelivery():
     with patch.object(client, "query", return_value=[]) as query:
         assert not client.acquire("a" * 64, "b" * 64, "owner/RAMS", "c" * 40,
                                   "worker-2", now=500)
-    assert "incidents.state IN ('resolved', 'handed_off')" in query.call_args.args[0]
+    assert "incidents.state!='handed_off'" in query.call_args.args[0]
 
 
 def test_terminal_failure_reconciliation_is_fenced_to_exact_handoff():
@@ -163,3 +163,13 @@ def test_terminal_failure_reconciliation_is_fenced_to_exact_handoff():
     with patch.object(client, "query", return_value=[]):
         assert not client.reconcile_failed_handoff("a" * 64, "b" * 64,
                                                     "stale", now=501)
+
+
+def test_new_head_does_not_bypass_accepted_handoff_fence():
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query", return_value=[]) as query:
+        assert not client.acquire("a" * 64, "d" * 64, "owner/RAMS",
+                                  "e" * 40, "worker-new", now=999)
+    sql = query.call_args.args[0]
+    assert "incidents.state!='handed_off'" in sql
+    assert "incidents.attempt_key!=excluded.attempt_key" in sql
