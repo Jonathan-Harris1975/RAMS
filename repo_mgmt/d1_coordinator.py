@@ -33,8 +33,10 @@ class D1Coordinator:
 
     def query(self, sql: str, params: list[str | int] | None = None) -> list[dict[str, Any]]:
         """Execute one parameterised statement and reject ambiguous results."""
-        if not sql or ";" in sql.rstrip().rstrip(";") or len(sql) > 8192:
+        if not isinstance(sql, str) or not sql or ";" in sql.rstrip().rstrip(";") or len(sql) > 8192:
             raise ValueError("expected one bounded SQL statement")
+        if params is not None and (not isinstance(params, list) or len(params) > 32 or any(type(value) not in (str, int) for value in params)):
+            raise ValueError("invalid bounded D1 query parameters")
         payload = json.dumps({"sql": sql, "params": params or []}).encode()
         request = urllib.request.Request(
             self._url, data=payload, method="POST",
@@ -93,6 +95,8 @@ class D1Coordinator:
         rows = self.query(sql, [incident_key, attempt_key, repository, head_sha,
                                 owner, now + lease_seconds, now,
                                 now, max_attempts])
+        if len(rows) > 1:
+            raise D1CoordinationError("D1 conditional mutation returned multiple rows")
         return len(rows) == 1 and rows[0].get("incident_key") == incident_key
 
     def finish(self, incident_key: str, attempt_key: str, owner: str, *,
@@ -139,4 +143,6 @@ class D1Coordinator:
             "VALUES (?,?,?,?,?) RETURNING id",
             [incident_key, attempt_key, event, owner, now],
         )
-        return len(rows) == 1 and isinstance(rows[0].get("id"), int)
+        if len(rows) > 1:
+            raise D1CoordinationError("D1 audit insertion returned multiple rows")
+        return len(rows) == 1 and type(rows[0].get("id")) is int
