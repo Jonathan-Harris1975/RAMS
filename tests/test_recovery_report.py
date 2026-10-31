@@ -123,4 +123,4 @@ def test_accepted_handoff_is_active_but_not_an_expired_worker():
     assert report["active"] == 1
     assert report["handed_off"] == 1
     assert report["expired_leases"] == 0
-    assert report["retry_exhausted"] == 1
+    assert report["retry_exhausted"] == 0
