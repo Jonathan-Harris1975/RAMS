@@ -37,10 +37,11 @@ class RecoveryOrchestrator:
                 "owner": owner, "diagnosis": diagnosis, "state": "claimed",
             },
         )
-        self.coordinator.record_event(
+        if not self.coordinator.record_event(
             identity.incident_key, identity.attempt_key, owner,
             "claim_acquired", now=timestamp,
-        )
+        ):
+            raise RuntimeError("D1 claim audit was not persisted")
         return True
 
     def renew(self, identity: IncidentIdentity, *, owner: str,
@@ -51,10 +52,11 @@ class RecoveryOrchestrator:
             identity.incident_key, identity.attempt_key, owner, now=timestamp,
         )
         if renewed:
-            self.coordinator.record_event(
+            if not self.coordinator.record_event(
                 identity.incident_key, identity.attempt_key, owner,
                 "lease_renewed", now=timestamp,
-            )
+            ):
+                raise RuntimeError("D1 lease renewal audit was not persisted")
         return renewed
 
     def finish(self, identity: IncidentIdentity, *, owner: str,
@@ -77,9 +79,10 @@ class RecoveryOrchestrator:
             resolved=resolved, now=timestamp,
         )
         if released:
-            self.coordinator.record_event(
+            if not self.coordinator.record_event(
                 identity.incident_key, identity.attempt_key, owner,
                 "repair_resolved" if resolved else "repair_released",
                 now=timestamp,
-            )
+            ):
+                raise RuntimeError("D1 completion audit was not persisted")
         return released
