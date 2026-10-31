@@ -20,13 +20,13 @@ _TYPES = frozenset({"incidents", "attempts", "audit", "receipts"})
 def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str,
                  receipt_id: str | None = None) -> str:
     """Build a path that cannot escape the repository's evidence prefix."""
-    if not _REPO.fullmatch(repo) or repo in {".", ".."}:
+    if not isinstance(repo, str) or not _REPO.fullmatch(repo) or repo in {".", ".."}:
         raise ValueError("invalid repository")
-    if kind not in _TYPES:
+    if not isinstance(kind, str) or kind not in _TYPES:
         raise ValueError("invalid evidence category")
-    if not _KEY.fullmatch(incident_key) or not _SHA.fullmatch(head_sha):
+    if not isinstance(incident_key, str) or not isinstance(head_sha, str) or not _KEY.fullmatch(incident_key) or not _SHA.fullmatch(head_sha):
         raise ValueError("invalid incident key or SHA")
-    if receipt_id is not None and not re.fullmatch(r"[a-f0-9]{32}", receipt_id):
+    if receipt_id is not None and (not isinstance(receipt_id, str) or not re.fullmatch(r"[a-f0-9]{32}", receipt_id)):
         raise ValueError("invalid receipt ID")
     suffix = f"-{receipt_id}" if receipt_id else ""
     return f"autonomous-recovery/{repo}/{kind}/{incident_key}/{head_sha.lower()}{suffix}.json"
