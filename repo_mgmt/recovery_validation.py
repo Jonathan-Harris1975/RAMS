@@ -51,3 +51,21 @@ def verified_merge(source_sha: str, merge: Any) -> str:
             or not isinstance(deployed_sha, str) or not _SHA.fullmatch(deployed_sha)):
         raise ValueError("invalid trusted exact-head merge evidence")
     return deployed_sha
+
+
+def verified_provider_outcome(outcome: Any, *, expected_task_id: str) -> dict[str, str]:
+    """Validate a terminal task response fetched by a trusted provider client.
+
+    Never use webhook text or a model-authored repair summary as provenance.
+    A missing, queued or running task is not a definitive failure.
+    """
+    if not isinstance(expected_task_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9_.:-]{1,128}", expected_task_id
+    ):
+        raise ValueError("invalid expected provider task identity")
+    if not isinstance(outcome, dict) or outcome.get("task_id") != expected_task_id:
+        raise ValueError("provider task identity does not match handoff")
+    status = outcome.get("status")
+    if status not in {"failed", "completed"}:
+        raise ValueError("provider outcome is not terminal")
+    return {"task_id": expected_task_id, "status": status}
