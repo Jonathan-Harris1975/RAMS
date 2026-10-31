@@ -16,9 +16,11 @@ def test_scoped_key_and_receipt():
         head_sha=sha, record={"state": "validated"},
     )
     assert path == f"autonomous-recovery/RAMS/receipts/{key}/{sha}.json"
-    call = client.put_object.call_args.kwargs
-    assert call["Bucket"] == "hive-repositories"
-    payload = json.loads(call["Body"])
+    call = client.put_object.call_args
+    assert call.args[0] == "hive-repositories"
+    assert call.args[1] == path
+    assert call.kwargs["content_type"] == "application/json"
+    payload = json.loads(call.args[2])
     assert payload["record"] == {"state": "validated"}
     assert payload["head_sha"] == sha
 
@@ -34,7 +36,7 @@ def test_path_traversal_rejected(repo, kind):
 
 def test_large_and_nonfinite_payloads_rejected():
     client = Mock()
-    args = dict(s3_client=client, repo="RAMS", kind="audit",
+    args = dict(r2_client=client, repo="RAMS", kind="audit",
                 incident_key="b" * 64, head_sha="a" * 40)
     with pytest.raises(ValueError):
         write_evidence(**args, record={"payload": "x" * 70000})
