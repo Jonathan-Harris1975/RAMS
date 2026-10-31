@@ -55,3 +55,58 @@ class D1Coordinator:
         if not isinstance(rows, list):
             raise D1CoordinationError("D1 returned invalid results")
         return rows
+
+    def acquire(
+        self, incident_key: str, attempt_key: str, repository: str,
+        head_sha: str, owner: str, *, now: int, lease_seconds: int = 300,
+        max_attempts: int = 3,
+    ) -> bool:
+        """Atomically claim or reclaim a lease on the exact attempt.
+
+        One INSERT ON CONFLICT statement prevents competing workers from
+        passing a separate read-before-write check.
+        """
+        if not re.fullmatch(r"[a-f0-9]{64}", incident_key):
+            raise ValueError("invalid incident key")
+        if not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
+            raise ValueError("invalid attempt key")
+        if not re.fullmatch(r"[a-f0-9]{40}", head_sha):
+            raise ValueError("invalid head SHA")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository):
+            raise ValueError("invalid repository")
+        if not owner or len(owner) > 128 or not 1 <= lease_seconds <= 3600 or not 1 <= max_attempts <= 20:
+            raise ValueError("invalid claim bounds")
+        sql = (
+            "INSERT INTO incidents (incident_key, attempt_key, repository, head_sha, owner, "
+            "lease_until, attempts, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'repairing', ?) "
+            "ON CONFLICT(incident_key) DO UPDATE SET "
+            "attempt_key=excluded.attempt_key, head_sha=excluded.head_sha, "
+            "owner=excluded.owner, lease_until=excluded.lease_until, "
+            "attempts=CASE WHEN incidents.attempt_key=excluded.attempt_key "
+            "THEN incidents.attempts+1 ELSE 1 END, state='repairing', "
+            "updated_at=excluded.updated_at WHERE "
+            "(incidents.owner IS NULL OR incidents.lease_until<=?) "
+            "AND NOT (incidents.state='resolved' AND incidents.attempt_key=excluded.attempt_key) "
+            "AND (incidents.attempt_key!=excluded.attempt_key OR incidents.attempts<?) "
+            "RETURNING incident_key"
+        )
+        rows = self.query(sql, [incident_key, attempt_key, repository, head_sha,
+                                owner, str(now + lease_seconds), str(now),
+                                str(now), str(max_attempts)])
+        return len(rows) == 1 and rows[0].get("incident_key") == incident_key
+
+    def finish(self, incident_key: str, attempt_key: str, owner: str, *,
+               resolved: bool, now: int) -> bool:
+        """Release only a live lease belonging to this owner and exact attempt."""
+        if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
+            raise ValueError("invalid incident identity")
+        if not owner:
+            raise ValueError("missing owner")
+        rows = self.query(
+            "UPDATE incidents SET owner=NULL, lease_until=0, state=?, updated_at=? "
+            "WHERE incident_key=? AND attempt_key=? AND owner=? AND lease_until>? "
+            "RETURNING incident_key",
+            ["resolved" if resolved else "pending", str(now), incident_key,
+             attempt_key, owner, str(now)],
+        )
+        return len(rows) == 1 and rows[0].get("incident_key") == incident_key
