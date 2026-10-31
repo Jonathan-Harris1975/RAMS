@@ -131,7 +131,9 @@ class D1Coordinator:
             [now + lease_seconds, now, incident_key,
              attempt_key, owner, now],
         )
-        return len(rows) == 1 and rows[0].get("incident_key") == incident_key
+        if len(rows) > 1 or (rows and rows[0].get("incident_key") != incident_key):
+            raise D1CoordinationError("D1 renewal returned an invalid incident identity")
+        return len(rows) == 1
 
     def record_event(self, incident_key: str, attempt_key: str, owner: str,
                      event: str, *, now: int) -> bool:
