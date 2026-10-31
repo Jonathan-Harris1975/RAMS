@@ -53,3 +53,15 @@ GitHub's existing comment reservation as dispatch deduplication until a
 transactional coordination backend (for example, a properly configured D1
 or Durable Object service) is implemented and validated. Use the existing
 R2 client and credentials; do not add public access or embed secrets.
+
+## Provisioned D1 transactional coordinator (2026-10-31)
+
+Cloudflare D1 database `rams-autonomous-recovery` (EU jurisdiction), UUID
+`759c49e9-0d72-4967-8a32-1e8b6dd6a1f8`. Created and confirmed tables:
+`incidents`, `incident_events`, and index `incident_events_key`.
+This is the **coordination** store; R2 `hive-repositories/autonomous-recovery/RAMS/`
+is the **evidence** store. D1 is not automatically accessible to the Koyeb
+Python service. Before activation, deploy an authenticated Worker/D1 binding
+or another supported secure D1 access path, implement atomic conditional
+claims and exact-owner fencing, test concurrent workers, and provision scoped
+credentials. Never expose Cloudflare account-wide tokens to untrusted PRs.
