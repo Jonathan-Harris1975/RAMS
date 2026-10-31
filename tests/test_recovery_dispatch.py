@@ -48,3 +48,19 @@ def test_changed_findings_do_not_reset_incident_retry_budget():
     assert first.attempt_key == changed.attempt_key
     different_pr = repair_identity("owner/RAMS", 436, "a" * 40, "check", ["lint failed"])
     assert first.incident_key != different_pr.incident_key
+
+
+@pytest.mark.parametrize("finding", ["bad\\x00payload", "bad\\x1bescape", "bad\\rreturn"])
+def test_control_character_findings_are_rejected(finding):
+    orchestrator = Mock()
+    with pytest.raises(ValueError, match="empty canonical finding"):
+        reserve_repair(orchestrator, repository="owner/RAMS", pr_number=435,
+                       head_sha="a" * 40, kind="check", findings=[finding],
+                       owner="worker-1")
+    orchestrator.claim.assert_not_called()
+
+
+def test_multiline_findings_remain_accepted():
+    identity = repair_identity("owner/RAMS", 435, "a" * 40, "check",
+                               ["failed test:\\n\\tassert expected"])
+    assert identity.head_sha == "a" * 40
