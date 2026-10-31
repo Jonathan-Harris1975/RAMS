@@ -11,6 +11,7 @@ from typing import Any
 from repo_mgmt.d1_coordinator import D1Coordinator
 from repo_mgmt.incident_identity import IncidentIdentity
 from repo_mgmt.recovery_evidence import write_evidence
+from repo_mgmt.deployment_receipt import verified_deployment
 
 
 class RecoveryOrchestrator:
@@ -63,6 +64,14 @@ class RecoveryOrchestrator:
                resolved: bool, evidence: dict[str, Any],
                now: int | None = None) -> bool:
         """Persist the outcome before releasing the exact owner's lease."""
+        if type(resolved) is not bool:
+            raise ValueError("resolved must be boolean")
+        if not isinstance(evidence, dict):
+            raise ValueError("completion evidence must be an object")
+        if resolved:
+            # Only authenticated exact-SHA production provenance can close an
+            # incident. Passing CI or merging a PR is insufficient.
+            verified_deployment(identity.head_sha.lower(), evidence.get("deployment"))
         timestamp = int(time.time()) if now is None else now
         # A completion receipt is an attempted outcome, not proof that the
         # coordinator accepted a release. The exact-owner fence remains decisive.
