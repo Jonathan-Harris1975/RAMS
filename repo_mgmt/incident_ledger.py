@@ -94,6 +94,24 @@ class IncidentLedger:
             db.execute("COMMIT")
             return True
 
+    def renew(
+        self, identity: IncidentIdentity, *, owner: str,
+        lease_seconds: int = 300, now: float | None = None,
+    ) -> bool:
+        """Extend an active lease without changing its owner or attempt."""
+        if not 1 <= lease_seconds <= 3600:
+            raise ValueError("invalid lease duration")
+        timestamp = time.time() if now is None else now
+        with self._connect() as db:
+            cursor = db.execute(
+                "UPDATE incidents SET lease_until=?, updated_at=? "
+                "WHERE incident_key=? AND attempt_key=? AND owner=? "
+                "AND lease_until>?",
+                (timestamp + lease_seconds, timestamp, identity.incident_key,
+                 identity.attempt_key, owner, timestamp),
+            )
+            return cursor.rowcount == 1
+
     def finish(
         self, identity: IncidentIdentity, *, owner: str, resolved: bool,
         now: float | None = None,
