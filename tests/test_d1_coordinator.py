@@ -48,7 +48,7 @@ def test_claim_is_single_atomic_upsert_and_fenced_release():
     assert "ON CONFLICT(incident_key) DO UPDATE" in sql
     assert "RETURNING incident_key" in sql
     assert "incidents.attempts<?" in sql
-    assert params[-2:] == ["100", "3"]
+    assert params[-2:] == [100, 3]
 
     with patch.object(client, "query", return_value=[]) as query:
         assert not client.finish("a" * 64, "b" * 64, "stale-owner",
@@ -69,8 +69,8 @@ def test_lease_renewal_requires_exact_owner_and_live_lease():
         assert client.renew("a" * 64, "b" * 64, "worker", now=100,
                             lease_seconds=60)
     assert "AND owner=? AND lease_until>?" in query.call_args.args[0]
-    assert query.call_args.args[1] == ["160", "100", "a" * 64,
-                                       "b" * 64, "worker", "100"]
+    assert query.call_args.args[1] == [160, 100, "a" * 64,
+                                       "b" * 64, "worker", 100]
     with patch.object(client, "query", return_value=[]):
         assert not client.renew("a" * 64, "b" * 64, "stale", now=101)
 
@@ -82,7 +82,7 @@ def test_durable_audit_event_is_parameterised():
                                    "claim_acquired", now=123)
     sql, params = query.call_args.args
     assert "INSERT INTO incident_events" in sql
-    assert params == ["a" * 64, "b" * 64, "claim_acquired", "worker", "123"]
+    assert params == ["a" * 64, "b" * 64, "claim_acquired", "worker", 123]
     with pytest.raises(ValueError):
         client.record_event("a" * 64, "b" * 64, "worker",
                             "'); DELETE FROM incidents;--", now=123)
