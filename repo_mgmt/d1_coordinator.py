@@ -31,7 +31,7 @@ class D1Coordinator:
         )
         self._token = token
 
-    def query(self, sql: str, params: list[str] | None = None) -> list[dict[str, Any]]:
+    def query(self, sql: str, params: list[str | int] | None = None) -> list[dict[str, Any]]:
         """Execute one parameterised statement and reject ambiguous results."""
         if not sql or ";" in sql.rstrip().rstrip(";") or len(sql) > 8192:
             raise ValueError("expected one bounded SQL statement")
@@ -91,8 +91,8 @@ class D1Coordinator:
             "RETURNING incident_key"
         )
         rows = self.query(sql, [incident_key, attempt_key, repository, head_sha,
-                                owner, str(now + lease_seconds), str(now),
-                                str(now), str(max_attempts)])
+                                owner, now + lease_seconds, now,
+                                now, max_attempts])
         return len(rows) == 1 and rows[0].get("incident_key") == incident_key
 
     def finish(self, incident_key: str, attempt_key: str, owner: str, *,
@@ -106,8 +106,8 @@ class D1Coordinator:
             "UPDATE incidents SET owner=NULL, lease_until=0, state=?, updated_at=? "
             "WHERE incident_key=? AND attempt_key=? AND owner=? AND lease_until>? "
             "RETURNING incident_key",
-            ["resolved" if resolved else "pending", str(now), incident_key,
-             attempt_key, owner, str(now)],
+            ["resolved" if resolved else "pending", now, incident_key,
+             attempt_key, owner, now],
         )
         return len(rows) == 1 and rows[0].get("incident_key") == incident_key
 
@@ -122,8 +122,8 @@ class D1Coordinator:
             "UPDATE incidents SET lease_until=?, updated_at=? "
             "WHERE incident_key=? AND attempt_key=? AND owner=? AND lease_until>? "
             "RETURNING incident_key",
-            [str(now + lease_seconds), str(now), incident_key,
-             attempt_key, owner, str(now)],
+            [now + lease_seconds, now, incident_key,
+             attempt_key, owner, now],
         )
         return len(rows) == 1 and rows[0].get("incident_key") == incident_key
 
@@ -137,6 +137,6 @@ class D1Coordinator:
         rows = self.query(
             "INSERT INTO incident_events (incident_key,attempt_key,event,owner,occurred_at) "
             "VALUES (?,?,?,?,?) RETURNING id",
-            [incident_key, attempt_key, event, owner, str(now)],
+            [incident_key, attempt_key, event, owner, now],
         )
         return len(rows) == 1 and isinstance(rows[0].get("id"), int)
