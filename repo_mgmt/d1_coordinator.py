@@ -46,13 +46,13 @@ class D1Coordinator:
                 data = json.load(response)
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             raise D1CoordinationError("D1 coordination request failed or outcome uncertain") from exc
-        if not data.get("success") or not isinstance(data.get("result"), list):
+        if not isinstance(data, dict) or not data.get("success") or not isinstance(data.get("result"), list):
             raise D1CoordinationError("D1 coordination rejected the query")
         results = data["result"]
-        if len(results) != 1 or not results[0].get("success"):
+        if len(results) != 1 or not isinstance(results[0], dict) or not results[0].get("success"):
             raise D1CoordinationError("D1 coordination statement did not succeed")
         rows = results[0].get("results")
-        if not isinstance(rows, list):
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise D1CoordinationError("D1 returned invalid results")
         return rows
 
