@@ -74,7 +74,7 @@ class D1Coordinator:
             raise ValueError("invalid head SHA")
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository):
             raise ValueError("invalid repository")
-        if not owner or len(owner) > 128 or not 1 <= lease_seconds <= 3600 or not 1 <= max_attempts <= 20:
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", owner) or not 1 <= lease_seconds <= 3600 or not 1 <= max_attempts <= 20:
             raise ValueError("invalid claim bounds")
         sql = (
             "INSERT INTO incidents (incident_key, attempt_key, repository, head_sha, owner, "
@@ -100,8 +100,8 @@ class D1Coordinator:
         """Release only a live lease belonging to this owner and exact attempt."""
         if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
             raise ValueError("invalid incident identity")
-        if not owner:
-            raise ValueError("missing owner")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", owner):
+            raise ValueError("invalid owner")
         rows = self.query(
             "UPDATE incidents SET owner=NULL, lease_until=0, state=?, updated_at=? "
             "WHERE incident_key=? AND attempt_key=? AND owner=? AND lease_until>? "
@@ -116,7 +116,7 @@ class D1Coordinator:
         """Renew only an unexpired lease owned by the same exact attempt."""
         if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
             raise ValueError("invalid incident identity")
-        if not owner or not 1 <= lease_seconds <= 3600:
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", owner) or not 1 <= lease_seconds <= 3600:
             raise ValueError("invalid lease renewal")
         rows = self.query(
             "UPDATE incidents SET lease_until=?, updated_at=? "
@@ -132,7 +132,7 @@ class D1Coordinator:
         """Append a bounded, durable D1 audit event."""
         if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
             raise ValueError("invalid incident identity")
-        if not owner or len(owner) > 128 or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", event):
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", owner) or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", event):
             raise ValueError("invalid audit event")
         rows = self.query(
             "INSERT INTO incident_events (incident_key,attempt_key,event,owner,occurred_at) "
