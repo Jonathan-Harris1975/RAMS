@@ -28,7 +28,7 @@ def repair_identity(repository: str, pr_number: int, head_sha: str,
     ):
         raise ValueError("invalid bounded findings")
     # Reject findings consisting only of whitespace; no diagnostic text is valid.
-    if any(not finding.strip() or any(ord(char) < 32 and char not in "\\n\\t" for char in finding) for finding in findings):
+    if any(not finding.strip() or any(ord(char) < 32 and char not in (chr(10), chr(9)) for char in finding) for finding in findings):
         raise ValueError("empty canonical finding")
     # Keep one incident across changing diagnostic text so retries cannot evade
     # the D1 attempt ceiling by rewriting a finding. The exact head remains
