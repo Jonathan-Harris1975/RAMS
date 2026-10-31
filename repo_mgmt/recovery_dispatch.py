@@ -29,7 +29,7 @@ def repair_identity(repository: str, pr_number: int, head_sha: str,
         for finding in findings
     ):
         raise ValueError("invalid bounded findings")
-    # Avoid transient URLs and order-dependent incidental whitespace in identity.
+    # Normalize ordering and whitespace without erasing substantive findings.
     canonical = sorted(set(" ".join(finding.split()) for finding in findings))
     if not canonical or any(not finding for finding in canonical):
         raise ValueError("empty canonical finding")
