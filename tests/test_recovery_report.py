@@ -48,3 +48,11 @@ def test_malformed_or_oversized_results_fail_closed(rows):
     d1.query.return_value = rows
     with pytest.raises(ValueError, match="invalid D1"):
         recovery_summary(d1, "owner/RAMS")
+
+
+@pytest.mark.parametrize("attempts", [None, "3", True, -1, 1000001, 1.5])
+def test_malformed_retry_counts_fail_closed(attempts):
+    d1 = Mock()
+    d1.query.return_value = [{"state": "repairing", "attempts": attempts}]
+    with pytest.raises(ValueError, match="retry count"):
+        recovery_summary(d1, "owner/RAMS")
