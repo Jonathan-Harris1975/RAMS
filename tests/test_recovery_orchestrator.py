@@ -48,7 +48,9 @@ def test_finish_requires_receipt_before_releasing():
     coordinator.finish.return_value = True
     assert RecoveryOrchestrator(coordinator, r2).finish(
         identity(), owner="worker", resolved=True,
-        evidence={"checks": "green"}, now=200)
+        evidence={"checks": "green", "deployment": {
+            "sha": "a" * 40, "environment": "production", "status": "success",
+            "provider": "koyeb", "deployment_id": "deploy-123"}}, now=200)
     assert coordinator.finish.call_count == 1
     assert coordinator.record_event.call_args.args[3] == "repair_resolved"
     assert r2.put_object_if_absent.call_args.args[1].startswith("autonomous-recovery/RAMS/receipts/")
@@ -91,3 +93,19 @@ def test_false_audit_acknowledgement_fails_closed(operation):
         else:
             orchestrator.finish(identity(), owner="worker", resolved=False,
                                 evidence={"reason": "explicit rejection"}, now=200)
+
+
+@pytest.mark.parametrize("evidence", [
+    {"checks": "green"},
+    {"deployment": {"sha": "b" * 40, "environment": "production",
+                    "status": "success", "provider": "koyeb", "deployment_id": "deploy-1"}},
+    {"deployment": {"sha": "a" * 40, "environment": "production",
+                    "status": "pending", "provider": "koyeb", "deployment_id": "deploy-1"}},
+])
+def test_resolved_incident_requires_verified_production_deployment(evidence):
+    coordinator, r2 = Mock(), Mock()
+    with pytest.raises(ValueError):
+        RecoveryOrchestrator(coordinator, r2).finish(
+            identity(), owner="worker", resolved=True, evidence=evidence, now=200)
+    coordinator.finish.assert_not_called()
+    r2.put_object_if_absent.assert_not_called()
