@@ -522,6 +522,23 @@ class Recovery(unittest.TestCase):
 
 
 
+    def test_stale_head_never_reserves_or_calls_kilo(self):
+        with (
+            patch.object(m.router, "all_pages", return_value=[]),
+            patch.object(m.router, "pr_details", return_value={
+                "head": {"sha": "b" * 40},
+                "number": self.pr["number"],
+            }),
+            patch.object(m.router, "api") as github,
+            patch.object(m.router.urllib.request, "urlopen") as kilo,
+        ):
+            self.assertEqual(
+                m.router.dispatch(self.pr, "review", ["finding"]),
+                "changed-before-dispatch",
+            )
+            github.assert_not_called()
+            kilo.assert_not_called()
+
     def test_persisted_marker_precedes_dispatch_and_survives_ack_failure(self):
         events = []
         saved = []
