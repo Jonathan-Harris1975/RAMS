@@ -122,6 +122,23 @@ jobs:
         R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
         R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       run: python3 .github/scripts/pr_repair_router.py
+    - name: Export durable recovery status
+      if: ${{ !cancelled() && vars.RAMS_RECOVERY_COORDINATION_ENABLED == 'true' }}
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        RAMS_RECOVERY_D1_DATABASE_ID: ${{ vars.RAMS_RECOVERY_D1_DATABASE_ID }}
+        RAMS_RECOVERY_D1_TOKEN: ${{ secrets.RAMS_RECOVERY_D1_TOKEN }}
+      run: python3 .github/scripts/recovery_status_report.py
+    - name: Preserve durable recovery status
+      if: ${{ always() && vars.RAMS_RECOVERY_COORDINATION_ENABLED == 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: rams-recovery-status-${{ github.run_id }}-${{ github.run_attempt }}
+        path: rams-autonomous-recovery-report.json
+        retention-days: 30
+        if-no-files-found: warn
     - name: Recover merge conflicts and verified review blockers
       if: ${{ !cancelled() }}
       env:
