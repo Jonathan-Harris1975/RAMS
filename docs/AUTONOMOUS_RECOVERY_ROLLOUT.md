@@ -15,7 +15,7 @@ all seven requirements have been verified on the default branch and in productio
    attempt keys. `IncidentLedger` provides atomic, bounded leases and retry
    accounting. It MUST use persistent storage, never a temporary CI workspace
    or ephemeral Koyeb filesystem. Do not enable distributed repair workers
-   until a shared persistent storage path is provisioned and tested.
+   until a transactional shared coordinator is provisioned and tested.
 5. **Validate**: require exact-head CI, CodeQL, security and hardening results.
    A previously passing SHA never admits a new SHA.
 6. **Merge/deploy**: trusted default-branch admission and native GitHub merge
@@ -37,3 +37,19 @@ all seven requirements have been verified on the default branch and in productio
 The repair webhook's existing GitHub-comment reservation remains authoritative
 until a durable, shared ledger is fully integrated. Do not run two independent
 deduplication authorities or claim cross-instance exactly-once dispatch.
+
+## Cloudflare R2 evidence storage (provisioned 2026-10-31)
+
+Cloudflare account's existing bucket: `hive-repositories`.
+Verified object: `autonomous-recovery/RAMS/README.json`.
+Repository-scoped keys must remain under `autonomous-recovery/RAMS/`:
+`incidents/`, `attempts/`, `audit/`, and `receipts/`.
+Create other repository prefixes **only** as each repository's upgrade starts.
+
+R2 objects are durable evidence storage, **not** a POSIX-mounted SQLite
+volume and not a transactional compare-and-swap lease coordinator. Do not
+upload a live SQLite database and assume concurrent writes are safe. Keep
+GitHub's existing comment reservation as dispatch deduplication until a
+transactional coordination backend (for example, a properly configured D1
+or Durable Object service) is implemented and validated. Use the existing
+R2 client and credentials; do not add public access or embed secrets.
