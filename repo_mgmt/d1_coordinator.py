@@ -21,9 +21,9 @@ class D1CoordinationError(RuntimeError):
 
 class D1Coordinator:
     def __init__(self, account_id: str, database_id: str, token: str) -> None:
-        if not _ACCOUNT.fullmatch(account_id) or not _UUID.fullmatch(database_id):
+        if not isinstance(account_id, str) or not isinstance(database_id, str) or not _ACCOUNT.fullmatch(account_id) or not _UUID.fullmatch(database_id):
             raise ValueError("invalid D1 resource identifiers")
-        if not token or any(c.isspace() for c in token):
+        if not isinstance(token, str) or not token or any(c.isspace() for c in token):
             raise ValueError("invalid D1 token")
         self._url = (
             f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
