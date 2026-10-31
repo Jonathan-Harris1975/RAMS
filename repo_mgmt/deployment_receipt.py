@@ -11,7 +11,7 @@ from typing import Any
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 
-def verified_deployment(expected_sha: str, deployment: dict[str, Any]) -> dict[str, str]:
+def verified_deployment(expected_sha: str, deployment: Any) -> dict[str, str]:
     """Return a minimal receipt only for a successful matching production release."""
     if not isinstance(expected_sha, str) or not _SHA.fullmatch(expected_sha):
         raise ValueError("invalid expected deployment SHA")
