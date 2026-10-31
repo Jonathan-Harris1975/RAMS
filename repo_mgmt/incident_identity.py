@@ -24,7 +24,7 @@ class IncidentIdentity:
     head_sha: str
 
     def __post_init__(self) -> None:
-        if not _REPO.fullmatch(self.repository):
+        if not _REPO.fullmatch(self.repository) or any(\n            segment in {".", ".."} for segment in self.repository.split("/")\n        ):
             raise ValueError("repository must be owner/name")
         if not _KIND.fullmatch(self.category):
             raise ValueError("invalid incident category")
