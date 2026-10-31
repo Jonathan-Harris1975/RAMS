@@ -42,7 +42,7 @@ class D1Coordinator:
                      "Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=15) as response:
+            with urllib.request.urlopen(request, timeout=15) as response:  # nosec B310 - fixed HTTPS Cloudflare API URL
                 data = json.load(response)
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             raise D1CoordinationError("D1 coordination request failed or outcome uncertain") from exc
