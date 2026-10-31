@@ -12,7 +12,7 @@ from repo_mgmt.d1_coordinator import D1Coordinator
 from repo_mgmt.incident_identity import IncidentIdentity
 from repo_mgmt.recovery_evidence import write_evidence
 from repo_mgmt.deployment_receipt import verified_deployment
-from repo_mgmt.recovery_validation import verified_release_checks
+from repo_mgmt.recovery_validation import verified_release_checks, verified_merge
 
 
 class RecoveryOrchestrator:
@@ -73,7 +73,8 @@ class RecoveryOrchestrator:
             # Only authenticated exact-SHA production provenance can close an
             # incident. Passing CI or merging a PR is insufficient.
             verified_release_checks(identity.head_sha.lower(), evidence.get("checks"))
-            verified_deployment(identity.head_sha.lower(), evidence.get("deployment"))
+            merged_sha = verified_merge(identity.head_sha.lower(), evidence.get("merge"))
+            verified_deployment(merged_sha, evidence.get("deployment"))
         timestamp = int(time.time()) if now is None else now
         # A completion receipt is an attempted outcome, not proof that the
         # coordinator accepted a release. The exact-owner fence remains decisive.
