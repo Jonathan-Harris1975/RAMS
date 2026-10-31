@@ -1,6 +1,6 @@
 """Release admission cannot be inferred from stale or partial CI evidence."""
 import pytest
-from repo_mgmt.recovery_validation import REQUIRED, verified_release_checks, verified_merge
+from repo_mgmt.recovery_validation import REQUIRED, verified_release_checks, verified_merge, verified_provider_outcome
 
 SHA = "a" * 40
 
@@ -45,3 +45,19 @@ def test_merged_commit_may_differ_from_source_sha():
 def test_unverified_merge_cannot_prove_production_release(merge):
     with pytest.raises(ValueError):
         verified_merge(SHA, merge)
+
+
+def test_authenticated_terminal_task_failure():
+    assert verified_provider_outcome({"task_id": "kilo-42", "status": "failed"},
+                                     expected_task_id="kilo-42") == {
+        "task_id": "kilo-42", "status": "failed"}
+
+
+@pytest.mark.parametrize("outcome", [None, {},
+    {"task_id": "different", "status": "failed"},
+    {"task_id": "kilo-42", "status": "running"},
+    {"task_id": "kilo-42", "status": "queued"},
+    {"task_id": "kilo-42", "status": "unknown"}])
+def test_unverified_provider_outcomes_never_release_repair(outcome):
+    with pytest.raises(ValueError):
+        verified_provider_outcome(outcome, expected_task_id="kilo-42")
