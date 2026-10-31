@@ -17,7 +17,7 @@ def test_scoped_key_and_receipt():
     )
     assert path.startswith(f"autonomous-recovery/RAMS/receipts/{key}/{sha}-")
     assert path.endswith(".json")
-    call = client.put_object.call_args
+    call = client.put_object_if_absent.call_args
     assert call.args[0] == "hive-repositories"
     assert call.args[1] == path
     assert call.kwargs["content_type"] == "application/json"
@@ -43,12 +43,12 @@ def test_large_and_nonfinite_payloads_rejected():
         write_evidence(**args, record={"payload": "x" * 70000})
     with pytest.raises(ValueError):
         write_evidence(**args, record={"nan": float("nan")})
-    client.put_object.assert_not_called()
+    client.put_object_if_absent.assert_not_called()
 
 
 def test_upload_failure_propagates():
     client = Mock()
-    client.put_object.side_effect = RuntimeError("upload failed")
+    client.put_object_if_absent.side_effect = RuntimeError("upload failed")
     with pytest.raises(RuntimeError, match="upload failed"):
         write_evidence(client, repo="RAMS", kind="audit",
                        incident_key="b" * 64, head_sha="a" * 40,
@@ -64,3 +64,12 @@ def test_each_receipt_has_unique_immutable_path():
     second = write_evidence(**args)
     assert first != second
     assert first.endswith(".json") and second.endswith(".json")
+
+
+def test_existing_receipt_is_never_overwritten():
+    client = Mock()
+    client.put_object_if_absent.return_value = False
+    with pytest.raises(RuntimeError, match="already exists"):
+        write_evidence(client, repo="RAMS", kind="audit",
+                       incident_key="b" * 64, head_sha="a" * 40,
+                       record={"state": "duplicate"})
