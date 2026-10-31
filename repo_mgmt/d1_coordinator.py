@@ -80,7 +80,7 @@ class D1Coordinator:
             "INSERT INTO incidents (incident_key, attempt_key, repository, head_sha, owner, "
             "lease_until, attempts, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'repairing', ?) "
             "ON CONFLICT(incident_key) DO UPDATE SET "
-            "attempt_key=excluded.attempt_key, head_sha=excluded.head_sha, "
+            "attempt_key=excluded.attempt_key, repository=excluded.repository, head_sha=excluded.head_sha, "
             "owner=excluded.owner, lease_until=excluded.lease_until, "
             "attempts=CASE WHEN incidents.attempt_key=excluded.attempt_key "
             "THEN incidents.attempts+1 ELSE 1 END, state='repairing', "
