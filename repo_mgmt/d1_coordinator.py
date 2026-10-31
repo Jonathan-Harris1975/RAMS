@@ -110,3 +110,19 @@ class D1Coordinator:
              attempt_key, owner, str(now)],
         )
         return len(rows) == 1 and rows[0].get("incident_key") == incident_key
+
+    def renew(self, incident_key: str, attempt_key: str, owner: str, *,
+              now: int, lease_seconds: int = 300) -> bool:
+        """Renew only an unexpired lease owned by the same exact attempt."""
+        if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
+            raise ValueError("invalid incident identity")
+        if not owner or not 1 <= lease_seconds <= 3600:
+            raise ValueError("invalid lease renewal")
+        rows = self.query(
+            "UPDATE incidents SET lease_until=?, updated_at=? "
+            "WHERE incident_key=? AND attempt_key=? AND owner=? AND lease_until>? "
+            "RETURNING incident_key",
+            [str(now + lease_seconds), str(now), incident_key,
+             attempt_key, owner, str(now)],
+        )
+        return len(rows) == 1 and rows[0].get("incident_key") == incident_key
