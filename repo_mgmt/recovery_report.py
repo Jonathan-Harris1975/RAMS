@@ -35,6 +35,22 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         attempts = row.get("attempts")
         if isinstance(attempts, bool) or not isinstance(attempts, int) or not 0 <= attempts <= 1000000:
             raise ValueError("invalid D1 incident retry count")
+    events = coordinator.query(
+        "SELECT event, COUNT(*) AS total FROM incident_events "
+        "WHERE incident_key IN (SELECT incident_key FROM incidents WHERE repository=?) "
+        "GROUP BY event ORDER BY event LIMIT 100",
+        [repository],
+    )
+    if not isinstance(events, list) or len(events) > 100:
+        raise ValueError("invalid D1 recovery event report")
+    event_totals = {}
+    for event in events:
+        if not isinstance(event, dict) or not isinstance(event.get("event"), str) or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", event["event"]):
+            raise ValueError("invalid D1 recovery event")
+        total = event.get("total")
+        if type(total) is not int or not 0 <= total <= 1_000_000:
+            raise ValueError("invalid D1 recovery event total")
+        event_totals[event["event"]] = total
     allowed = {"incident_key", "attempt_key", "head_sha", "state",
                "attempts", "lease_until", "updated_at"}
     return {
@@ -43,5 +59,6 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         "active": sum(row.get("state") == "repairing" for row in rows),
         "resolved": sum(row.get("state") == "resolved" for row in rows),
         "retry_attempts": sum(max(0, row["attempts"] - 1) for row in rows),
+        "event_totals": event_totals,
         "incidents": [{key: row[key] for key in allowed if key in row} for row in rows],
     }
