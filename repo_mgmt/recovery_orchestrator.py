@@ -37,6 +37,10 @@ class RecoveryOrchestrator:
                 "owner": owner, "diagnosis": diagnosis, "state": "claimed",
             },
         )
+        self.coordinator.record_event(
+            identity.incident_key, identity.attempt_key, owner,
+            "claim_acquired", now=timestamp,
+        )
         return True
 
     def finish(self, identity: IncidentIdentity, *, owner: str,
@@ -52,7 +56,14 @@ class RecoveryOrchestrator:
                 "owner": owner, "resolved": resolved, "evidence": evidence,
             },
         )
-        return self.coordinator.finish(
+        released = self.coordinator.finish(
             identity.incident_key, identity.attempt_key, owner,
             resolved=resolved, now=timestamp,
         )
+        if released:
+            self.coordinator.record_event(
+                identity.incident_key, identity.attempt_key, owner,
+                "repair_resolved" if resolved else "repair_released",
+                now=timestamp,
+            )
+        return released
