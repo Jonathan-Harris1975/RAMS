@@ -5,6 +5,7 @@ import pytest
 
 from repo_mgmt.incident_identity import IncidentIdentity
 from repo_mgmt.recovery_orchestrator import RecoveryOrchestrator
+from repo_mgmt.recovery_validation import REQUIRED
 
 
 def identity():
@@ -48,7 +49,8 @@ def test_finish_requires_receipt_before_releasing():
     coordinator.finish.return_value = True
     assert RecoveryOrchestrator(coordinator, r2).finish(
         identity(), owner="worker", resolved=True,
-        evidence={"checks": "green", "deployment": {
+        evidence={"checks": [{"name": name, "head_sha": "a" * 40,
+            "status": "completed", "conclusion": "success"} for name in REQUIRED], "deployment": {
             "sha": "a" * 40, "environment": "production", "status": "success",
             "provider": "koyeb", "deployment_id": "deploy-123"}}, now=200)
     assert coordinator.finish.call_count == 1
