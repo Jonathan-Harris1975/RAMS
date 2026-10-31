@@ -26,10 +26,14 @@ all seven requirements have been verified on the default branch and in productio
 
 ## Release blockers
 
-- Ledger is currently a tested component, **not** wired to the production
-  PR repair router or persistent shared storage.
-- Exact-head recovery lifecycle, reporting and deployment receipts require
-  integration tests against the running services.
+- D1 and R2 are provisioned and the PR router contains an opt-in durable
+  coordinator, but the trusted default-branch workflow is not activated.
+  The production D1 incident table currently contains no incidents.
+- Accepted Kilo handoffs are durably fenced and can be reopened only with
+  definitive terminal-failure evidence. No authenticated provider-outcome
+  polling or webhook consumer is wired to invoke that reconciliation yet.
+- Exact-head recovery lifecycle, HIVE cost reporting and deployment receipts
+  require integration tests against running services.
 - PR #435 must leave draft, pass all required checks and merge through the
   repository's existing trusted admission policy.
 - No rollout to the next repository until these checks are evidenced.
@@ -94,5 +98,7 @@ Do not treat a successful GitHub check run as proof of these runtime
 preconditions.
 
 The read-only `recovery_summary` adapter provides bounded, repository-filtered
-incident state and retry totals. It is not yet connected to the HIVE UI;
-model costs and deployment receipts remain separate release blockers.
+incident state, accepted handoffs, expired worker leases, exhausted retries and
+D1 event totals. The workflow can export this report as an artifact when enabled.
+It is not yet connected to the HIVE UI; authenticated provider completion,
+model costs and production deployment provenance remain release blockers.
