@@ -46,6 +46,7 @@ def test_claim_is_single_atomic_upsert_and_fenced_release():
                               "worker-1", now=100)
     sql, params = query.call_args.args
     assert "ON CONFLICT(incident_key) DO UPDATE" in sql
+    assert "repository=excluded.repository" in sql
     assert "RETURNING incident_key" in sql
     assert "incidents.attempts<?" in sql
     assert params[-2:] == [100, 3]
