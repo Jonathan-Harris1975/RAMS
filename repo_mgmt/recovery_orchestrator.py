@@ -43,6 +43,20 @@ class RecoveryOrchestrator:
         )
         return True
 
+    def renew(self, identity: IncidentIdentity, *, owner: str,
+              now: int | None = None) -> bool:
+        """Heartbeat the lease for the same head, owner and attempt."""
+        timestamp = int(time.time()) if now is None else now
+        renewed = self.coordinator.renew(
+            identity.incident_key, identity.attempt_key, owner, now=timestamp,
+        )
+        if renewed:
+            self.coordinator.record_event(
+                identity.incident_key, identity.attempt_key, owner,
+                "lease_renewed", now=timestamp,
+            )
+        return renewed
+
     def finish(self, identity: IncidentIdentity, *, owner: str,
                resolved: bool, evidence: dict[str, Any],
                now: int | None = None) -> bool:
