@@ -61,6 +61,41 @@ class RecoveryOrchestrator:
                 raise RuntimeError("D1 lease renewal audit was not persisted")
         return renewed
 
+    def reconcile_failed_handoff(self, identity: IncidentIdentity, *,
+                                 owner: str, provider_evidence: dict[str, Any],
+                                 now: int | None = None) -> bool:
+        """Reopen a handed-off attempt only on definitive provider failure.
+
+        A timeout, missing task, or transport error is not terminal evidence.
+        This is a trusted-runtime API; callers must authenticate provenance.
+        """
+        if not isinstance(provider_evidence, dict) or provider_evidence.get("status") != "failed":
+            raise ValueError("verified terminal provider failure is required")
+        task_id = provider_evidence.get("task_id")
+        if not isinstance(task_id, str) or not 1 <= len(task_id) <= 128 or not all(
+            c.isalnum() or c in "-_.:" for c in task_id
+        ):
+            raise ValueError("invalid provider task identity")
+        timestamp = int(time.time()) if now is None else now
+        write_evidence(
+            self.r2_client, repo=identity.repository.split("/")[1],
+            kind="receipts", incident_key=identity.incident_key,
+            head_sha=identity.head_sha, record={
+                "attempt_key": identity.attempt_key, "owner": owner,
+                "reconciliation": "provider_terminal_failure",
+                "task_id": task_id,
+            },
+        )
+        released = self.coordinator.reconcile_failed_handoff(
+            identity.incident_key, identity.attempt_key, owner, now=timestamp,
+        )
+        if released and not self.coordinator.record_event(
+            identity.incident_key, identity.attempt_key, owner,
+            "provider_handoff_failed", now=timestamp,
+        ):
+            raise RuntimeError("D1 reconciliation audit was not persisted")
+        return released
+
     def finish(self, identity: IncidentIdentity, *, owner: str,
                resolved: bool, evidence: dict[str, Any],
                now: int | None = None) -> bool:
