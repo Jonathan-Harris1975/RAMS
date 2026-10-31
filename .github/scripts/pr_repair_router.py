@@ -320,6 +320,12 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     if sum(f":{kind} -->" in c["body"] for c in markers) >= 2:
         print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
         return 'attempt-limit'
+    # A workflow-run event can be delayed while the PR advances. Never send
+    # stale findings to a repair agent, even when the event was authenticated.
+    current_pr = pr_details(int(number))
+    if current_pr is None or current_pr.get("head", {}).get("sha") != sha:
+        print(f"PR #{number} moved or became ineligible before repair dispatch.")
+        return 'changed-before-dispatch'
     trigger_secret = trigger_secret_for(kind)
     url = os.environ.get(trigger_secret, "")
     if not valid_kilo_webhook_url(url):
@@ -452,10 +458,11 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         print("::warning::Kilo accepted the repair request, but its acknowledgement could not be updated; the persisted marker still suppresses duplicate dispatch.")
     if orchestrator is not None:
         try:
-            orchestrator.coordinator.record_event(
+            if not orchestrator.coordinator.record_event(
                 _identity.incident_key, _identity.attempt_key, owner,
                 "repair_handoff_accepted", now=int(time.time()),
-            )
+            ):
+                raise RuntimeError("D1 acceptance audit not acknowledged")
         except Exception:
             print("::warning::Repair was accepted but durable acceptance audit failed; investigate before retrying.")
     print(f"Sent {kind} repair for PR #{number} at {sha[:12]} to Kilo.")
