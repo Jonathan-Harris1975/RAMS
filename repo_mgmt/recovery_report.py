@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from repo_mgmt.d1_coordinator import D1Coordinator
@@ -10,7 +11,7 @@ _REPOSITORY = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 
 
 def recovery_summary(coordinator: D1Coordinator, repository: str, *,
-                     limit: int = 50) -> dict[str, Any]:
+                     limit: int = 50, now: int | None = None) -> dict[str, Any]:
     """Return recent incidents and retry counts without secrets or evidence bodies.
 
     This endpoint-independent adapter is safe for human-readable HIVE reporting.
@@ -23,6 +24,9 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         raise ValueError("invalid repository")
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
+    timestamp = int(time.time()) if now is None else now
+    if type(timestamp) is not int or timestamp < 0:
+        raise ValueError("invalid report timestamp")
     rows = coordinator.query(
         "SELECT incident_key, attempt_key, head_sha, state, attempts, "
         "lease_until, updated_at FROM incidents WHERE repository=? "
@@ -68,6 +72,10 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         "total_returned": len(rows),
         "active": sum(row.get("state") == "repairing" for row in rows),
         "resolved": sum(row.get("state") == "resolved" for row in rows),
+        "expired_leases": sum(row["state"] == "repairing" and
+                              row["lease_until"] <= timestamp for row in rows),
+        "retry_exhausted": sum(row["state"] != "resolved" and row["attempts"] >= 2
+                               for row in rows),
         "retry_attempts": sum(max(0, row["attempts"] - 1) for row in rows),
         "event_totals": event_totals,
         "incidents": [{key: row[key] for key in allowed if key in row} for row in rows],
