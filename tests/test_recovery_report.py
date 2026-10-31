@@ -110,3 +110,17 @@ def test_invalid_report_timestamp_fails_before_query(now):
     with pytest.raises(ValueError, match="timestamp"):
         recovery_summary(d1, "owner/RAMS", now=now)
     d1.query.assert_not_called()
+
+
+def test_accepted_handoff_is_active_but_not_an_expired_worker():
+    d1 = Mock()
+    d1.query.side_effect = [[{
+        "incident_key": "a" * 64, "attempt_key": "b" * 64,
+        "head_sha": "c" * 40, "state": "handed_off",
+        "attempts": 2, "lease_until": 100, "updated_at": 99,
+    }], [{"event": "repair_handoff_accepted", "total": 1}]]
+    report = recovery_summary(d1, "owner/RAMS", now=500)
+    assert report["active"] == 1
+    assert report["handed_off"] == 1
+    assert report["expired_leases"] == 0
+    assert report["retry_exhausted"] == 1
