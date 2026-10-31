@@ -542,6 +542,7 @@ class Recovery(unittest.TestCase):
             return response
 
         with (
+            patch.object(m.router, "pr_details", return_value=self.pr),
             patch.object(m.router, "all_pages", return_value=[]),
             patch.object(m.router, "valid_kilo_webhook_url", return_value=True),
             patch.object(m.router, "machine_contract", return_value="machine contract"),
@@ -600,6 +601,7 @@ class Recovery(unittest.TestCase):
             "https://example.invalid/repair", 429, "rate limited", {}, None
         )
         with (
+            patch.object(m.router, "pr_details", return_value=self.pr),
             patch.object(m.router, "all_pages", side_effect=[[], comments]),
             patch.object(m.router, "api", side_effect=api),
             patch.object(m.router, "valid_kilo_webhook_url", return_value=True),
