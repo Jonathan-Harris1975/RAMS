@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -16,7 +17,7 @@ _KEY = re.compile(r"^[a-f0-9]{64}$")
 _TYPES = frozenset({"incidents", "attempts", "audit", "receipts"})
 
 
-def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str) -> str:
+def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str,\n                 receipt_id: str | None = None) -> str:
     """Build a path that cannot escape the repository's evidence prefix."""
     if not _REPO.fullmatch(repo) or repo in {".", ".."}:
         raise ValueError("invalid repository")
@@ -24,7 +25,7 @@ def evidence_key(repo: str, kind: str, incident_key: str, head_sha: str) -> str:
         raise ValueError("invalid evidence category")
     if not _KEY.fullmatch(incident_key) or not _SHA.fullmatch(head_sha):
         raise ValueError("invalid incident key or SHA")
-    return f"autonomous-recovery/{repo}/{kind}/{incident_key}/{head_sha.lower()}.json"
+    if receipt_id is not None and not re.fullmatch(r"[a-f0-9]{32}", receipt_id):\n        raise ValueError("invalid receipt ID")\n    suffix = f"-{receipt_id}" if receipt_id else ""\n    return f"autonomous-recovery/{repo}/{kind}/{incident_key}/{head_sha.lower()}{suffix}.json"
 
 
 def write_evidence(
@@ -33,7 +34,7 @@ def write_evidence(
     bucket: str = "hive-repositories",
 ) -> str:
     """Persist a bounded JSON receipt, using the existing RAMS R2Client."""
-    key = evidence_key(repo, kind, incident_key, head_sha)
+    key = evidence_key(repo, kind, incident_key, head_sha, uuid.uuid4().hex)
     if not isinstance(record, dict):
         raise ValueError("record must be an object")
     payload = json.dumps({
