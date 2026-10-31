@@ -374,7 +374,10 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                "kind": kind, "task": instruction, "findings": findings[:12]}
     # Optional durable coordination is enabled only with all required scoped
     # credentials. Existing GitHub reservations remain the final handoff guard.
-    if os.environ.get("RAMS_RECOVERY_COORDINATION_ENABLED", "").lower() == "true":
+    recovery_flag = os.environ.get("RAMS_RECOVERY_COORDINATION_ENABLED", "").strip().lower()
+    if recovery_flag not in {"", "false", "true"}:
+        raise RuntimeError("Invalid RAMS recovery coordination flag")
+    if recovery_flag == "true":
         from repo_mgmt.d1_coordinator import D1Coordinator
         from repo_mgmt.recovery_dispatch import reserve_repair
         from repo_mgmt.recovery_orchestrator import RecoveryOrchestrator
