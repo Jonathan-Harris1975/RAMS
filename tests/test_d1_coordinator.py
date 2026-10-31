@@ -37,3 +37,27 @@ def test_invalid_identifiers_and_multistatement_rejected():
     client = D1Coordinator(ACCOUNT, DATABASE, "token")
     with pytest.raises(ValueError):
         client.query("DELETE FROM incidents; DELETE FROM incident_events")
+
+
+def test_claim_is_single_atomic_upsert_and_fenced_release():
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query", return_value=[{"incident_key": "a" * 64}]) as query:
+        assert client.acquire("a" * 64, "b" * 64, "owner/RAMS", "c" * 40,
+                              "worker-1", now=100)
+    sql, params = query.call_args.args
+    assert "ON CONFLICT(incident_key) DO UPDATE" in sql
+    assert "RETURNING incident_key" in sql
+    assert "incidents.attempts<?" in sql
+    assert params[-2:] == ["100", "3"]
+
+    with patch.object(client, "query", return_value=[]) as query:
+        assert not client.finish("a" * 64, "b" * 64, "stale-owner",
+                                 resolved=True, now=200)
+    assert "AND owner=? AND lease_until>?" in query.call_args.args[0]
+
+
+def test_claim_rejects_invalid_identity():
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with pytest.raises(ValueError):
+        client.acquire("../escape", "b" * 64, "owner/RAMS", "c" * 40,
+                       "worker", now=100)
