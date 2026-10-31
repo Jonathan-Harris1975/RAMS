@@ -78,6 +78,11 @@ def recovery_summary(coordinator: D1Coordinator, repository: str, *,
         "retry_exhausted": sum(row["state"] != "resolved" and row["attempts"] >= 3
                                for row in rows),
         "retry_attempts": sum(max(0, row["attempts"] - 1) for row in rows),
+        "escalation_required": sum(row["state"] != "resolved" and
+                                   row["attempts"] >= 3 for row in rows),
+        "provider_cost_usd": None,
+        "provider_cost_status": "not_integrated",
+        "production_health": "not_verified",
         "event_totals": event_totals,
         "incidents": [{key: row[key] for key in allowed if key in row} for row in rows],
     }
