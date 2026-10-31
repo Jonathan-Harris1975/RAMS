@@ -65,3 +65,34 @@ Python service. Before activation, deploy an authenticated Worker/D1 binding
 or another supported secure D1 access path, implement atomic conditional
 claims and exact-owner fencing, test concurrent workers, and provision scoped
 credentials. Never expose Cloudflare account-wide tokens to untrusted PRs.
+
+
+## Trusted router opt-in (not yet activated)
+
+The default-branch `.github/workflows/pr-issue-repair.yml` now supports
+`vars.RAMS_RECOVERY_COORDINATION_ENABLED=true` for a D1 claim and an R2
+diagnostic receipt **before** Kilo dispatch. The feature remains disabled
+until all of the following are verified in the trusted `Autonomy` environment:
+
+- `vars.CLOUDFLARE_ACCOUNT_ID` identifies the provisioned Cloudflare account.
+- `vars.RAMS_RECOVERY_D1_DATABASE_ID` identifies the provisioned D1 database.
+- `secrets.RAMS_RECOVERY_D1_TOKEN` is a scoped D1 API credential, never
+  an account-wide administrative token.
+- `secrets.R2_ACCESS_KEY_ID` and `secrets.R2_SECRET_ACCESS_KEY` grant
+  access to the private `hive-repositories` bucket.
+- The trusted runner can install the declared Python dependencies and write
+  a D1 claim and a private R2 receipt with a synthetic, non-production incident.
+- Two competing trusted workers cannot both acquire the same live incident.
+- A failed R2 write prevents webhook dispatch, and a stale owner cannot
+  release another worker's D1 lease.
+
+The GitHub issue-comment reservation is deliberately retained as a second
+safety check during migration. Claims that are acquired before a failed
+GitHub reservation or an ambiguous webhook response must not be
+automatically retried until their lease and provider delivery are reconciled.
+Do not treat a successful GitHub check run as proof of these runtime
+preconditions.
+
+The read-only `recovery_summary` adapter provides bounded, repository-filtered
+incident state and retry totals. It is not yet connected to the HIVE UI;
+model costs and deployment receipts remain separate release blockers.
