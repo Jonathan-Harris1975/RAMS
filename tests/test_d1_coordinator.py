@@ -54,7 +54,7 @@ def test_claim_is_single_atomic_upsert_and_fenced_release():
     with patch.object(client, "query", return_value=[]) as query:
         assert not client.finish("a" * 64, "b" * 64, "stale-owner",
                                  resolved=True, now=200)
-    assert "AND owner=? AND lease_until>?" in query.call_args.args[0]
+    assert "AND owner=? AND (lease_until>? OR state='handed_off')" in query.call_args.args[0]
 
 
 def test_claim_rejects_invalid_identity():
