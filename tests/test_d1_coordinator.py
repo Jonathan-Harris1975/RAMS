@@ -117,3 +117,19 @@ def test_query_rejects_malformed_response_shapes(payload):
     with patch("urllib.request.urlopen", return_value=io.BytesIO(body)):
         with pytest.raises(D1CoordinationError):
             client.query("SELECT 1")
+
+
+@pytest.mark.parametrize("operation", ["acquire", "renew", "finish"])
+@pytest.mark.parametrize("rows", [[{"incident_key": "f" * 64}],
+                                   [{"incident_key": "a" * 64}] * 2])
+def test_mutations_reject_wrong_or_ambiguous_acknowledgement(operation, rows):
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query", return_value=rows):
+        with pytest.raises(D1CoordinationError):
+            if operation == "acquire":
+                client.acquire("a" * 64, "b" * 64, "owner/RAMS", "c" * 40,
+                               "worker", now=100)
+            elif operation == "renew":
+                client.renew("a" * 64, "b" * 64, "worker", now=100)
+            else:
+                client.finish("a" * 64, "b" * 64, "worker", resolved=False, now=100)
