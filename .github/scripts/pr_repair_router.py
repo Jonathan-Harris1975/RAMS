@@ -469,6 +469,17 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                 "repair_handoff_accepted", now=int(time.time()),
             ):
                 raise RuntimeError("D1 acceptance audit not acknowledged")
+            # A durable acceptance receipt is required before the GitHub
+            # marker can truthfully describe this as accepted.
+            from repo_mgmt.recovery_evidence import write_evidence
+            write_evidence(
+                orchestrator.r2_client, repo=REPO.split("/")[1],
+                kind="receipts", incident_key=_identity.incident_key,
+                head_sha=_identity.head_sha,
+                record={"outcome": "accepted", "attempt_key": _identity.attempt_key,
+                        "owner": owner, "pr_number": number, "kind": kind,
+                        "source_sha": sha, "provider": "kilo"},
+            )
             handoff_recorded = True
         except Exception:
             print("::warning::Kilo accepted repair but durable handoff is uncertain; operator reconciliation required.")
