@@ -22,9 +22,9 @@ def repair_identity(repository: str, pr_number: int, head_sha: str,
     """Fingerprint the authenticated issue, never an arbitrary repair prompt."""
     if isinstance(pr_number, bool) or not isinstance(pr_number, int) or not 1 <= pr_number <= 1_000_000:
         raise ValueError("invalid PR number")
-    if not _SHA.fullmatch(head_sha) or not _KIND.fullmatch(kind):
+    if not isinstance(head_sha, str) or not isinstance(kind, str) or not _SHA.fullmatch(head_sha) or not _KIND.fullmatch(kind):
         raise ValueError("invalid repair head or category")
-    if not isinstance(findings, list) or not 1 <= len(findings) <= 12 or any(
+    if not isinstance(repository, str) or not isinstance(findings, list) or not 1 <= len(findings) <= 12 or any(
         not isinstance(finding, str) or not 1 <= len(finding) <= 3500
         for finding in findings
     ):
