@@ -27,13 +27,12 @@ def repair_identity(repository: str, pr_number: int, head_sha: str,
         for finding in findings
     ):
         raise ValueError("invalid bounded findings")
-    # Normalize ordering and whitespace without erasing substantive findings.
-    canonical = sorted(set(" ".join(finding.split()) for finding in findings))
-    if not canonical or any(not finding for finding in canonical):
+    # Reject findings consisting only of whitespace; no diagnostic text is valid.
+    if any(not finding.strip() for finding in findings):
         raise ValueError("empty canonical finding")
     # Keep one incident across changing diagnostic text so retries cannot evade
     # the D1 attempt ceiling by rewriting a finding. The exact head remains
-    # the attempt boundary; the findings digest belongs in the diagnosis.
+    # the attempt boundary; the full findings belong in the diagnosis.
     return IncidentIdentity(repository, "pr_repair", kind,
                             f"pr:{pr_number}", head_sha)
 
