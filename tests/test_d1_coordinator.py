@@ -133,3 +133,19 @@ def test_mutations_reject_wrong_or_ambiguous_acknowledgement(operation, rows):
                 client.renew("a" * 64, "b" * 64, "worker", now=100)
             else:
                 client.finish("a" * 64, "b" * 64, "worker", resolved=False, now=100)
+
+
+def test_accepted_handoff_is_atomically_fenced_against_redelivery():
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query", return_value=[{"incident_key": "a" * 64}]) as query:
+        assert client.mark_handoff("a" * 64, "b" * 64, "worker", now=100)
+    sql, params = query.call_args.args
+    assert "state='handed_off'" in sql
+    assert "AND owner=? AND lease_until>?" in sql
+    assert params == [100, "a" * 64, "b" * 64, "worker", 100]
+    with patch.object(client, "query", return_value=[]) as query:
+        assert not client.mark_handoff("a" * 64, "b" * 64, "stale", now=101)
+    with patch.object(client, "query", return_value=[]) as query:
+        assert not client.acquire("a" * 64, "b" * 64, "owner/RAMS", "c" * 40,
+                                  "worker-2", now=500)
+    assert "incidents.state IN ('resolved', 'handed_off')" in query.call_args.args[0]
