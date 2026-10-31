@@ -47,5 +47,5 @@ def write_evidence(
     }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     if len(payload) > 65536:
         raise ValueError("evidence record exceeds 64 KiB")
-    r2_client.put_object(bucket, key, payload, content_type="application/json")
+    if not r2_client.put_object_if_absent(\n        bucket, key, payload, content_type="application/json",\n    ):\n        raise RuntimeError("recovery evidence receipt already exists")
     return key
