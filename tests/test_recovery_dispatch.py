@@ -31,7 +31,7 @@ def test_claim_uses_durable_orchestrator_and_preserves_diagnosis():
     assert orchestrator.claim.call_args.kwargs["diagnosis"]["source_head_sha"] == "a" * 40
 
 
-@pytest.mark.parametrize("findings", [[], [""] , ["x" * 3501], ["x"] * 13])
+@pytest.mark.parametrize("findings", [[], [""] , ["x" * 3501], ["   "], ["x"] * 13])
 def test_invalid_findings_never_claim(findings):
     orchestrator = Mock()
     with pytest.raises(ValueError):
