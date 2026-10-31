@@ -372,6 +372,30 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     instruction = machine_contract() + "\n\n" + instruction
     payload = {"repository": REPO, "source_pr": source, "source_sha": sha,
                "kind": kind, "task": instruction, "findings": findings[:12]}
+    # Optional durable coordination is enabled only with all required scoped
+    # credentials. Existing GitHub reservations remain the final handoff guard.
+    if os.environ.get("RAMS_RECOVERY_COORDINATION_ENABLED", "").lower() == "true":
+        from repo_mgmt.d1_coordinator import D1Coordinator
+        from repo_mgmt.recovery_dispatch import reserve_repair
+        from repo_mgmt.recovery_orchestrator import RecoveryOrchestrator
+        from repo_mgmt.r2_client import R2Client
+        from repo_mgmt.config import Settings
+
+        coordinator = D1Coordinator(
+            os.environ["CLOUDFLARE_ACCOUNT_ID"],
+            os.environ["RAMS_RECOVERY_D1_DATABASE_ID"],
+            os.environ["RAMS_RECOVERY_D1_TOKEN"],
+        )
+        orchestrator = RecoveryOrchestrator(coordinator, R2Client(Settings()))
+        owner = f"gh-{os.environ['GITHUB_RUN_ID']}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
+        _identity, acquired = reserve_repair(
+            orchestrator, repository=REPO, pr_number=int(number),
+            head_sha=sha, kind=kind, findings=findings[:12], owner=owner,
+        )
+        if not acquired:
+            print(f"PR #{number} has an active or exhausted durable repair claim; skipping.")
+            return 'durable-claim-unavailable'
+
     # Write the deduplication marker before contacting Kilo. If the later
     # acknowledgement update fails, an event retry still sees the reservation.
     reservation = api("POST", f"/repos/{REPO}/issues/{number}/comments", {"body":
