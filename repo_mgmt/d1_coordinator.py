@@ -88,7 +88,7 @@ class D1Coordinator:
             "THEN incidents.attempts+1 ELSE 1 END, state='repairing', "
             "updated_at=excluded.updated_at WHERE "
             "(incidents.owner IS NULL OR incidents.lease_until<=?) "
-             "AND incidents.state!='handed_off' AND NOT (incidents.state='resolved' AND incidents.attempt_key=excluded.attempt_key) "
+            "AND incidents.state!='handed_off' AND NOT (incidents.state='resolved' AND incidents.attempt_key=excluded.attempt_key) "
             "AND (incidents.attempt_key!=excluded.attempt_key OR incidents.attempts<?) "
             "RETURNING incident_key"
         )
