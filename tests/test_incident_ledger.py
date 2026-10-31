@@ -80,3 +80,27 @@ def test_lease_renewal_is_fenced_by_owner_and_expiry(tmp_path):
     assert not ledger.renew(key, owner="a", now=126)
     assert ledger.acquire(key, owner="b", now=126)
     assert not ledger.finish(key, owner="a", resolved=True, now=127)
+
+
+def test_audit_trail_persists_and_is_bounded(tmp_path):
+    path = tmp_path / "incidents.sqlite3"
+    ledger = IncidentLedger(path)
+    key = incident()
+    assert ledger.events(key) == []
+    assert ledger.acquire(key, owner="worker", now=100)
+    assert ledger.finish(key, owner="worker", resolved=False, now=101)
+    assert ledger.acquire(key, owner="worker2", now=102)
+    events = IncidentLedger(path).events(key)
+    assert [event["event"] for event in events] == ["acquired", "released", "acquired"]
+    assert len(ledger.events(key, limit=2)) == 2
+    with pytest.raises(ValueError):
+        ledger.events(key, limit=0)
+
+
+def test_rejected_claim_does_not_write_audit_event(tmp_path):
+    ledger = IncidentLedger(tmp_path / "incidents.sqlite3")
+    key = incident()
+    assert ledger.acquire(key, owner="a", now=100)
+    assert not ledger.acquire(key, owner="b", now=101)
+    assert not ledger.finish(key, owner="b", resolved=True, now=102)
+    assert len(ledger.events(key)) == 1
