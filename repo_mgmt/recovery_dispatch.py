@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any
 
 from repo_mgmt.incident_identity import IncidentIdentity
 from repo_mgmt.recovery_orchestrator import RecoveryOrchestrator
