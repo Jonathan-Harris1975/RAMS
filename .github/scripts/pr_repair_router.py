@@ -423,20 +423,22 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
             if response.status not in (200, 201, 202, 204):
                 raise RuntimeError(f"Kilo trigger returned HTTP {response.status}")
     except urllib.error.HTTPError as exc:
+        durable_rejection_recorded = orchestrator is None
         if 400 <= exc.code < 500 and orchestrator is not None:
             # An explicit provider rejection cannot have created a repair task.
             # Record the rejected handoff before releasing this exact-owner lease.
             # Uncertain or failed receipts retain the lease and suppress retries.
             try:
-                if not orchestrator.finish(
+                durable_rejection_recorded = orchestrator.finish(
                     _identity, owner=owner, resolved=False,
                     evidence={"outcome": "rejected", "http_status": exc.code,
                               "pr_number": number, "head_sha": sha},
-                ):
+                )
+                if not durable_rejection_recorded:
                     print("::warning::D1 repair lease could not be released after explicit rejection.")
             except Exception:
                 print("::warning::Durable rejection receipt failed; lease retained for reconciliation.")
-        if 400 <= exc.code < 500:
+        if 400 <= exc.code < 500 and durable_rejection_recorded:
             try:
                 api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
                     f"{marker}\ndispatch-state: rejected-http-{exc.code}\n"
@@ -444,6 +446,8 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                     "one bounded retry remains available after correcting or clearing the rejection."})
             except Exception:
                 print("::warning::Kilo rejected the repair handoff, but its reservation could not be marked retryable; automatic retry remains suppressed.")
+        if 400 <= exc.code < 500 and not durable_rejection_recorded:
+            print("::warning::Rejection could not be durably reconciled; pending marker retained.")
         raise RuntimeError(f"Kilo trigger returned HTTP {exc.code}") from None
     except urllib.error.URLError:
         # The provider may have accepted before the connection failed; keep the
