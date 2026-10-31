@@ -458,13 +458,18 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         print("::warning::Kilo accepted the repair request, but its acknowledgement could not be updated; the persisted marker still suppresses duplicate dispatch.")
     if orchestrator is not None:
         try:
+            if not orchestrator.coordinator.mark_handoff(
+                _identity.incident_key, _identity.attempt_key, owner,
+                now=int(time.time()),
+            ):
+                raise RuntimeError("D1 accepted handoff was not persisted")
             if not orchestrator.coordinator.record_event(
                 _identity.incident_key, _identity.attempt_key, owner,
                 "repair_handoff_accepted", now=int(time.time()),
             ):
                 raise RuntimeError("D1 acceptance audit not acknowledged")
         except Exception:
-            print("::warning::Repair was accepted but durable acceptance audit failed; investigate before retrying.")
+            print("::warning::Repair was accepted but durable handoff or audit failed; investigate before retrying.")
     print(f"Sent {kind} repair for PR #{number} at {sha[:12]} to Kilo.")
     return 'requested'
 
