@@ -15,7 +15,7 @@ def test_scoped_key_and_receipt():
         client, repo="RAMS", kind="receipts", incident_key=key,
         head_sha=sha, record={"state": "validated"},
     )
-    assert path == f"autonomous-recovery/RAMS/receipts/{key}/{sha}.json"
+    assert path.startswith(f"autonomous-recovery/RAMS/receipts/{key}/{sha}-")\n    assert path.endswith(".json")
     call = client.put_object.call_args
     assert call.args[0] == "hive-repositories"
     assert call.args[1] == path
@@ -52,3 +52,14 @@ def test_upload_failure_propagates():
         write_evidence(client, repo="RAMS", kind="audit",
                        incident_key="b" * 64, head_sha="a" * 40,
                        record={"state": "failed"})
+
+
+def test_each_receipt_has_unique_immutable_path():
+    client = Mock()
+    args = dict(r2_client=client, repo="RAMS", kind="audit",
+                incident_key="b" * 64, head_sha="a" * 40,
+                record={"state": "retry"})
+    first = write_evidence(**args)
+    second = write_evidence(**args)
+    assert first != second
+    assert first.endswith(".json") and second.endswith(".json")
