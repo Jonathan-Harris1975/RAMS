@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -377,6 +378,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     recovery_flag = os.environ.get("RAMS_RECOVERY_COORDINATION_ENABLED", "").strip().lower()
     if recovery_flag not in {"", "false", "true"}:
         raise RuntimeError("Invalid RAMS recovery coordination flag")
+    orchestrator = None
     if recovery_flag == "true":
         from repo_mgmt.d1_coordinator import D1Coordinator
         from repo_mgmt.recovery_dispatch import reserve_repair
@@ -415,6 +417,19 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
             if response.status not in (200, 201, 202, 204):
                 raise RuntimeError(f"Kilo trigger returned HTTP {response.status}")
     except urllib.error.HTTPError as exc:
+        if 400 <= exc.code < 500 and orchestrator is not None:
+            # An explicit provider rejection cannot have created a repair task.
+            # Record the rejected handoff before releasing this exact-owner lease.
+            # Uncertain or failed receipts retain the lease and suppress retries.
+            try:
+                if not orchestrator.finish(
+                    _identity, owner=owner, resolved=False,
+                    evidence={"outcome": "rejected", "http_status": exc.code,
+                              "pr_number": number, "head_sha": sha},
+                ):
+                    print("::warning::D1 repair lease could not be released after explicit rejection.")
+            except Exception:
+                print("::warning::Durable rejection receipt failed; lease retained for reconciliation.")
         if 400 <= exc.code < 500:
             try:
                 api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
@@ -435,6 +450,14 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
             "The source PR remains governed by its normal checks."})
     except Exception:
         print("::warning::Kilo accepted the repair request, but its acknowledgement could not be updated; the persisted marker still suppresses duplicate dispatch.")
+    if orchestrator is not None:
+        try:
+            orchestrator.coordinator.record_event(
+                _identity.incident_key, _identity.attempt_key, owner,
+                "repair_handoff_accepted", now=int(time.time()),
+            )
+        except Exception:
+            print("::warning::Repair was accepted but durable acceptance audit failed; investigate before retrying.")
     print(f"Sent {kind} repair for PR #{number} at {sha[:12]} to Kilo.")
     return 'requested'
 
