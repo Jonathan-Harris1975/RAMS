@@ -96,7 +96,7 @@ def test_false_audit_acknowledgement_fails_closed(operation):
             orchestrator.renew(identity(), owner="worker", now=150)
         else:
             orchestrator.finish(identity(), owner="worker", resolved=False,
-                                evidence={"reason": "explicit rejection"}, now=200)
+                                evidence={"outcome": "rejected", "reason": "explicit rejection"}, now=200)
 
 
 @pytest.mark.parametrize("evidence", [
@@ -148,4 +148,16 @@ def test_reconciliation_rejects_task_id_from_another_dispatch():
             provider_evidence={"status": "failed", "task_id": "other-task"},
             expected_task_id="task-123", now=300)
     coordinator.reconcile_failed_handoff.assert_not_called()
+    r2.put_object_if_absent.assert_not_called()
+
+
+@pytest.mark.parametrize("evidence", [{}, {"reason": "timeout"},
+    {"outcome": "unknown"}, {"outcome": "accepted"}])
+def test_unverified_unresolved_release_is_never_persisted(evidence):
+    coordinator, r2 = Mock(), Mock()
+    with pytest.raises(ValueError, match="definitive"):
+        RecoveryOrchestrator(coordinator, r2).finish(
+            identity(), owner="worker", resolved=False,
+            evidence=evidence, now=200)
+    coordinator.finish.assert_not_called()
     r2.put_object_if_absent.assert_not_called()
