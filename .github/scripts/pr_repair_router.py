@@ -450,12 +450,9 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         # pending marker and require inspection before another dispatch.
         raise RuntimeError("Kilo trigger could not be reached") from None
 
-    try:
-        api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
-            f"{marker}\ndispatch-state: accepted\nKilo accepted the repair request for {kind}. "
-            "The source PR remains governed by its normal checks."})
-    except Exception:
-        print("::warning::Kilo accepted the repair request, but its acknowledgement could not be updated; the persisted marker still suppresses duplicate dispatch.")
+    # Persist the durable handoff before presenting the GitHub marker as
+    # accepted. A failed D1 write is an uncertain delivery, never success.
+    handoff_recorded = orchestrator is None
     if orchestrator is not None:
         try:
             if not orchestrator.coordinator.mark_handoff(
@@ -468,8 +465,18 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                 "repair_handoff_accepted", now=int(time.time()),
             ):
                 raise RuntimeError("D1 acceptance audit not acknowledged")
+            handoff_recorded = True
         except Exception:
-            print("::warning::Repair was accepted but durable handoff or audit failed; investigate before retrying.")
+            print("::warning::Kilo accepted repair but durable handoff is uncertain; operator reconciliation required.")
+    if handoff_recorded:
+        try:
+            api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
+                f"{marker}\\ndispatch-state: accepted\\nKilo accepted the repair request for {kind}. "
+                "The source PR remains governed by its normal checks."})
+        except Exception:
+            print("::warning::Kilo accepted repair, but the persisted reservation marker could not be updated.")
+    else:
+        raise RuntimeError("Kilo handoff accepted but durable state is uncertain")
     print(f"Sent {kind} repair for PR #{number} at {sha[:12]} to Kilo.")
     return 'requested'
 
