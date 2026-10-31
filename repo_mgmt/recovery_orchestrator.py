@@ -102,6 +102,8 @@ class RecoveryOrchestrator:
             raise ValueError("resolved must be boolean")
         if not isinstance(evidence, dict):
             raise ValueError("completion evidence must be an object")
+        if not resolved and evidence.get("outcome") not in {"rejected", "cancelled"}:
+            raise ValueError("unresolved repair release requires a definitive rejection or cancellation")
         if resolved:
             # Only authenticated exact-SHA production provenance can close an
             # incident. Passing CI or merging a PR is insufficient.
