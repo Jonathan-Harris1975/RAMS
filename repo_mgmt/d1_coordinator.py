@@ -88,7 +88,7 @@ class D1Coordinator:
             "THEN incidents.attempts+1 ELSE 1 END, state='repairing', "
             "updated_at=excluded.updated_at WHERE "
             "(incidents.owner IS NULL OR incidents.lease_until<=?) "
-            "AND NOT (incidents.state='resolved' AND incidents.attempt_key=excluded.attempt_key) "
+             "AND NOT (incidents.state IN ('resolved', 'handed_off') AND incidents.attempt_key=excluded.attempt_key) "
             "AND (incidents.attempt_key!=excluded.attempt_key OR incidents.attempts<?) "
             "RETURNING incident_key"
         )
@@ -97,6 +97,26 @@ class D1Coordinator:
                                 now, max_attempts])
         if len(rows) > 1 or (rows and rows[0].get("incident_key") != incident_key):
             raise D1CoordinationError("D1 conditional mutation returned an invalid claim")
+        return len(rows) == 1
+
+    def mark_handoff(self, incident_key: str, attempt_key: str, owner: str, *, now: int) -> bool:
+        """Fence an accepted provider handoff against lease-expiry redispatch.
+
+        This does not resolve the incident. Reconciliation must explicitly
+        establish the repair outcome before permitting another attempt.
+        """
+        if not re.fullmatch(r"[a-f0-9]{64}", incident_key) or not re.fullmatch(r"[a-f0-9]{64}", attempt_key):
+            raise ValueError("invalid incident identity")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", owner) or type(now) is not int or now < 0:
+            raise ValueError("invalid handoff owner or timestamp")
+        rows = self.query(
+            "UPDATE incidents SET state='handed_off', updated_at=? "
+            "WHERE incident_key=? AND attempt_key=? AND owner=? "
+            "AND lease_until>? AND state='repairing' RETURNING incident_key",
+            [now, incident_key, attempt_key, owner, now],
+        )
+        if len(rows) > 1 or (rows and rows[0].get("incident_key") != incident_key):
+            raise D1CoordinationError("D1 handoff returned invalid incident identity")
         return len(rows) == 1
 
     def finish(self, incident_key: str, attempt_key: str, owner: str, *,
