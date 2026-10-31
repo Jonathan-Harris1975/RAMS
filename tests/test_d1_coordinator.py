@@ -61,3 +61,15 @@ def test_claim_rejects_invalid_identity():
     with pytest.raises(ValueError):
         client.acquire("../escape", "b" * 64, "owner/RAMS", "c" * 40,
                        "worker", now=100)
+
+
+def test_lease_renewal_requires_exact_owner_and_live_lease():
+    client = D1Coordinator(ACCOUNT, DATABASE, "token")
+    with patch.object(client, "query", return_value=[{"incident_key": "a" * 64}]) as query:
+        assert client.renew("a" * 64, "b" * 64, "worker", now=100,
+                            lease_seconds=60)
+    assert "AND owner=? AND lease_until>?" in query.call_args.args[0]
+    assert query.call_args.args[1] == ["160", "100", "a" * 64,
+                                       "b" * 64, "worker", "100"]
+    with patch.object(client, "query", return_value=[]):
+        assert not client.renew("a" * 64, "b" * 64, "stale", now=101)
