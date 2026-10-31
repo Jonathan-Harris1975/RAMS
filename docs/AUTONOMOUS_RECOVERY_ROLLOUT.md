@@ -1,0 +1,39 @@
+# RAMS autonomous recovery rollout
+
+## Implementation and verification contract
+
+This rollout is RAMS-only. Do not propagate to other repositories until
+all seven requirements have been verified on the default branch and in production.
+
+1. **Detect**: authenticated GitHub workflow/PR failure events; operational
+   alerts must remain active and failures must not be silently treated as success.
+2. **Diagnose**: retain original failing checks, exact head SHA and a stable
+   failure fingerprint; no unverified root-cause assumptions.
+3. **Repair**: route bounded repair tasks to the governed model ladder;
+   reject out-of-scope patches and retain model-cost evidence.
+4. **Recover**: `IncidentIdentity` provides stable incident and exact-head
+   attempt keys. `IncidentLedger` provides atomic, bounded leases and retry
+   accounting. It MUST use persistent storage, never a temporary CI workspace
+   or ephemeral Koyeb filesystem. Do not enable distributed repair workers
+   until a shared persistent storage path is provisioned and tested.
+5. **Validate**: require exact-head CI, CodeQL, security and hardening results.
+   A previously passing SHA never admits a new SHA.
+6. **Merge/deploy**: trusted default-branch admission and native GitHub merge
+   rules remain authoritative. No owner-approval forgery, check bypass or
+   force-push. Verify deployment against the merged SHA before closing.
+7. **Learn/report**: record incident outcomes, retries, model routing/cost,
+   escalation and production health in existing operational reporting.
+
+## Release blockers
+
+- Ledger is currently a tested component, **not** wired to the production
+  PR repair router or persistent shared storage.
+- Exact-head recovery lifecycle, reporting and deployment receipts require
+  integration tests against the running services.
+- PR #435 must leave draft, pass all required checks and merge through the
+  repository's existing trusted admission policy.
+- No rollout to the next repository until these checks are evidenced.
+
+The repair webhook's existing GitHub-comment reservation remains authoritative
+until a durable, shared ledger is fully integrated. Do not run two independent
+deduplication authorities or claim cross-instance exactly-once dispatch.
