@@ -6,8 +6,6 @@ D1 coordinator and R2 evidence client, and still retain GitHub reservations.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 
 from repo_mgmt.incident_identity import IncidentIdentity
@@ -33,9 +31,11 @@ def repair_identity(repository: str, pr_number: int, head_sha: str,
     canonical = sorted(set(" ".join(finding.split()) for finding in findings))
     if not canonical or any(not finding for finding in canonical):
         raise ValueError("empty canonical finding")
-    digest = hashlib.sha256(json.dumps(canonical, separators=(",", ":")).encode()).hexdigest()
+    # Keep one incident across changing diagnostic text so retries cannot evade
+    # the D1 attempt ceiling by rewriting a finding. The exact head remains
+    # the attempt boundary; the findings digest belongs in the diagnosis.
     return IncidentIdentity(repository, "pr_repair", kind,
-                            f"pr:{pr_number}:{digest}", head_sha)
+                            f"pr:{pr_number}", head_sha)
 
 
 def reserve_repair(orchestrator: RecoveryOrchestrator, *,
