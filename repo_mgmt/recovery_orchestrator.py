@@ -62,6 +62,8 @@ class RecoveryOrchestrator:
                now: int | None = None) -> bool:
         """Persist the outcome before releasing the exact owner's lease."""
         timestamp = int(time.time()) if now is None else now
+        # A completion receipt is an attempted outcome, not proof that the
+        # coordinator accepted a release. The exact-owner fence remains decisive.
         write_evidence(
             self.r2_client, repo=identity.repository.split("/")[1],
             kind="receipts", incident_key=identity.incident_key,
