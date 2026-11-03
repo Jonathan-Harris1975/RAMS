@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     # ── OpenRouter ─────────────────────────────────────────────────────────
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str = ""
-    openrouter_primary_model: str = "openai/gpt-5.6-sol"
+    openrouter_primary_model: str = "openai/gpt-5.6-luna"
     openrouter_secondary_model: str = "anthropic/claude-sonnet-5.5"
     openrouter_triage_model: str = "openai/gpt-5.6-luna"
     openrouter_http_referer: str = "https://jonathan-harris.online"
