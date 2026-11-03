@@ -25,9 +25,9 @@ EXPECTED_IMAGE_DEFAULTS = {
     "OPENROUTER_API_BASE": "https://openrouter.ai/api/v1",
     "OPENROUTER_APP_NAME": "RAMS",
     "OPENROUTER_HTTP_REFERER": "https://jonathan-harris.online",
-    "OPENROUTER_PRIMARY_MODEL": "openai/gpt-5.6-sol",
-    "OPENROUTER_SECONDARY_MODEL": "anthropic/claude-sonnet-5",
-    "OPENROUTER_TRIAGE_MODEL": "google/gemini-2.5-flash-lite",
+    "OPENROUTER_PRIMARY_MODEL": "openai/gpt-5.6-luna",
+    "OPENROUTER_SECONDARY_MODEL": "anthropic/claude-sonnet-5.5",
+    "OPENROUTER_TRIAGE_MODEL": "openai/gpt-5.6-luna",
     "PYTHONDONTWRITEBYTECODE": "1",
     "PYTHONHASHSEED": "random",
     "PYTHONUNBUFFERED": "1",
@@ -77,7 +77,7 @@ EXPECTED_IMAGE_DEFAULTS = {
     "RMS_OPENROUTER_RETRY_BASE_SECONDS": "1",
     "RMS_OPENROUTER_RETRY_MAX_SECONDS": "8",
     "RMS_OPENROUTER_WRITE_TIMEOUT_SECONDS": "30",
-    "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL": "openai/gpt-5.6-sol",
+    "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL": "anthropic/claude-sonnet-5.5",
     "RMS_ENGINEERING_COUNCIL_CHAIR_CONFIDENCE": "85",
     "RMS_ENGINEERING_COUNCIL_CHAIR_MODEL": "anthropic/claude-opus-5",
     "RMS_ENGINEERING_COUNCIL_ENABLED": "true",
@@ -187,8 +187,8 @@ def test_image_defaults_plus_sensitive_bindings_form_complete_production_config(
     assert cfg.rms_push_enabled is True
     assert cfg.rms_create_pr is True
     assert cfg.rms_max_issues_per_run == 1
-    assert cfg.openrouter_primary_model == "openai/gpt-5.6-sol"
-    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5"
+    assert cfg.openrouter_primary_model == "openai/gpt-5.6-luna"
+    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5.5"
     assert cfg.rms_engineering_council_expert_enabled is False
 
 
