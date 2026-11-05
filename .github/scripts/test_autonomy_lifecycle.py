@@ -219,7 +219,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         admit.assert_called_once_with(22, self.sha)
         approve.assert_not_called()
 
-    def test_human_hold_label_withdraws_existing_GitHub native auto-merge_admission(self):
+    def test_human_hold_label_withdraws_existing_GitHub_native_auto_merge_admission(self):
         pr = copy.deepcopy(self.pr)
         pr["labels"].extend([{"name": "hold"}, {"name": "autonomy:admitted"}])
         self.enterContext(patch.object(automation, "pr_files", return_value=["docs/runbook.md"]))
