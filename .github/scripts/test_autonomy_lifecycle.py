@@ -133,8 +133,8 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         self.assertNotIn("disablePullRequestAutoMerge", source)
         self.assertNotIn('gh", "pr", "merge', source)
 
-    def test_managed_branch_pr_is_admitted_to_mergify_after_green_checks(self):
-        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+    def test_managed_branch_pr_is_admitted_to_github_native_auto_merge_after_green_checks(self):
+        admit = self.enterContext(patch.object(automation, "admit_to_github_native_auto_merge"))
         approve = self.enterContext(patch.object(automation, "approve_pr"))
         self.enterContext(
             patch.object(automation, "pr_files", return_value=["docs/example.md"])
@@ -159,7 +159,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         risk_label = self.enterContext(patch.object(automation, "add_labels"))
         self.enterContext(patch.object(automation, "comment"))
         hold = self.enterContext(patch.object(automation, "place_human_hold"))
-        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+        admit = self.enterContext(patch.object(automation, "admit_to_github_native_auto_merge"))
         self.enterContext(
             patch.object(automation, "pr_files", return_value=[".github/workflows/security.yml"])
         )
@@ -175,7 +175,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         risk_label = self.enterContext(patch.object(automation, "add_labels"))
         self.enterContext(patch.object(automation, "comment"))
         hold = self.enterContext(patch.object(automation, "place_human_hold"))
-        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+        admit = self.enterContext(patch.object(automation, "admit_to_github_native_auto_merge"))
         self.enterContext(
             patch.object(automation, "pr_files", return_value=[".github/scripts/trusted_automation.py"])
         )
@@ -191,7 +191,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         pr = copy.deepcopy(self.pr)
         pr["labels"].append({"name": automation.RISK_APPROVAL_LABEL})
         remove = self.enterContext(patch.object(automation, "remove_label"))
-        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+        admit = self.enterContext(patch.object(automation, "admit_to_github_native_auto_merge"))
         approve = self.enterContext(patch.object(automation, "approve_pr"))
         self.enterContext(
             patch.object(
@@ -219,25 +219,25 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         admit.assert_called_once_with(22, self.sha)
         approve.assert_not_called()
 
-    def test_human_hold_label_withdraws_existing_mergify_admission(self):
+    def test_human_hold_label_withdraws_existing_github_native_auto_merge_admission(self):
         pr = copy.deepcopy(self.pr)
         pr["labels"].extend([{"name": "hold"}, {"name": "autonomy:admitted"}])
         self.enterContext(patch.object(automation, "pr_files", return_value=["docs/runbook.md"]))
         remove = self.enterContext(patch.object(automation, "remove_label"))
-        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+        admit = self.enterContext(patch.object(automation, "admit_to_github_native_auto_merge"))
 
         automation.reconcile_pr(pr)
 
         remove.assert_any_call(22, "autonomy:admitted")
         admit.assert_not_called()
 
-    def test_admit_to_mergify_refuses_human_hold_label(self):
+    def test_admit_to_github_native_auto_merge_refuses_human_hold_label(self):
         pr = copy.deepcopy(self.pr)
         pr["labels"].append({"name": "do-not-merge"})
         self.enterContext(patch.object(automation, "get", return_value=pr))
         add = self.enterContext(patch.object(automation, "add_labels"))
 
-        automation.admit_to_mergify(22, self.sha)
+        automation.admit_to_github_native_auto_merge(22, self.sha)
 
         add.assert_not_called()
 
@@ -254,7 +254,7 @@ class KiloPolicyTests(unittest.TestCase):
         self.assertEqual(permission["external_directory"], "deny")
         for tool in ("edit", "write", "apply_patch"):
             self.assertEqual(permission[tool]["*"], "allow")
-            for path in ("kilo.jsonc", ".github/workflows/*", ".github/scripts/*", ".github/production-governance.json", ".mergify.yml", "renovate.json"):
+            for path in ("kilo.jsonc", ".github/workflows/*", ".github/scripts/*", ".github/production-governance.json", "renovate.json"):
                 self.assertEqual(permission[tool][path], "deny")
 
     def test_shell_is_deny_by_default_and_cannot_merge_deploy_or_force_push(self):
@@ -286,7 +286,7 @@ class RenovateGovernanceTests(unittest.TestCase):
             patch.object(automation, "pr_files", return_value=[".github/workflows/security.yml"]),
             patch.object(automation, "has_current_approval", return_value=False),
             patch.object(automation, "place_human_hold") as hold,
-            patch.object(automation, "admit_to_mergify") as admit,
+            patch.object(automation, "admit_to_github_native_auto_merge") as admit,
         ):
             automation.reconcile_pr(pr)
         hold.assert_not_called()
@@ -575,7 +575,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
             patch.object(automation, "has_operator_risk_approval", return_value=False),
             patch.object(automation, "add_labels") as add_risk_label,
             patch.object(automation, "comment") as risk_comment,
-            patch.object(automation, "admit_to_mergify") as admit,
+            patch.object(automation, "admit_to_github_native_auto_merge") as admit,
             patch.object(automation, "set_admission_check"),
             patch.object(automation, "remove_label"),
         ):

@@ -3,7 +3,7 @@
 
 This script is executed only by the trusted default-branch controller. It
 never checks out or executes code from the pushed branch and never enables or
-performs a merge. Mergify is the sole automated merge arbiter after trusted
+performs a merge. GitHub native auto-merge is the sole automated merge arbiter after trusted
 admission.
 """
 from __future__ import annotations
@@ -28,8 +28,7 @@ EXCLUDED_PREFIXES = (
     "autonomy/",
     "renovate/",
     "dependabot/",
-    "mergify/",
-    "tmp/",
+        "tmp/",
     "temp/",
     "internal/",
 )
@@ -222,7 +221,7 @@ def pr_metadata(branch: str, sha: str) -> tuple[str, str]:
         f"- Target branch: `{DEFAULT_BRANCH}`\n"
         f"- Signalled head: `{sha}`\n\n"
         "The repository's normal pull-request CI and security workflows must complete "
-        "successfully. Trusted automation may then admit the PR to Mergify; Mergify is "
+        "successfully. Trusted automation may then admit the PR to GitHub native auto-merge; GitHub native auto-merge is "
         "the sole automated merger. This branch controller never enables native auto-merge."
         f"{details_block}"
     )

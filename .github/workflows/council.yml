@@ -81,25 +81,26 @@ jobs:
             failures="$(jq --arg v "unresolved autonomy state exists" '. + [$v]' <<< "$failures")"
           fi
 
-          mergify_ok="false"
-          if [ -f .mergify.yml ]; then
-            mergify_ok="$(python3 - <<'PY'
+          github_native_auto_merge_ok="false"
+          if [ -f .github/scripts/native_auto_merge.py ] && [ -f .github/scripts/trusted_automation.py ]; then
+            github_native_auto_merge_ok="$(python3 - <<'PY'
           from pathlib import Path
-          text = Path(".mergify.yml").read_text()
+          controller = Path(".github/scripts/native_auto_merge.py").read_text()
+          trusted = Path(".github/scripts/trusted_automation.py").read_text()
           checks = [
-              "merge_method: squash",
-              "label = autonomy:admitted",
-              "check-success = ci-gate",
-              "check-success = CodeQL security alert gate",
-              "check-success = Trivy, Gitleaks and actionlint",
+              "ADMISSION_CHECK = \"Trusted autonomy admission\"",
+              "enablePullRequestAutoMerge",
+              "disablePullRequestAutoMerge",
+              "autonomy:human-hold",
+              "def admit_to_github_native_auto_merge",
           ]
-          print("true" if all(item in text for item in checks) else "false")
+          print("true" if all(item in controller + trusted for item in checks) else "false")
           PY
             )"
           fi
-          evidence="$(jq --argjson ok "$mergify_ok" --arg state "$([ -f .mergify.yml ] && echo PRESENT || echo MISSING)" '.mergifyPolicy=$ok | .mergifyPolicyFile=$state' <<< "$evidence")"
-          if [ "$mergify_ok" != "true" ]; then
-            failures="$(jq --arg v "$([ -f .mergify.yml ] && echo 'Mergify policy does not prove admitted squash-merge authority' || echo 'Mergify policy file .mergify.yml is missing; merge authority is unverified')" '. + [$v]' <<< "$failures")"
+          evidence="$(jq --argjson ok "$github_native_auto_merge_ok" --arg state "$([ -f .github/scripts/native_auto_merge.py ] && echo PRESENT || echo MISSING)" '.githubNativeAutoMergePolicy=$ok | .githubNativeAutoMergeController=$state' <<< "$evidence")"
+          if [ "$github_native_auto_merge_ok" != "true" ]; then
+            failures="$(jq --arg v "GitHub native auto-merge controller is missing or not gated by exact-head trusted admission" '. + [$v]' <<< "$failures")"
           fi
 
           koyeb_state="$(gh api "repos/${REPO}/commits/${TARGET_SHA}/status" --jq '[.statuses[] | select(.context | startswith("Koyeb - "))] | sort_by(.updated_at) | last | .state // "missing"')"
@@ -160,7 +161,7 @@ jobs:
           for name, result in workflows.items():
               lines.append(f"| {name} | {result} |")
           lines.extend([
-              f"| Mergify policy | {'PASS' if evidence.get('mergifyPolicy') else 'FAIL'} ({evidence.get('mergifyPolicyFile', 'unknown')} file) |",
+              f"| GitHub native auto-merge policy | {'PASS' if evidence.get('githubNativeAutoMergePolicy') else 'FAIL'} ({evidence.get('githubNativeAutoMergeController', 'unknown')} controller) |",
               f"| Koyeb deployment | {evidence.get('koyebDeployment', 'unknown')} |",
               f"| DAST | {evidence.get('dast', 'unknown')} |",
               f"| Open autonomy blockers | {evidence.get('autonomyBlockerCount', 'unknown')} |",
