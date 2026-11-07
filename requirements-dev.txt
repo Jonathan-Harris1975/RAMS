@@ -287,9 +287,9 @@ boto3==1.43.99 \
     # via
     #   -r requirements.in
     #   litellm
-botocore==1.43.114 \
-    --hash=sha256:d1c441a22e93e158de5b1e026205f5d6d67a4545d10540c5090c62dccb3a9eca \
-    --hash=sha256:f366fa4db518775632ad1eb128cd8203ca46396cecf37209d904f0bbc049ce90
+botocore==1.43.124 \
+    --hash=sha256:4651bac68d1aef78d42c8aefb514a6cd86fda07971b8348652a9d24f21b07965 \
+    --hash=sha256:6df80235995e2926e0768e7ad270e774adcd6ff0307da7ab87ffb8c384edb578
     # via
     #   boto3
     #   s3transfer
@@ -2790,9 +2790,9 @@ ruff==0.16.9 \
     --hash=sha256:d29c934357e45642fda2f34c0b1f4025b4a6c01e15e4bf0016879d60078a142c \
     --hash=sha256:ed1a252039200f57a59eebc063b54beabea67bfbaaca0eeaa7f54b5fbcda2284
     # via -r requirements-dev.in
-s3transfer==0.19.2 \
-    --hash=sha256:ba0309fd86be3c27dbf78cdd813c13c5e1df16e5874b99d2535ebbdfb9892993 \
-    --hash=sha256:d8168eccca828cbb2cd573675333f3bddd254313a9c42494b84c76b539e8ba25
+s3transfer==0.19.3 \
+    --hash=sha256:24eb7535804306355e31c952a90022bf5b2f9d760f9a11062c7493a217c08553 \
+    --hash=sha256:8326acc3d056d7f7b8a37110c7d2aea41f67e83f6ae79cd3b5fbcca34c726406
     # via boto3
 shellingham==1.5.4 \
     --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686 \
