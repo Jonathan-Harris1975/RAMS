@@ -619,7 +619,7 @@ class Recovery(unittest.TestCase):
         )
         with (
             patch.object(m.router, "pr_details", return_value=self.pr),
-            patch.object(m.router, "all_pages", side_effect=[[], comments]),
+            patch.object(m.router, "all_pages", side_effect=lambda path: list(comments) if "/comments" in path else []),
             patch.object(m.router, "api", side_effect=api),
             patch.object(m.router, "valid_kilo_webhook_url", return_value=True),
             patch.object(m.router, "machine_contract", return_value="machine contract"),
