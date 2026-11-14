@@ -109,11 +109,12 @@ class AuditRemediation:
                       "status": "pending" if batches else ("attention_required" if blocked else "completed"),
                       "completionBasis": "no actionable findings" if not batches and not blocked else None}
             key = f"{root}/state.json"
-            if not self.write(key, record, create=True):
-                return self.read(key)
-            # Index is also durable; recovery can resume after a service restart.
+            # Publish recovery intent first: a crash may leave an indexed pending
+            # registration, but it must never leave undiscoverable mandatory work.
+            # Also recreate the index when replaying an existing registration.
             self.write(f"{self.cfg.rms_report_prefix}/remediation/active/{pipeline}-{run_id}.json",
                        {"stateKey": key, "pipeline": pipeline, "runId": run_id}, create=True)
+            self.write(key, record, create=True)
             return self.reconcile(pipeline, run_id)
 
     def reconcile(self, pipeline: str, run_id: str) -> dict[str, Any]:

@@ -173,3 +173,14 @@ def test_stale_before_handoff_replans_without_replaying_uncertain_provider():
     service.write(new.removesuffix('.json')+'/provider-reservation.json',{'outcome':'unknown'})
     assert service.reconcile('content','stale-run')['status']=='attention_required'
     assert len(github.events)==2
+
+
+def test_repeated_registration_recovers_missing_active_index():
+    service, storage, github=setup()
+    service.register('content','orphaned-run',audit(),[task()])
+    index='qa-suite/reports/remediation/active/content-orphaned-run.json'
+    storage.delete_object('audits',index)
+    service.register('content','orphaned-run',audit(),[task()])
+    assert storage.object_exists('audits',index)
+    assert len(github.events)==1
+    assert service.sweep()==1
