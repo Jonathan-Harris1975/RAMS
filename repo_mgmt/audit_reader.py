@@ -361,10 +361,10 @@ def read_report_key(
             return {}
     if pipeline_id == "content":
         council = data.get("council")
-        if not isinstance(council, dict) or council.get("synthesisState") != "Complete":
-            logger.warning("audit_reader: content report synthesis is incomplete")
-            return {}
         if schema_version == "content-audit-report/v2":
+            if not isinstance(council, dict) or council.get("synthesisState") != "Complete":
+                logger.warning("audit_reader: content report synthesis is incomplete")
+                return {}
             refresh = data.get("sourceRefresh")
             if not isinstance(refresh, dict) or refresh.get("freshnessLocked") is not True:
                 logger.warning("audit_reader: content v2 source freshness is not locked")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from repo_mgmt.audit_remediation import AuditRemediation, digest
+from repo_mgmt.audit_remediation import AuditRemediation, _repository_lock, digest, protected
 
 
 class Storage:
@@ -184,3 +184,36 @@ def test_repeated_registration_recovers_missing_active_index():
     assert storage.object_exists('audits',index)
     assert len(github.events)==1
     assert service.sweep()==1
+
+
+def test_protected_infrastructure_and_build_paths():
+    for path in ('Dockerfile', 'Dockerfile.production', 'docker-compose.prod.yml', 'infra/main.tf', 'x.tfvars',
+                 'requirements-test.txt', 'Pipfile', 'setup.py', '.gitlab-ci.yml',
+                 'Jenkinsfile', 'azure-pipelines.yml', 'cloudbuild.yaml', 'netlify.toml',
+                 'vercel.json', 'fly.toml', 'k8s/app.yaml', 'helm/chart.yaml',
+                 'deploy/app.yaml', 'terraform/main.tf', 'ansible/site.yml'):
+        assert protected(path), path
+
+
+def test_repository_locks_are_shared_per_repository_only():
+    assert _repository_lock('owner/repo') is _repository_lock('owner/repo')
+    assert _repository_lock('owner/repo') is not _repository_lock('other/repo')
+
+
+def test_sweep_counts_missing_index_entry_and_continues():
+    service, storage, _ = setup()
+    index = 'qa-suite/reports/remediation/active/'
+    storage.objects['audits', index + 'missing.json'] = b'{}'
+    storage.objects['audits', index + 'present.json'] = b'{}'
+    real_read = service.read
+
+    def read(key):
+        if key.endswith('missing.json'):
+            raise KeyError(key)
+        if key.endswith('present.json'):
+            return {'pipeline': 'content', 'runId': 'present'}
+        return real_read(key)
+
+    service.read = read
+    service.reconcile = lambda *_: {'batches': [{'status': 'dispatch_pending'}]}
+    assert service.sweep() == 2

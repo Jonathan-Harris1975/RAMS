@@ -17,7 +17,8 @@ import httpx
 
 from repo_mgmt.github_pr import parse_github_repo
 
-_LOCK = threading.RLock()
+_LOCKS_GUARD = threading.Lock()
+_REPOSITORY_LOCKS: dict[str, threading.RLock] = {}
 _SHA = re.compile(r"[0-9a-f]{40}")
 _ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 _REQUIRED = {
@@ -39,11 +40,22 @@ def prefix(cfg: Any, pipeline: str, run_id: str) -> str:
 
 def protected(path: str) -> bool:
     parts = path.lower().split("/")
+    name = parts[-1]
     return (path.startswith("/") or ".." in parts or not path or "\\" in path
-            or parts[0] in {".github", ".git", "infra", "migrations"}
+            or parts[0] in {".github", ".git", "infra", "migrations", "k8s", "helm", "deploy", "terraform", "ansible"}
             or any(p in {"secrets", "credentials", "authentication"} for p in parts)
-            or parts[-1] in {"package.json", "package-lock.json", "pyproject.toml", "requirements.in", "requirements-dev.txt"}
-            or parts[-1].startswith(".env") or parts[-1].endswith((".lock", ".env", ".sql")))
+            or name in {"package.json", "package-lock.json", "pyproject.toml", "requirements.in", "requirements-dev.txt",
+                        "pipfile", "setup.py", "setup.cfg", "jenkinsfile", ".gitlab-ci.yml",
+                        "azure-pipelines.yml", "cloudbuild.yaml", "netlify.toml", "vercel.json", "fly.toml"}
+            or name.startswith("dockerfile")
+            or name.startswith((".env", "docker-compose", "requirements")) and
+               (name.startswith(".env") or name.startswith("docker-compose") or name.endswith(".txt"))
+            or name.endswith((".tf", ".tfvars", ".lock", ".env", ".sql")))
+
+
+def _repository_lock(repository: str) -> threading.RLock:
+    with _LOCKS_GUARD:
+        return _REPOSITORY_LOCKS.setdefault(repository, threading.RLock())
 
 
 class AuditRemediation:
@@ -77,9 +89,9 @@ class AuditRemediation:
         return True
 
     def register(self, pipeline: str, run_id: str, audit: dict[str, Any], tasks: list[dict[str, Any]]) -> dict[str, Any]:
-        with _LOCK:
+        repository = "/".join(parse_github_repo(self.cfg.repo_url_for(pipeline)))
+        with _repository_lock(repository):
             root = prefix(self.cfg, pipeline, run_id)
-            repository = "/".join(parse_github_repo(self.cfg.repo_url_for(pipeline)))
             eligible, blocked, guidance = [], [], []
             for task in tasks:
                 row = dict(task)
@@ -118,8 +130,9 @@ class AuditRemediation:
             return self.reconcile(pipeline, run_id)
 
     def reconcile(self, pipeline: str, run_id: str) -> dict[str, Any]:
-        with _LOCK:
-            root = prefix(self.cfg, pipeline, run_id)
+        root = prefix(self.cfg, pipeline, run_id)
+        repository = "/".join(parse_github_repo(self.cfg.repo_url_for(pipeline)))
+        with _repository_lock(repository):
             state = self.read(f"{root}/state.json")
             if state.get("status") in {"completed", "attention_required"} and not any(
                     b.get("status") != "verified" for b in state.get("batches", [])):
@@ -315,8 +328,8 @@ class AuditRemediation:
         if len(keys) >= 1000:
             raise ValueError("audit active index exceeds bounded sweep; refusing idle certification")
         for key in keys:
-            item = self.read(key)
             try:
+                item = self.read(key)
                 state = self.reconcile(item["pipeline"], item["runId"])
                 if any(b.get("status") != "verified" for b in state.get("batches", [])):
                     active += 1
