@@ -56,7 +56,8 @@ def test_code_fix_becomes_external_agent_routing_task():
 def test_missing_contract_refuses_direct_rams_code_write():
     routed = _apply_audit_remediation_routing([_issue()], {}, "website")
     item = routed[0]
-    assert item["classification"] == "code_fix"
+    assert item["classification"] == "manual_review"
+    assert item["proposedClassification"] == "code_fix"
     assert item["status"] == "manual_review"
     assert item["patchAttempted"] is False
     assert any("routing contract missing/invalid" in e for e in item["evidence"])
@@ -67,7 +68,14 @@ def test_unsupported_merge_authority_is_rejected():
     audit["operational"]["remediationRouting"]["mergeAuthority"] = "unsupported"
     routed = _apply_audit_remediation_routing([_issue()], audit, "website")
     item = routed[0]
-    assert item["classification"] == "code_fix"
+    assert item["classification"] == "manual_review"
+    assert item["proposedClassification"] == "code_fix"
     assert item["status"] == "manual_review"
     assert item["patchAttempted"] is False
     assert any("routing contract missing/invalid" in e for e in item["evidence"])
+
+
+def test_missing_contract_cannot_reach_executor_queue():
+    from repo_mgmt.task_ranker import rank
+    tasks = _apply_audit_remediation_routing([_issue()], {}, "website")
+    assert not rank(tasks).code_fix

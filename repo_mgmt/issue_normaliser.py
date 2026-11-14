@@ -1015,7 +1015,13 @@ def _map_content_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
     paths = [str(x).strip() for x in candidate.get("affectedPaths", []) if str(x).strip()] if isinstance(candidate.get("affectedPaths"), list) else []
     fix_class = _first_text(candidate, "fixClass", "allowedFixClass")
     allowed = {"content_prompt_fix","validator_fix","council_fix","retry_fix","metadata_fix","scheduler_fix","link_fix"}
-    safe_code = classification == "code_fix" and confidence == "confirmed" and bool(paths) and fix_class in allowed
+    source_ids = _safe_string_list(candidate.get("sourceFindingIds", []))
+    outcome = _first_text(candidate, "exactRemediation", "requiredOutcome")
+    verification = _first_text(candidate, "verificationMethod")
+    acceptance = _first_text(candidate, "acceptanceCriterion")
+    safe_code = (classification == "code_fix" and confidence == "confirmed" and bool(paths)
+                 and fix_class in allowed and bool(source_ids) and bool(outcome)
+                 and bool(verification) and bool(acceptance))
     return {
         "taskId": finding_id,
         "title": _first_text(candidate, "title") or f"Content council finding {finding_id}",
@@ -1028,6 +1034,9 @@ def _map_content_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
         "requiredOutcome": _first_text(candidate, "exactRemediation", "requiredOutcome"),
         "verificationMethod": _first_text(candidate, "verificationMethod", "acceptanceCriterion"),
         "sourceAudit": "content-master:final-report",
+        "sourceFindingIds": source_ids,
+        "acceptanceCriterion": acceptance,
+        "confidence": _confidence_from_candidate(candidate),
     }
 
 def _map_mobile_candidate(candidate: dict[str, Any], artefact_name: str) -> dict[str, Any] | None:
@@ -1671,7 +1680,7 @@ def _build_validated(
         "description": finding.get("description", ""),
         "fixClass": fix_class,
     }
-    for key in ("sourceIssueId", "sourceArtefact", "route", "viewport", "check", "sourceType", "sourceOwner", "automationReadiness", "councilMember"):
+    for key in ("sourceIssueId", "sourceFindingIds", "acceptanceCriterion", "verificationMethod", "sourceArtefact", "route", "viewport", "check", "sourceType", "sourceOwner", "automationReadiness", "councilMember"):
         if key in finding and finding[key] not in (None, ""):
             issue[key] = finding[key]
     try:
