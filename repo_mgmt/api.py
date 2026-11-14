@@ -28,6 +28,7 @@ from starlette.responses import Response
 
 from repo_mgmt import pipeline as pipeline_mod  # noqa: F401
 from repo_mgmt import audit_reader
+from repo_mgmt.audit_remediation import AuditRemediation
 from repo_mgmt.config import (
     ConfigurationError,
     PipelineId,
@@ -76,10 +77,19 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
             if not restored.get("ok"):
                 logger.warning("rms-api: model governance restore failed: %s", restored.get("error"))
         _r2_monitor_task = asyncio.create_task(_r2_monitor_loop(cfg))
+    remediation_task = None
+    if cfg is not None and _r2_configured(cfg) and process_local_idempotency_safe(cfg):
+        remediation_task = asyncio.create_task(_audit_remediation_loop(cfg))
     try:
         yield
     finally:
         _shutting_down = True
+        if remediation_task is not None:
+            remediation_task.cancel()
+            try:
+                await remediation_task
+            except asyncio.CancelledError:
+                pass
         if _r2_monitor_task is not None:
             _r2_monitor_task.cancel()
             try:
@@ -147,6 +157,7 @@ _r2_last_success_at: str | None = None
 _r2_last_failure_at: str | None = None
 _r2_check_count = 0
 _r2_monitor_task: asyncio.Task[None] | None = None
+_audit_pending_count = 0
 _bootstrap_attempted: bool = False
 _bootstrap_results: list[BootstrapResult] = []
 
@@ -539,7 +550,7 @@ def _pipeline_states() -> dict[str, str]:
 
 def _health_payload() -> dict[str, object]:
     """Build the exact /health contract from the RMS specification, plus lifecycle state."""
-    busy = any(_running.values())
+    busy = any(_running.values()) or _audit_pending_count != 0
     state = lifecycle.compute_state(busy=busy, dependencies_ready=True)
     return {"status": "ok", "pipelines": _pipeline_states(), "lifecycle": state}
 
@@ -550,7 +561,7 @@ def _readiness_payload() -> dict[str, object]:
     ready_values = [value for value in deps.values() if isinstance(value, bool)]
     dependencies_ready = bool(ready_values) and all(ready_values)
     status = "ready" if dependencies_ready else "degraded"
-    busy = any(_running.values())
+    busy = any(_running.values()) or _audit_pending_count != 0
     state = lifecycle.compute_state(busy=busy, dependencies_ready=dependencies_ready)
     return {
         "status": status,
@@ -786,7 +797,7 @@ def _claim_live_operation(
                 and terminal.get("runId") == saved_run_id
                 and terminal.get("requestDigest") == request_digest
                 and terminal.get("targetSha") == previous.get("targetSha")
-                and terminal.get("terminalResult") in {"completed", "failed"}):
+                and terminal.get("terminalResult") in {"completed", "failed", "awaiting_remediation"}):
             return None, JSONResponse(status_code=202, content={
                 **details, "dryRun": False, "terminalResult": terminal["terminalResult"],
                 "reportKey": terminal["reportKey"],
@@ -822,6 +833,10 @@ def _record_live_operation_result(operation: dict[str, Any], report: Any) -> Non
             if (isinstance(persisted, dict) and persisted.get("runId") == operation["runId"]
                     and persisted.get("pipeline") == operation["pipeline"]):
                 result["terminalResult"] = "failed" if report.error else "completed"
+                if getattr(report, "remediation", None) is not None:
+                    result["processingResult"] = result["terminalResult"]
+                    result["terminalResult"] = "awaiting_remediation"
+                    result["remediationStatusUrl"] = f"/remediation/{operation['pipeline']}/{operation['runId']}"
         except (R2Error, ValueError):
             pass
     created = r2.put_object_if_absent(cfg.r2_bucket_audits, operation["resultKey"],
@@ -838,7 +853,7 @@ async def _run_pipeline_bg(
     operation: dict[str, Any] | None = None,
 ) -> None:
     """Await a pipeline run and clear global eMicro admission state safely."""
-    global _active_pipeline, _active_run_id
+    global _active_pipeline, _active_run_id, _audit_pending_count
     _running[pipeline_id] = True
     report = None
     try:
@@ -869,6 +884,8 @@ async def _run_pipeline_bg(
                 logger.error("api: terminal receipt unconfirmed operation=%s runId=%s; replay remains blocked",
                              operation["operationId"], run_id)
         with _admission_lock:
+            if not dry_run and pipeline_id in {"website", "content"}:
+                _audit_pending_count = -1  # fresh durable sweep must certify idle before power-down
             _running[pipeline_id] = False
             if _active_run_id == run_id:
                 _active_pipeline = None
@@ -1566,6 +1583,52 @@ async def get_live_report(
 
 
 
+async def _audit_remediation_loop(cfg: Settings) -> None:
+    """Resume durable audit work after restarts, independently of HTTP polling."""
+    global _audit_pending_count
+    _audit_pending_count = -1
+    while True:
+        try:
+            r2 = _get_r2()
+            if r2 is not None:
+                _audit_pending_count = await asyncio.to_thread(AuditRemediation(cfg, r2).sweep)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _audit_pending_count = -1
+            logger.exception("audit remediation reconciliation failed; durable work remains unresolved")
+        await asyncio.sleep(60)
+
+
+@app.get("/remediation/{pipeline_id}/{run_id}")
+async def audit_remediation_status(
+    pipeline_id: Annotated[Literal["website", "content"], Path()],
+    run_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9._:-]{1,128}$")],
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    auth_error = _auth_error_response(authorization, request)
+    if auth_error is not None:
+        return auth_error
+    cfg, r2 = _get_cfg(), _get_r2()
+    if cfg is None or r2 is None:
+        return JSONResponse(status_code=503, content={"error": "remediation storage unavailable"})
+    try:
+        from repo_mgmt.audit_remediation import prefix as work_prefix
+        state = await asyncio.to_thread(AuditRemediation(cfg, r2).read, f"{work_prefix(cfg, pipeline_id, run_id)}/state.json")
+    except (R2Error, ValueError):
+        try:
+            report = await asyncio.to_thread(AuditRemediation(cfg, r2).read,
+                f"{cfg.rms_report_prefix}/{pipeline_id}/{run_id}/report.json")
+        except (R2Error, ValueError):
+            report = None
+        if report and (report.get("error") or report.get("dryRun")):
+            return JSONResponse(status_code=200, content={"status": "attention_required", "pipeline": pipeline_id,
+                "runId": run_id, "error": report.get("error") or "dry-run report cannot certify live remediation"})
+        return JSONResponse(status_code=202, content={"status": "pending", "pipeline": pipeline_id, "runId": run_id})
+    return JSONResponse(status_code=200, content=state)
+
+
 @app.get("/operations/{operation_id}")
 async def live_operation_status(
     operation_id: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
@@ -1603,7 +1666,7 @@ async def live_operation_status(
                     and terminal.get("runId") == claim.get("runId")
                     and terminal.get("requestDigest") == claim.get("requestDigest")
                     and terminal.get("targetSha") == claim.get("targetSha")
-                    and terminal.get("terminalResult") in {"completed", "failed"}):
+                    and terminal.get("terminalResult") in {"completed", "failed", "awaiting_remediation"}):
                 return JSONResponse(status_code=200, content={
                     **details, "state": terminal["terminalResult"].upper(),
                     "recordedAt": terminal.get("recordedAt"), "reportKey": terminal.get("reportKey"),

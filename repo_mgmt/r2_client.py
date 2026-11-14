@@ -259,3 +259,10 @@ class R2Client:
             raise R2Error(
                 f"R2 object_exists failed for bucket={bucket!r} key={key!r}: {_error_summary(exc)}"
             ) from exc
+
+    def delete_object(self, bucket: str, key: str) -> None:
+        """Remove a mutable work index; immutable task evidence is retained."""
+        try:
+            self._client.delete_object(Bucket=bucket, Key=key)
+        except (ClientError, EndpointConnectionError, BotoCoreError) as exc:
+            raise R2Error(f"R2 work-index cleanup failed: {_error_summary(exc)}") from exc

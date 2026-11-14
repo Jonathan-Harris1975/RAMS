@@ -287,7 +287,7 @@ def read_report_key(
     allowed_schemas = (
         frozenset(_WEBSITE_REPORT_CONTRACTS)
         if pipeline_id == "website"
-        else frozenset({"content-audit-report/v1"})
+        else frozenset({"content-audit-report/v1", "content-audit-report/v2"})
     )
     if (
         data.get("auditType") != expected_type
@@ -359,6 +359,16 @@ def read_report_key(
                 final_key,
             )
             return {}
+    if pipeline_id == "content":
+        council = data.get("council")
+        if not isinstance(council, dict) or council.get("synthesisState") != "Complete":
+            logger.warning("audit_reader: content report synthesis is incomplete")
+            return {}
+        if schema_version == "content-audit-report/v2":
+            refresh = data.get("sourceRefresh")
+            if not isinstance(refresh, dict) or refresh.get("freshnessLocked") is not True:
+                logger.warning("audit_reader: content v2 source freshness is not locked")
+                return {}
     result = dict(data)
     result["sourceAuditKey"] = final_key
     return result
