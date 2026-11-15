@@ -359,3 +359,17 @@ def test_content_v2_requires_complete_fresh_report(mock_r2):
     payload['council']['synthesisState']='Incomplete'
     mock_r2.get_object.return_value=json.dumps(payload).encode()
     assert audit_reader.read_report_key('content',mock_r2,'audits',key)=={}
+
+
+def test_content_v1_also_requires_explicit_completed_synthesis(mock_r2):
+    key='audits/content-master/2026-11/legacy-run/content-audit.json'
+    root=key.rsplit('/',1)[0]
+    payload={'schemaVersion':'content-audit-report/v1','auditType':'content-master',
+        'remediationContractVersion':'rams-content/v1','sessionId':'legacy-run','retentionPolicy':'final-pdf-html-json-only',
+        'reportSet':{kind:{'key':f'{root}/content-audit.{kind}'} for kind in ['pdf','html','json']},
+        'council':{'synthesisState':'Complete'},'masterIssueLedger':[]}
+    mock_r2.get_object.return_value=json.dumps(payload).encode()
+    assert audit_reader.read_report_key('content',mock_r2,'audits',key)['schemaVersion']=='content-audit-report/v1'
+    payload.pop('council')
+    mock_r2.get_object.return_value=json.dumps(payload).encode()
+    assert audit_reader.read_report_key('content',mock_r2,'audits',key)=={}
