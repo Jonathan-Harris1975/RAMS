@@ -87,6 +87,10 @@ class AuditRemediation:
         with _LOCKS[pipeline]:
             root = prefix(self.cfg, pipeline, run_id)
             state = self.read(f"{root}/state.json")
+            if state.get("classificationCorrection"):
+                # Persisted correction and publication are separate writes. Retry
+                # interrupted publication even when no new row needs correction.
+                self._publish_progress(state, root)
             if (pipeline != "content" or state.get("status") != "attention_required"
                     or state.get("batches") or not state.get("manualReview")):
                 return state

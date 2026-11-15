@@ -261,3 +261,26 @@ def test_unmatched_manual_blockers_survive_deferred_guidance_recovery():
     assert result['status'] == 'attention_required'
     assert result['manualReview'][0]['title'] == 'Unknown defect'
     assert len(result['futureGuidance']) == 1
+
+
+def test_legacy_correction_publication_recovers_after_interrupted_completion_write():
+    service, storage, github = setup()
+    legacy_deferred_state(service)
+    write = storage.put_object_if_absent
+    fail_once = True
+
+    def interrupted(bucket, key, body, content_type='application/json'):
+        nonlocal fail_once
+        if key.endswith('/completion.json') and fail_once:
+            fail_once = False
+            raise RuntimeError('transient completion publication failure')
+        return write(bucket, key, body, content_type)
+
+    storage.put_object_if_absent = interrupted
+    import pytest
+    with pytest.raises(RuntimeError, match='transient completion'):
+        service.status('content', 'legacy')
+    result = service.status('content', 'legacy')
+    assert result['status'] == 'completed'
+    assert service.read('qa-suite/reports/remediation/content/legacy/completion.json')['futureGuidance']
+    assert not github.events
