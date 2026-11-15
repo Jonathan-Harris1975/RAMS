@@ -625,6 +625,9 @@ def _extract_website_findings(audit: dict[str, Any], cfg: "Settings") -> list[di
     # contract below.
     master_ledger = council.get("masterIssueLedger")
     if isinstance(master_ledger, list) and any(isinstance(item, dict) for item in master_ledger):
+        # The complete governed report is already byte-bounded by the reader.
+        # A per-execution mutation cap must never discard mandatory ledger rows.
+        max_items = 0
         candidates.extend(item for item in master_ledger if isinstance(item, dict))
     else:
         for key in ("unifiedFindings", "topActions"):
@@ -642,7 +645,7 @@ def _extract_website_findings(audit: dict[str, Any], cfg: "Settings") -> list[di
             continue
         seen.add(signature)
         mapped.append(finding)
-        if len(mapped) >= max_items:
+        if max_items and len(mapped) >= max_items:
             break
     return mapped
 
