@@ -447,3 +447,30 @@ def test_unified_website_requires_explicit_code_fix_classification(
     issues = normalise(audit, "website", "2026-07-26", settings)
     assert len(issues) == 1
     assert issues[0]["classification"] == "manual_review"
+
+
+def test_every_governed_website_ledger_row_survives_execution_limits(settings):
+    from repo_mgmt.issue_normaliser import normalise
+    rows=[{'findingId':f'ALL-{index}','title':f'Distinct finding {index}',
+           'classification':'manual_review','exactRemediation':'Review the retained source evidence',
+           'confidence':'Needs Verification'} for index in range(200)]
+    settings.rms_website_max_issues_per_run=1
+    result=normalise({'council':{'masterIssueLedger':rows}},'website','2026-11-15',settings)
+    assert len(result)==200
+    assert len({row['taskId'] for row in result})==200
+
+
+def test_content_future_guidance_is_retained_without_becoming_a_blocked_code_task(settings):
+    audit = {"council": {"masterIssueLedger": [{
+        "findingId": "C-001", "title": "Test next month packaging",
+        "classification": "future_guidance", "fixClass": "content_prompt_fix",
+        "confidence": "Confirmed", "affectedPaths": ["services/rss-feed-creator/utils/rss-prompts.js"],
+        "sourceFindingIds": ["OB-001"], "exactRemediation": "Compare next month evidence",
+        "acceptanceCriterion": "Measured improvement", "verificationMethod": "Compare monthly reports",
+    }]}}
+    issues = normalise(audit, "content", "2026-11-15", settings)
+    assert len(issues) == 1
+    assert issues[0]["classification"] == "future_guidance"
+    assert issues[0]["status"] == "future_guidance"
+    assert issues[0]["allowedFixClass"] == ""
+    assert issues[0]["sourceFindingIds"] == ["OB-001"]

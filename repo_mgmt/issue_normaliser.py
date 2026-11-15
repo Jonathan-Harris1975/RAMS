@@ -625,6 +625,9 @@ def _extract_website_findings(audit: dict[str, Any], cfg: "Settings") -> list[di
     # contract below.
     master_ledger = council.get("masterIssueLedger")
     if isinstance(master_ledger, list) and any(isinstance(item, dict) for item in master_ledger):
+        # The complete governed report is already byte-bounded by the reader.
+        # A per-execution mutation cap must never discard mandatory ledger rows.
+        max_items = 0
         candidates.extend(item for item in master_ledger if isinstance(item, dict))
     else:
         for key in ("unifiedFindings", "topActions"):
@@ -642,7 +645,7 @@ def _extract_website_findings(audit: dict[str, Any], cfg: "Settings") -> list[di
             continue
         seen.add(signature)
         mapped.append(finding)
-        if len(mapped) >= max_items:
+        if max_items and len(mapped) >= max_items:
             break
     return mapped
 
@@ -1027,7 +1030,7 @@ def _map_content_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
         "title": _first_text(candidate, "title") or f"Content council finding {finding_id}",
         "description": _first_text(candidate, "exactRemediation", "description"),
         "severity": _map_severity(candidate.get("severity"), pipeline="on-brand"),
-        "classification": "code_fix" if safe_code else "manual_review",
+        "classification": "code_fix" if safe_code else ("future_guidance" if classification == "future_guidance" else "manual_review"),
         "affectedPaths": paths,
         "allowedFixClass": fix_class if safe_code else "",
         "evidence": [str(x) for x in candidate.get("evidence", [])][:20] if isinstance(candidate.get("evidence"), list) else [],
