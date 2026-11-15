@@ -17,7 +17,7 @@ import httpx
 
 from repo_mgmt.github_pr import parse_github_repo
 
-_LOCK = threading.RLock()
+_LOCKS = {pipeline: threading.RLock() for pipeline in ("website", "content")}
 _SHA = re.compile(r"[0-9a-f]{40}")
 _ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 _REQUIRED = {
@@ -39,11 +39,17 @@ def prefix(cfg: Any, pipeline: str, run_id: str) -> str:
 
 def protected(path: str) -> bool:
     parts = path.lower().split("/")
-    return (path.startswith("/") or ".." in parts or not path or "\\" in path
-            or parts[0] in {".github", ".git", "infra", "migrations"}
+    basename = parts[-1]
+    return (not path or path.startswith("/") or ".." in parts or "\\" in path
+            or parts[0] in {".github", ".git", ".circleci", ".buildkite", ".gitlab", ".devcontainer",
+                            "infra", "infrastructure", "migrations", "db", "database", "k8s", "kubernetes",
+                            "helm", "charts", "deploy", "deployment", "terraform", "ansible"}
             or any(p in {"secrets", "credentials", "authentication"} for p in parts)
-            or parts[-1] in {"package.json", "package-lock.json", "pyproject.toml", "requirements.in", "requirements-dev.txt"}
-            or parts[-1].startswith(".env") or parts[-1].endswith((".lock", ".env", ".sql")))
+            or basename in {"package.json", "package-lock.json", "pyproject.toml", "pipfile", "setup.py", "setup.cfg",
+                            "jenkinsfile", ".gitlab-ci.yml", "azure-pipelines.yml", "cloudbuild.yaml", "netlify.toml",
+                            "vercel.json", "fly.toml", "wrangler.toml", "wrangler.json", "wrangler.jsonc", "koyeb.yaml", "koyeb.yml"}
+            or basename.startswith((".env", "dockerfile", "containerfile", "docker-compose", "requirements"))
+            or basename.endswith((".lock", ".env", ".sql", ".tf", ".tfvars")))
 
 
 class AuditRemediation:
@@ -77,7 +83,7 @@ class AuditRemediation:
         return True
 
     def register(self, pipeline: str, run_id: str, audit: dict[str, Any], tasks: list[dict[str, Any]]) -> dict[str, Any]:
-        with _LOCK:
+        with _LOCKS[pipeline]:
             root = prefix(self.cfg, pipeline, run_id)
             repository = "/".join(parse_github_repo(self.cfg.repo_url_for(pipeline)))
             eligible, blocked, guidance = [], [], []
@@ -112,13 +118,17 @@ class AuditRemediation:
             # Publish recovery intent first: a crash may leave an indexed pending
             # registration, but it must never leave undiscoverable mandatory work.
             # Also recreate the index when replaying an existing registration.
-            self.write(f"{self.cfg.rms_report_prefix}/remediation/active/{pipeline}-{run_id}.json",
-                       {"stateKey": key, "pipeline": pipeline, "runId": run_id}, create=True)
+            intent = {"stateKey": key, "pipeline": pipeline, "runId": run_id, "registration": record}
+            # Budget validation precedes either write. The recovery index carries
+            # the complete registration so a crash before state PUT is recoverable.
+            if len(json.dumps(intent, sort_keys=True, allow_nan=False).encode()) > self.cfg.rms_report_max_bytes:
+                raise ValueError("audit registration exceeds storage budget")
+            self.write(f"{self.cfg.rms_report_prefix}/remediation/active/{pipeline}-{run_id}.json", intent, create=True)
             self.write(key, record, create=True)
             return self.reconcile(pipeline, run_id)
 
     def reconcile(self, pipeline: str, run_id: str) -> dict[str, Any]:
-        with _LOCK:
+        with _LOCKS[pipeline]:
             root = prefix(self.cfg, pipeline, run_id)
             state = self.read(f"{root}/state.json")
             if state.get("status") in {"completed", "attention_required"} and not any(
@@ -190,6 +200,9 @@ class AuditRemediation:
             batch["status"], state["status"] = "attention_required", "attention_required"
             batch["blocker"] = receipt.get("reason") or "provider dispatch rejected"
             return
+        if receipt and receipt.get("status") == "configuration_pending":
+            batch["blocker"] = receipt.get("reason")
+            receipt = None  # no external request was reserved; bounded event retries remain safe
         if receipt:
             batch["status"] = "repairing"
         elif time.time() - batch["dispatchRequestedAt"] > 300:
@@ -315,8 +328,14 @@ class AuditRemediation:
         if len(keys) >= 1000:
             raise ValueError("audit active index exceeds bounded sweep; refusing idle certification")
         for key in keys:
-            item = self.read(key)
             try:
+                item = self.read(key)
+                root = prefix(self.cfg, item["pipeline"], item["runId"])
+                if not self.r2.object_exists(self.cfg.r2_bucket_audits, f"{root}/state.json"):
+                    intent = item.get("registration")
+                    if not isinstance(intent, dict) or intent.get("pipeline") != item["pipeline"] or intent.get("runId") != item["runId"]:
+                        raise ValueError("pending audit registration recovery intent unavailable")
+                    self.write(f"{root}/state.json", intent, create=True)
                 state = self.reconcile(item["pipeline"], item["runId"])
                 if any(b.get("status") != "verified" for b in state.get("batches", [])):
                     active += 1

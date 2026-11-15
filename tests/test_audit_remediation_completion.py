@@ -184,3 +184,35 @@ def test_repeated_registration_recovers_missing_active_index():
     assert storage.object_exists('audits',index)
     assert len(github.events)==1
     assert service.sweep()==1
+
+
+def test_index_recovers_a_crash_before_registration_state_write():
+    import pytest
+    service, storage, github=setup()
+    original=storage.put_object_if_absent
+    def crash(bucket,key,body,content_type='application/json'):
+        if key.endswith('/state.json'):
+            raise RuntimeError('simulated interruption')
+        return original(bucket,key,body,content_type)
+    storage.put_object_if_absent=crash
+    with pytest.raises(RuntimeError):
+        service.register('content','crash-run',audit(),[task()])
+    storage.put_object_if_absent=original
+    assert service.sweep()==1
+    assert len(github.events)==1
+
+
+def test_oversized_registration_never_creates_an_active_index():
+    import pytest
+    service, storage, _=setup()
+    service.cfg.rms_report_max_bytes=64
+    with pytest.raises(ValueError):
+        service.register('content','oversized-run',audit(),[task()])
+    assert not storage.objects
+
+
+def test_infrastructure_and_dependency_paths_cannot_be_audit_scope():
+    from repo_mgmt.audit_remediation import protected
+    for path in ['Dockerfile','deploy/config.yml','requirements.txt','k8s/deploy.yaml','main.tf','setup.py','Pipfile','helm/chart.yaml']:
+        assert protected(path)
+    assert not protected('services/newsletter/prompt.js')
