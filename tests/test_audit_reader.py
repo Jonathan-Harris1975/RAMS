@@ -340,3 +340,22 @@ def test_exact_website_report_rejects_session_mismatch(mock_r2: MagicMock) -> No
         }
     ).encode()
     assert audit_reader.read_report_key("website", mock_r2, "audits", key) == {}
+
+
+def test_content_v2_requires_complete_fresh_report(mock_r2):
+    key = 'audits/content-master/2026-11/run-1/content-audit.json'
+    root = key.rsplit('/', 1)[0]
+    payload = {'schemaVersion': 'content-audit-report/v2', 'auditType':'content-master',
+        'remediationContractVersion':'rams-content/v1', 'sessionId':'run-1',
+        'retentionPolicy':'final-pdf-html-json-only',
+        'reportSet':{kind:{'key':f'{root}/content-audit.{kind}'} for kind in ['pdf','html','json']},
+        'council':{'synthesisState':'Complete'},'sourceRefresh':{'freshnessLocked':True}}
+    mock_r2.get_object.return_value=json.dumps(payload).encode()
+    assert audit_reader.read_report_key('content',mock_r2,'audits',key)['schemaVersion']=='content-audit-report/v2'
+    payload['sourceRefresh']['freshnessLocked']=False
+    mock_r2.get_object.return_value=json.dumps(payload).encode()
+    assert audit_reader.read_report_key('content',mock_r2,'audits',key)=={}
+    payload['sourceRefresh']['freshnessLocked']=True
+    payload['council']['synthesisState']='Incomplete'
+    mock_r2.get_object.return_value=json.dumps(payload).encode()
+    assert audit_reader.read_report_key('content',mock_r2,'audits',key)=={}

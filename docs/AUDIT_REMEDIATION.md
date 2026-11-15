@@ -1,0 +1,15 @@
+# Audit repair coordination and completion
+
+RAMS accepts exact Website v1/v2 and Content Master v1/v2 reports. Content synthesis must be Complete; v2 source refresh must be freshness-locked. Finding IDs, acceptance criteria, verification method and source paths survive normalisation. Missing routing contracts force manual_review classification and cannot leak into the code executor.
+
+Live Website and Content jobs register every routed repair in `qa-suite/reports/remediation/{pipeline}/{runId}/state.json` in the audits bucket. They do not run RAMS direct model patch generation. Immutable plans group up to five tasks without dropping later tasks. A restart-safe background loop reconciles the active index every minute. The authenticated `/remediation/{pipeline}/{runId}` endpoint exposes durable progress. Report processing is recorded separately as awaiting_remediation.
+
+The target GitHub repository receives `rams-audit-remediation` with the plan key. Its trusted worker checks the audit digest, repository, source SHA and allowed scope, then claims the shared repository writer using conditional R2 writes and reserves the Kilo handoff once. Duplicate events cannot duplicate an uncertain external write. Three bounded stale-before-handoff replans are allowed only when no provider reservation exists. Five bounded event retries recover missed GitHub deliveries. Protected or insufficiently evidenced tasks stay visibly unresolved.
+
+Kilo pushes the declared fix branch; native branch automation creates the managed PR. Trusted admission enforces allowed affected paths and the exact regression-test path. Required CI must execute that test. Existing exact-head admission, human-risk controls, CI repair and merge gates remain in force. The audit writer lease permits CI repair on its own branch and excludes unrelated writers.
+
+Completion requires every mandatory batch to have the regression test, green required workflows on its PR head, a merged SHA, successful production integration workflow, and the currently deployed exact revision. RAMS writes an immutable verified receipt per batch and a final completion receipt only when no mandatory manual work remains. Future guidance is explicitly deferred. Processing reports and latest pointers are updated only for the matching run. The RAMS health lifecycle stays busy while durable repair work remains or its state is unknown; MAST must probe this before pausing it.
+
+An external provider rejection, ambiguous write, closed unmerged PR, out-of-scope implementation, missing acceptance criteria or unverified production keeps work open with its blocker. Do not reset a provider reservation or transfer writer ownership without reconciling the original provider. There is no blind second-provider fallback after an uncertain handoff.
+
+Deployment and workflow preflight must be followed by a real audit-to-repair production acceptance run before claiming the whole external chain has been proven.

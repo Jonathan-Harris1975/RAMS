@@ -91,6 +91,7 @@ class RunReport:
     skills_baseline: dict[str, Any] | None = None
     ai_usage: dict[str, Any] | None = None
     release_evidence: dict[str, Any] | None = None
+    remediation: dict[str, Any] | None = None
     pull_request: PullRequestInfo | None = None
 
 
@@ -168,6 +169,11 @@ def _report_quality(report: "RunReport") -> dict[str, Any]:
             ],
         },
     }
+    if report.remediation is not None:
+        state = report.remediation
+        return {"lane": "durable external-agent audit remediation", "status": state["status"],
+                "manualInterventionRequired": bool(state.get("manualReview")) or state["status"] == "attention_required",
+                "operatorNextStep": "Follow /remediation/<pipeline>/<runId>; a processing report is not completion."}
     gate = pipeline_gates.get(report.pipeline, {})
     summary = report.summary or {}
     tasks = report.tasks or []
@@ -407,6 +413,8 @@ def _convert(obj: Any) -> Any:
             "publishStatus": _convert(obj.publish_status),
             "reportQuality": _report_quality(obj),
         }
+        if obj.remediation is not None:
+            data["remediation"] = _convert(obj.remediation)
         if obj.pull_request is not None:
             data["pullRequest"] = _convert(obj.pull_request)
         if obj.skills_baseline is not None:

@@ -151,6 +151,8 @@ def _mark_code_fixes_manual(
     for issue in issues:
         task = dict(issue)
         if task.get("classification") == "code_fix":
+            task["proposedClassification"] = task["classification"]
+            task["classification"] = "manual_review"
             task["status"] = "manual_review"
             task["error"] = reason
             task["patchAttempted"] = False
@@ -720,6 +722,20 @@ async def _run_async(
         )
         queues = task_ranker.rank(issues, code_fix_limit)
         selected = [*queues.code_fix, *queues.manual_review, *queues.future_guidance]
+
+        if not dry_run and pipeline_id in {"website", "content"}:
+            from repo_mgmt.audit_remediation import AuditRemediation
+            remediation = await asyncio.to_thread(
+                AuditRemediation(cfg, r2).register, pipeline_id, actual_run_id, audit, selected
+            )
+            report = _make_report(
+                run_id=actual_run_id, pipeline_id=pipeline_id, target_repo=target_repo,
+                branch=branch, dry_run=False, tasks=selected, snapshots=snapshots, cfg=cfg,
+                error=None, ai_usage=_router_usage(router),
+            )
+            report.remediation = remediation
+            await asyncio.to_thread(_publish_report, report, cfg, r2)
+            return report
 
         git_mgr = None
         if not dry_run and queues.code_fix:
