@@ -6,7 +6,9 @@ but it must never review, approve, queue, auto-merge or merge them. GitHub nativ
 from __future__ import annotations
 
 import inspect
+import io
 import os
+import urllib.error
 import unittest
 from unittest.mock import patch
 
@@ -133,6 +135,62 @@ class BranchPrAutomationTests(unittest.TestCase):
             m.recover_branch_signals()
         create.assert_not_called()
         self.assertEqual(get.call_count, 2)
+
+    def test_transient_compare_http_500_retries_then_succeeds(self):
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return b'{"ahead_by": 1}'
+
+        error = urllib.error.HTTPError("https://api.github.com/test", 500, "Server Error", {}, io.BytesIO(b"comparison temporarily unavailable"))
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[error, Response()]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            response = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(response["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_bad_get_response_not_retried(self):
+        error = urllib.error.HTTPError("https://api.github.com/test", 404, "Not Found", {}, io.BytesIO(b"not found"))
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=error) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(m.ApiError) as raised:
+                m.get("/repos/owner/repo/branches/absent")
+        self.assertEqual(raised.exception.status, 404)
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_mutating_post_is_never_retried(self):
+        error = urllib.error.HTTPError("https://api.github.com/test", 500, "Server Error", {}, io.BytesIO(b"failed"))
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=error) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(m.ApiError):
+                m.post("/repos/owner/repo/pulls", {"title": "test"})
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_repeated_transient_errors_are_bounded(self):
+        def error():
+            return urllib.error.HTTPError("https://api.github.com/test", 503, "Unavailable", {}, io.BytesIO(b"temporary"))
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[error() for _ in range(4)]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(m.ApiError) as raised:
+                m.get("/repos/owner/repo/compare/main...fix/branch")
+        self.assertEqual(raised.exception.status, 503)
+        self.assertEqual(urlopen.call_count, 4)
+        self.assertEqual([args[0] for args, _kwargs in (x for x in sleep.call_args_list)], [1, 2, 4])
 
     def test_controller_contains_no_review_or_merge_authority(self):
         source = inspect.getsource(m)
