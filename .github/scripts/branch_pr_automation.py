@@ -8,6 +8,7 @@ admission.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 API = "https://api.github.com"
@@ -52,6 +54,7 @@ class ApiError(RuntimeError):
 # Retry only safe reads; never automatically replay PR creation or label writes.
 RETRYABLE_GET_STATUSES = frozenset({429, 500, 502, 503, 504})
 GET_RETRY_DELAYS = (1, 2, 4)
+TRANSPORT_ERROR_STATUS = 0
 
 
 def request(
@@ -80,7 +83,11 @@ def request(
                 return json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")
-            if method != "GET" or exc.code not in RETRYABLE_GET_STATUSES or attempt + 1 >= attempts:
+            if (
+                method != "GET"
+                or exc.code not in RETRYABLE_GET_STATUSES
+                or attempt + 1 >= attempts
+            ):
                 raise ApiError(exc.code, body) from exc
             # Primary rate-limit exhaustion needs a reset window, not a short retry loop.
             if exc.code == 429 and exc.headers and exc.headers.get("X-RateLimit-Remaining") == "0":
@@ -89,14 +96,31 @@ def request(
             try:
                 delay = min(max(int(retry_after), 0), 60) if retry_after else GET_RETRY_DELAYS[attempt]
             except ValueError:
-                delay = GET_RETRY_DELAYS[attempt]
-            log(f"Transient GitHub GET HTTP {exc.code}; retry {attempt + 1}/{attempts - 1} in {delay}s.")
+                try:
+                    retry_at = parsedate_to_datetime(retry_after)
+                    delay = min(max(retry_at.timestamp() - time.time(), 0), 60)
+                except (TypeError, ValueError, OverflowError):
+                    delay = GET_RETRY_DELAYS[attempt]
+            log(
+                f"Transient GitHub GET HTTP {exc.code}; "
+                f"retry {attempt + 1}/{attempts - 1} in {delay}s."
+            )
             time.sleep(delay)
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            http.client.HTTPException,
+        ) as exc:
             if method != "GET" or attempt + 1 >= attempts:
-                raise ApiError(0, str(exc)) from exc
+                raise ApiError(
+                    TRANSPORT_ERROR_STATUS, f"{type(exc).__name__}: {exc}"
+                ) from exc
             delay = GET_RETRY_DELAYS[attempt]
-            log(f"Transient GitHub GET transport error; retry {attempt + 1}/{attempts - 1} in {delay}s.")
+            log(
+                f"Transient GitHub GET transport error; "
+                f"retry {attempt + 1}/{attempts - 1} in {delay}s."
+            )
             time.sleep(delay)
 
 
