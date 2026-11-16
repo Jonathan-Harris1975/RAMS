@@ -85,10 +85,14 @@ def request(
             # Primary rate-limit exhaustion needs a reset window, not a short retry loop.
             if exc.code == 429 and exc.headers and exc.headers.get("X-RateLimit-Remaining") == "0":
                 raise ApiError(exc.code, body) from exc
-            delay = GET_RETRY_DELAYS[attempt]
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = min(max(int(retry_after), 0), 60) if retry_after else GET_RETRY_DELAYS[attempt]
+            except ValueError:
+                delay = GET_RETRY_DELAYS[attempt]
             log(f"Transient GitHub GET HTTP {exc.code}; retry {attempt + 1}/{attempts - 1} in {delay}s.")
             time.sleep(delay)
-        except urllib.error.URLError as exc:
+        except (urllib.error.URLError, TimeoutError) as exc:
             if method != "GET" or attempt + 1 >= attempts:
                 raise ApiError(0, str(exc)) from exc
             delay = GET_RETRY_DELAYS[attempt]
@@ -341,4 +345,3 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"::error::{exc}", flush=True)
         raise
-

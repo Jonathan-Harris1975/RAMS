@@ -156,6 +156,68 @@ class BranchPrAutomationTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    def test_transient_rate_limit_honors_bounded_retry_after(self):
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return b'{"ahead_by": 1}'
+
+        error = urllib.error.HTTPError(
+            "https://api.github.com/test", 429, "Too Many Requests",
+            {"Retry-After": "90", "X-RateLimit-Remaining": "1"},
+            io.BytesIO(b"rate limited"),
+        )
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[error, Response()]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            response = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(response["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(60)
+
+    def test_timeout_retries_then_succeeds(self):
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return b'{"ahead_by": 1}'
+
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[TimeoutError("read timed out"), Response()]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            response = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(response["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_transient_transport_error_retries_then_succeeds(self):
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return b'{"ahead_by": 1}'
+
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[urllib.error.URLError("temporary connection failure"), Response()]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            response = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(response["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
     def test_primary_rate_limit_does_not_spin(self):
         err = urllib.error.HTTPError("https://api.github.com/test", 429, "Too Many Requests", {"X-RateLimit-Remaining":"0"}, io.BytesIO(b"rate limited"))
         with patch.object(m.urllib.request, "urlopen", side_effect=err) as opened, patch.object(m.time, "sleep") as sleep:
@@ -208,7 +270,7 @@ class BranchPrAutomationTests(unittest.TestCase):
                 m.get("/repos/owner/repo/compare/main...fix/branch")
         self.assertEqual(raised.exception.status, 503)
         self.assertEqual(urlopen.call_count, 4)
-        self.assertEqual([args[0] for args, _kwargs in (x for x in sleep.call_args_list)], [1, 2, 4])
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2, 4])
 
     def test_controller_contains_no_review_or_merge_authority(self):
         source = inspect.getsource(m)
