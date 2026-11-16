@@ -82,6 +82,52 @@ class AuditRemediation:
         self.r2.put_object(self.cfg.r2_bucket_audits, key, body, content_type="application/json")
         return True
 
+    def status(self, pipeline: str, run_id: str) -> dict[str, Any]:
+        """Read status, repairing only the known pre-v2 deferred-guidance mapping."""
+        with _LOCKS[pipeline]:
+            root = prefix(self.cfg, pipeline, run_id)
+            state = self.read(f"{root}/state.json")
+            if state.get("classificationCorrection"):
+                # Persisted correction and publication are separate writes. Retry
+                # interrupted publication even when no new row needs correction.
+                self._publish_progress(state, root)
+            if (pipeline != "content" or state.get("status") != "attention_required"
+                    or state.get("batches") or not state.get("manualReview")):
+                return state
+            try:
+                source = self.read(state["auditJsonKey"])
+            except Exception:
+                return state  # Unavailable original evidence cannot clear a blocker.
+            if (digest(source) != state.get("auditDigest") or source.get("schemaVersion") != "content-audit-report/v2"
+                    or source.get("council", {}).get("synthesisState") != "Complete"
+                    or source.get("sourceRefresh", {}).get("freshnessLocked") is not True):
+                return state
+            original = source["council"].get("masterIssueLedger", [])
+            remaining, deferred = [], []
+            for row in state["manualReview"]:
+                matches = [finding for finding in original if isinstance(finding, dict)
+                           and finding.get("classification") == "future_guidance"
+                           and finding.get("title") == row.get("title")
+                           and finding.get("sourceFindingIds") == row.get("sourceFindingIds")
+                           and finding.get("exactRemediation") == row.get("requiredOutcome")
+                           and finding.get("affectedPaths") == row.get("affectedPaths")]
+                if len(matches) == 1:
+                    deferred.append({**row, "classification": "future_guidance", "status": "future_guidance",
+                                     "allowedFixClass": ""})
+                else:
+                    remaining.append(row)
+            if not deferred:
+                return state
+            state.update({"manualReview": remaining, "futureGuidance": state.get("futureGuidance", []) + deferred,
+                          "classificationCorrection": {"reason": "preserve original deferred content guidance",
+                                                       "auditDigest": state["auditDigest"], "count": len(deferred)},
+                          "updatedAt": time.time()})
+            if not remaining:
+                state.update({"status": "completed", "completionBasis": "no mandatory repair; original future guidance retained"})
+            self.write(f"{root}/state.json", state)
+            self._publish_progress(state, root)
+            return state
+
     def register(self, pipeline: str, run_id: str, audit: dict[str, Any], tasks: list[dict[str, Any]]) -> dict[str, Any]:
         with _LOCKS[pipeline]:
             root = prefix(self.cfg, pipeline, run_id)
@@ -263,6 +309,7 @@ class AuditRemediation:
                 "schemaVersion": "audit-remediation-completion/v1", "pipeline": state["pipeline"],
                 "runId": state["runId"], "repository": state["repository"], "auditJsonKey": state["auditJsonKey"],
                 "completedAt": time.time(), "batches": state["batches"], "manualReview": [],
+                "futureGuidance": state.get("futureGuidance", []), "completionBasis": state.get("completionBasis"),
             }, create=True)
         key = f"{self.cfg.rms_report_prefix}/{state['pipeline']}/{state['runId']}/report.json"
         try:

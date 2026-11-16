@@ -5,15 +5,37 @@ but it must never review, approve, queue, auto-merge or merge them. GitHub nativ
 """
 from __future__ import annotations
 
+import http.client
 import inspect
+import io
 import os
+import urllib.error
 import unittest
+from email.utils import formatdate
 from unittest.mock import patch
 
 os.environ.setdefault("GH_TOKEN", "unit-test")
 os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
 
 import branch_pr_automation as m  # noqa: E402
+
+
+class JsonResponse:
+    status = 200
+
+    def __init__(self, read_error=None):
+        self.read_error = read_error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        if self.read_error:
+            raise self.read_error
+        return b'{"ahead_by": 1}'
 
 
 class BranchPrAutomationTests(unittest.TestCase):
@@ -133,6 +155,164 @@ class BranchPrAutomationTests(unittest.TestCase):
             m.recover_branch_signals()
         create.assert_not_called()
         self.assertEqual(get.call_count, 2)
+
+    def test_transient_compare_http_500_retries_then_succeeds(self):
+        error = urllib.error.HTTPError(
+            "https://api.github.com/test", 500, "Server Error", {},
+            io.BytesIO(b"comparison temporarily unavailable"),
+        )
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[error, JsonResponse()]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            response = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(response["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_transient_rate_limit_honors_bounded_retry_after(self):
+        error = urllib.error.HTTPError(
+            "https://api.github.com/test", 429, "Too Many Requests",
+            {"Retry-After": "90", "X-RateLimit-Remaining": "1"},
+            io.BytesIO(b"rate limited"),
+        )
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[error, JsonResponse()]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            response = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(response["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(60)
+
+    def test_http_date_retry_after_is_honored(self):
+        retry_at = 1_700_000_120
+        error = urllib.error.HTTPError(
+            "https://api.github.com/test", 503, "Unavailable",
+            {"Retry-After": formatdate(retry_at, usegmt=True)}, io.BytesIO(b"temporary"),
+        )
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[error, JsonResponse()]) as urlopen,
+            patch.object(m.time, "time", return_value=retry_at - 10),
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            response = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(response["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(10)
+
+    def test_read_phase_disconnect_retries_then_succeeds(self):
+        with (
+            patch.object(
+                m.urllib.request,
+                "urlopen",
+                side_effect=[
+                    JsonResponse(http.client.RemoteDisconnected("connection closed")),
+                    JsonResponse(),
+                ],
+            ) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            result = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(result["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_truncated_read_retries_then_succeeds(self):
+        with (
+            patch.object(
+                m.urllib.request,
+                "urlopen",
+                side_effect=[
+                    JsonResponse(http.client.IncompleteRead(b"partial")),
+                    JsonResponse(),
+                ],
+            ) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            result = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(result["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_read_phase_timeout_retries_then_succeeds(self):
+        with (
+            patch.object(
+                m.urllib.request,
+                "urlopen",
+                side_effect=[JsonResponse(TimeoutError("read timed out")), JsonResponse()],
+            ) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            result = m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(result["ahead_by"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_primary_rate_limit_does_not_spin(self):
+        err = urllib.error.HTTPError(
+            "https://api.github.com/test", 429, "Too Many Requests",
+            {"X-RateLimit-Remaining": "0"}, io.BytesIO(b"rate limited"),
+        )
+        with patch.object(m.urllib.request, "urlopen", side_effect=err) as opened, patch.object(m.time, "sleep") as sleep:
+            with self.assertRaises(m.ApiError) as caught:
+                m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(caught.exception.status, 429)
+        self.assertEqual(opened.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_exhausted_transport_errors_use_api_error_contract(self):
+        errors = [TimeoutError() for _ in range(4)]
+        with patch.object(m.urllib.request, "urlopen", side_effect=errors) as opened, patch.object(m.time, "sleep") as sleep:
+            with self.assertRaises(m.ApiError) as caught:
+                m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(caught.exception.status, m.TRANSPORT_ERROR_STATUS)
+        self.assertEqual(caught.exception.body, "TimeoutError: ")
+        self.assertEqual(opened.call_count, 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2, 4])
+
+    def test_bad_get_response_not_retried(self):
+        error = urllib.error.HTTPError(
+            "https://api.github.com/test", 404, "Not Found", {}, io.BytesIO(b"not found")
+        )
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=error) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(m.ApiError) as raised:
+                m.get("/repos/owner/repo/branches/absent")
+        self.assertEqual(raised.exception.status, 404)
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_mutating_post_is_never_retried(self):
+        error = urllib.error.HTTPError(
+            "https://api.github.com/test", 500, "Server Error", {}, io.BytesIO(b"failed")
+        )
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=error) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(m.ApiError):
+                m.post("/repos/owner/repo/pulls", {"title": "test"})
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_repeated_transient_errors_are_bounded(self):
+        def error():
+            return urllib.error.HTTPError(
+                "https://api.github.com/test", 503, "Unavailable", {},
+                io.BytesIO(b"temporary"),
+            )
+        with (
+            patch.object(m.urllib.request, "urlopen", side_effect=[error() for _ in range(4)]) as urlopen,
+            patch.object(m.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(m.ApiError) as raised:
+                m.get("/repos/owner/repo/compare/main...fix/branch")
+        self.assertEqual(raised.exception.status, 503)
+        self.assertEqual(urlopen.call_count, 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2, 4])
 
     def test_controller_contains_no_review_or_merge_authority(self):
         source = inspect.getsource(m)

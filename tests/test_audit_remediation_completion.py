@@ -216,3 +216,71 @@ def test_infrastructure_and_dependency_paths_cannot_be_audit_scope():
     for path in ['Dockerfile','deploy/config.yml','requirements.txt','k8s/deploy.yaml','main.tf','setup.py','Pipfile','helm/chart.yaml']:
         assert protected(path)
     assert not protected('services/newsletter/prompt.js')
+
+
+def legacy_deferred_state(service):
+    finding = {'findingId': 'C-001', 'title': 'Test next month packaging', 'classification': 'future_guidance',
+               'sourceFindingIds': ['S-1'], 'exactRemediation': 'Compare monthly evidence', 'affectedPaths': []}
+    source = {'schemaVersion': 'content-audit-report/v2', 'sourceRefresh': {'freshnessLocked': True},
+              'council': {'synthesisState': 'Complete', 'masterIssueLedger': [finding]}}
+    source_key = audit()['sourceAuditKey']
+    service.write(source_key, source)
+    state = service.register('content', 'legacy', {**source, 'sourceAuditKey': source_key}, [{
+        'title': finding['title'], 'classification': 'manual_review', 'sourceFindingIds': ['S-1'],
+        'requiredOutcome': finding['exactRemediation'], 'affectedPaths': []}])
+    return state, source
+
+
+def test_saved_deferred_guidance_is_recovered_from_exact_original_evidence_without_dispatch():
+    service, _, github = setup()
+    legacy_deferred_state(service)
+    state = service.status('content', 'legacy')
+    assert state['status'] == 'completed'
+    assert len(state['futureGuidance']) == 1
+    assert not state['manualReview']
+    assert state['classificationCorrection']['count'] == 1
+    assert not github.events
+    receipt = service.read('qa-suite/reports/remediation/content/legacy/completion.json')
+    assert receipt['futureGuidance'] == state['futureGuidance']
+    assert service.status('content', 'legacy') == state
+
+
+def test_modified_source_cannot_clear_existing_manual_blocker():
+    service, _, _ = setup()
+    _, source = legacy_deferred_state(service)
+    service.write(audit()['sourceAuditKey'], {**source, 'changed': True})
+    assert service.status('content', 'legacy')['status'] == 'attention_required'
+
+
+def test_unmatched_manual_blockers_survive_deferred_guidance_recovery():
+    service, _, _ = setup()
+    state, _ = legacy_deferred_state(service)
+    state['manualReview'].append({'title': 'Unknown defect', 'classification': 'manual_review'})
+    service.write('qa-suite/reports/remediation/content/legacy/state.json', state)
+    result = service.status('content', 'legacy')
+    assert result['status'] == 'attention_required'
+    assert result['manualReview'][0]['title'] == 'Unknown defect'
+    assert len(result['futureGuidance']) == 1
+
+
+def test_legacy_correction_publication_recovers_after_interrupted_completion_write():
+    service, storage, github = setup()
+    legacy_deferred_state(service)
+    write = storage.put_object_if_absent
+    fail_once = True
+
+    def interrupted(bucket, key, body, content_type='application/json'):
+        nonlocal fail_once
+        if key.endswith('/completion.json') and fail_once:
+            fail_once = False
+            raise RuntimeError('transient completion publication failure')
+        return write(bucket, key, body, content_type)
+
+    storage.put_object_if_absent = interrupted
+    import pytest
+    with pytest.raises(RuntimeError, match='transient completion'):
+        service.status('content', 'legacy')
+    result = service.status('content', 'legacy')
+    assert result['status'] == 'completed'
+    assert service.read('qa-suite/reports/remediation/content/legacy/completion.json')['futureGuidance']
+    assert not github.events

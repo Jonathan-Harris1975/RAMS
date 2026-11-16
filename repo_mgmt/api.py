@@ -1614,8 +1614,7 @@ async def audit_remediation_status(
     if cfg is None or r2 is None:
         return JSONResponse(status_code=503, content={"error": "remediation storage unavailable"})
     try:
-        from repo_mgmt.audit_remediation import prefix as work_prefix
-        state = await asyncio.to_thread(AuditRemediation(cfg, r2).read, f"{work_prefix(cfg, pipeline_id, run_id)}/state.json")
+        state = await asyncio.to_thread(AuditRemediation(cfg, r2).status, pipeline_id, run_id)
     except (R2Error, ValueError):
         try:
             report = await asyncio.to_thread(AuditRemediation(cfg, r2).read,

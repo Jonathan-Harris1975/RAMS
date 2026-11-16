@@ -1031,7 +1031,7 @@ def _map_content_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
         "title": _first_text(candidate, "title") or f"Content council finding {finding_id}",
         "description": _first_text(candidate, "exactRemediation", "description"),
         "severity": _map_severity(candidate.get("severity"), pipeline="on-brand"),
-        "classification": "code_fix" if safe_code else "manual_review",
+        "classification": "code_fix" if safe_code else ("future_guidance" if classification == "future_guidance" else "manual_review"),
         "affectedPaths": paths,
         "allowedFixClass": fix_class if safe_code else "",
         "evidence": [str(x) for x in candidate.get("evidence", [])][:20] if isinstance(candidate.get("evidence"), list) else [],

@@ -487,3 +487,18 @@ def test_every_governed_website_ledger_row_survives_execution_limits(
         ["SEO-1"],
         ["SEO-2"],
     ]
+
+def test_content_future_guidance_is_retained_without_becoming_a_blocked_code_task(settings):
+    audit = {"council": {"masterIssueLedger": [{
+        "findingId": "C-001", "title": "Test next month packaging",
+        "classification": "future_guidance", "fixClass": "content_prompt_fix",
+        "confidence": "Confirmed", "affectedPaths": ["services/rss-feed-creator/utils/rss-prompts.js"],
+        "sourceFindingIds": ["OB-001"], "exactRemediation": "Compare next month evidence",
+        "acceptanceCriterion": "Measured improvement", "verificationMethod": "Compare monthly reports",
+    }]}}
+    issues = normalise(audit, "content", "2026-11-15", settings)
+    assert len(issues) == 1
+    assert issues[0]["classification"] == "future_guidance"
+    assert issues[0]["status"] == "future_guidance"
+    assert issues[0]["allowedFixClass"] == ""
+    assert issues[0]["sourceFindingIds"] == ["OB-001"]
