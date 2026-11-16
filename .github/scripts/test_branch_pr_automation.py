@@ -190,7 +190,7 @@ class BranchPrAutomationTests(unittest.TestCase):
                 m.get("/repos/owner/repo/compare/main...fix/branch")
         self.assertEqual(raised.exception.status, 503)
         self.assertEqual(urlopen.call_count, 4)
-        self.assertEqual([args[0] for args, _kwargs in (x for x in sleep.call_args_list)], [1, 2, 4])
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2, 4])
 
     def test_controller_contains_no_review_or_merge_authority(self):
         source = inspect.getsource(m)
