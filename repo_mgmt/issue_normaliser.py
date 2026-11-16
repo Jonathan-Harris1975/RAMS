@@ -627,6 +627,7 @@ def _extract_website_findings(audit: dict[str, Any], cfg: "Settings") -> list[di
     if isinstance(master_ledger, list) and any(isinstance(item, dict) for item in master_ledger):
         # The complete governed report is already byte-bounded by the reader.
         # A per-execution mutation cap must never discard mandatory ledger rows.
+        # 0 disables the per-execution cap; audit_reader enforces the byte budget.
         max_items = 0
         candidates.extend(item for item in master_ledger if isinstance(item, dict))
     else:

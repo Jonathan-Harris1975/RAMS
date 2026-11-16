@@ -449,16 +449,44 @@ def test_unified_website_requires_explicit_code_fix_classification(
     assert issues[0]["classification"] == "manual_review"
 
 
-def test_every_governed_website_ledger_row_survives_execution_limits(settings):
-    from repo_mgmt.issue_normaliser import normalise
-    rows=[{'findingId':f'ALL-{index}','title':f'Distinct finding {index}',
-           'classification':'manual_review','exactRemediation':'Review the retained source evidence',
-           'confidence':'Needs Verification'} for index in range(200)]
-    settings.rms_website_max_issues_per_run=1
-    result=normalise({'council':{'masterIssueLedger':rows}},'website','2026-11-15',settings)
-    assert len(result)==200
-    assert len({row['taskId'] for row in result})==200
-
+def test_every_governed_website_ledger_row_survives_execution_limits(
+    settings, tmp_path
+):
+    repo = tmp_path / "website"
+    page = repo / "index.html"
+    repo.mkdir()
+    page.write_text("<html></html>", encoding="utf-8")
+    settings.rms_website_repo_path = str(repo)
+    rows = [
+        {
+            "findingId": f"ALL-{index}",
+            "title": f"Distinct finding {index}",
+            "classification": "code_fix" if index < 3 else "manual_review",
+            "fixClass": "canonical_fix",
+            "affectedPaths": ["index.html"] if index < 3 else [],
+            "sourceFindingIds": [f"SEO-{index}"] if index < 3 else [],
+            "evidence": ["Confirmed source evidence."],
+            "exactRemediation": (
+                "Correct the canonical href."
+                if index < 3
+                else "Review the retained source evidence"
+            ),
+            "confidence": "Confirmed" if index < 3 else "Needs Verification",
+        }
+        for index in range(200)
+    ]
+    settings.rms_website_max_issues_per_run = 1
+    result = normalise(
+        {"council": {"masterIssueLedger": rows}}, "website", "2026-11-15", settings
+    )
+    assert len(result) == 200
+    assert len({row["taskId"] for row in result}) == 200
+    assert [row["classification"] for row in result[:3]] == ["code_fix"] * 3
+    assert [row["sourceFindingIds"] for row in result[:3]] == [
+        ["SEO-0"],
+        ["SEO-1"],
+        ["SEO-2"],
+    ]
 
 def test_content_future_guidance_is_retained_without_becoming_a_blocked_code_task(settings):
     audit = {"council": {"masterIssueLedger": [{
