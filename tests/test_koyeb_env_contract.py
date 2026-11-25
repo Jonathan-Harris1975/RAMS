@@ -26,7 +26,7 @@ EXPECTED_IMAGE_DEFAULTS = {
     "OPENROUTER_APP_NAME": "RAMS",
     "OPENROUTER_HTTP_REFERER": "https://jonathan-harris.online",
     "OPENROUTER_PRIMARY_MODEL": "openai/gpt-5.6-luna",
-    "OPENROUTER_SECONDARY_MODEL": "anthropic/claude-sonnet-5.5",
+    "OPENROUTER_SECONDARY_MODEL": "openai/gpt-6.1-terra",
     "OPENROUTER_TRIAGE_MODEL": "openai/gpt-5.6-luna",
     "PYTHONDONTWRITEBYTECODE": "1",
     "PYTHONHASHSEED": "random",
@@ -74,16 +74,19 @@ EXPECTED_IMAGE_DEFAULTS = {
     "RMS_OPENROUTER_POOL_TIMEOUT_SECONDS": "5",
     "RMS_OPENROUTER_PROVIDER_SORT": "price",
     "RMS_OPENROUTER_READ_TIMEOUT_SECONDS": "90",
+    "OPENROUTER_MODEL_MIGRATION_ENABLED": "true",
+    "RMS_OPENROUTER_SCHEDULED_FLEX_ENABLED": "true",
+    "RMS_OPENROUTER_FLEX_TIMEOUT_SECONDS": "240",
     "RMS_OPENROUTER_RETRY_BASE_SECONDS": "1",
     "RMS_OPENROUTER_RETRY_MAX_SECONDS": "8",
     "RMS_OPENROUTER_WRITE_TIMEOUT_SECONDS": "30",
-    "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL": "anthropic/claude-sonnet-5.5",
+    "RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL": "openai/gpt-6.1-terra",
     "RMS_ENGINEERING_COUNCIL_CHAIR_CONFIDENCE": "85",
-    "RMS_ENGINEERING_COUNCIL_CHAIR_MODEL": "anthropic/claude-opus-5",
+    "RMS_ENGINEERING_COUNCIL_CHAIR_MODEL": "openai/gpt-6.1-terra",
     "RMS_ENGINEERING_COUNCIL_ENABLED": "true",
     "RMS_ENGINEERING_COUNCIL_EXPERT_ENABLED": "false",
     "RMS_ENGINEERING_COUNCIL_REVIEW_CONFIDENCE": "85",
-    "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL": "anthropic/claude-sonnet-5",
+    "RMS_ENGINEERING_COUNCIL_SPECIALIST_MODEL": "openai/gpt-5.6-luna",
     "RMS_PORT": "8000",
     "RMS_PRIMARY_MAX_TOKENS": "6144",
     "RMS_PRIMARY_TEMPERATURE": "0",
@@ -188,7 +191,7 @@ def test_image_defaults_plus_sensitive_bindings_form_complete_production_config(
     assert cfg.rms_create_pr is True
     assert cfg.rms_max_issues_per_run == 1
     assert cfg.openrouter_primary_model == "openai/gpt-5.6-luna"
-    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5.5"
+    assert cfg.openrouter_secondary_model == "openai/gpt-6.1-terra"
     assert cfg.rms_engineering_council_expert_enabled is False
 
 
