@@ -106,7 +106,6 @@ class Settings(BaseSettings):
     rms_openrouter_scheduled_flex_enabled: bool = True
     rms_openrouter_flex_timeout_seconds: float = Field(default=240.0, ge=30.0, le=600.0)
 
-
     # eMicro-safe OpenRouter transport and generation controls.
     rms_openrouter_connect_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
     rms_openrouter_read_timeout_seconds: float = Field(default=90.0, ge=10.0, le=300.0)
