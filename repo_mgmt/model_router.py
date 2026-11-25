@@ -526,7 +526,10 @@ class ModelRouter:
                 raise
             claim_recovery()
             logger.info("model_router: Flex unavailable; retrying same model on standard tier")
-            return self._call_sync_once(*args, service_tier="default")
+            # Omit the optional tier on the standard retry. OpenRouter's standard route is
+            # the documented default when no tier is sent; sending a literal fallback
+            # value can turn recovery into a second parameter-rejection failure.
+            return self._call_sync_once(*args)
 
     def _call_sync_once(
         self,
@@ -613,7 +616,9 @@ class ModelRouter:
                 raise
             claim_recovery()
             logger.info("model_router: Flex unavailable; retrying same model on standard tier")
-            return await self._call_async_once(*args, service_tier="default")
+            # Keep the standard retry on the provider's normal route by omitting the
+            # optional tier parameter (see sync path above).
+            return await self._call_async_once(*args)
 
     async def _call_async_once(
         self,
