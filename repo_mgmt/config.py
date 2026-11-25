@@ -235,7 +235,7 @@ class Settings(BaseSettings):
     rms_engineering_council_enabled: bool = True
     rms_engineering_council_architect_model: str = "openai/gpt-6.1-terra"
     rms_engineering_council_specialist_model: str = "openai/gpt-5.6-luna"
-    rms_engineering_council_chair_model: str = "openai/gpt-5.6-sol"
+    rms_engineering_council_chair_model: str = "openai/gpt-6.1-terra"
     rms_engineering_council_expert_enabled: bool = False
     rms_engineering_council_expert_justification_id: str = ""
     rms_engineering_council_review_confidence: int = Field(default=85, ge=0, le=100)
