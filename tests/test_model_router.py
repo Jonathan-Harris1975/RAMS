@@ -38,9 +38,9 @@ class FakeClient:
         self.closed = False
 
     def post(
-        self, url: str, *, headers: dict[str, str], json: dict[str, Any]
+        self, url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: httpx.Timeout | None = None
     ) -> httpx.Response:
-        self.calls.append({"url": url, "headers": headers, "json": json})
+        self.calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -57,9 +57,9 @@ class FakeAsyncClient:
         self.closed = False
 
     async def post(
-        self, url: str, *, headers: dict[str, str], json: dict[str, Any]
+        self, url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: httpx.Timeout | None = None
     ) -> httpx.Response:
-        self.calls.append({"url": url, "headers": headers, "json": json})
+        self.calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -305,3 +305,37 @@ def test_eligible_request_uses_headroom_output_and_accounts_savings(settings) ->
     assert headroom["transforms"] == {"smartcrusher": 1}
     assert headroom["byModel"]["anthropic/claude-3-5-sonnet"]["tokensSaved"] == 400
     assert headroom["byContextProvider"]["headroom"]["tokensSaved"] == 400
+
+
+def test_scheduled_flex_uses_verified_models_and_bounded_standard_fallback(settings) -> None:
+    settings.rms_openrouter_scheduled_flex_enabled = True
+    settings.rms_openrouter_flex_timeout_seconds = 240
+    settings.rms_context_primary_provider = "direct"
+    settings.rms_context_fallback_providers = "direct"
+    model = "openai/gpt-5.6-luna"
+    router, client = _router_with_sync(settings, [_response(429, "flex unavailable"), _success()])
+    assert router.complete_with_model(model, "prompt", json_mode=True) == "ok"
+    assert [call["json"]["service_tier"] for call in client.calls] == ["flex", "default"]
+    assert all(call["json"]["model"] == model for call in client.calls)
+    assert all(call["json"]["provider"]["data_collection"] == settings.rms_openrouter_data_collection for call in client.calls)
+    assert all(call["json"]["response_format"] == {"type": "json_object"} for call in client.calls)
+    assert client.calls[0]["timeout"].read == 240
+    assert client.calls[1]["timeout"] is None
+    assert not router._flex_enabled("openrouter/free")
+    assert router._flex_enabled("openai/gpt-6.1-terra")
+    assert router._flex_enabled("openai/gpt-6.1-sol")
+
+
+@pytest.mark.asyncio
+async def test_async_flex_recovery_keeps_model_and_privacy(settings) -> None:
+    settings.rms_openrouter_scheduled_flex_enabled = True
+    settings.rms_context_primary_provider = "direct"
+    settings.rms_context_fallback_providers = "direct"
+    router = ModelRouter(settings)
+    client = FakeAsyncClient([_response(503, "flex unavailable"), _success()])
+    router._async_client = client  # type: ignore[assignment]
+    model = "openai/gpt-6.1-terra"
+    assert await router.complete_with_model_async(model, "prompt", json_mode=True) == "ok"
+    assert [call["json"]["service_tier"] for call in client.calls] == ["flex", "default"]
+    assert all(call["json"]["model"] == model for call in client.calls)
+    assert all(call["json"]["provider"]["data_collection"] == settings.rms_openrouter_data_collection for call in client.calls)
