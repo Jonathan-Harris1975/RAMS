@@ -315,7 +315,7 @@ def test_scheduled_flex_uses_verified_models_and_bounded_standard_fallback(setti
     model = "openai/gpt-5.6-luna"
     router, client = _router_with_sync(settings, [_response(429, "flex unavailable"), _success()])
     assert router.complete_with_model(model, "prompt", json_mode=True) == "ok"
-    assert [call["json"]["service_tier"] for call in client.calls] == ["flex", "default"]
+    assert [call["json"].get("service_tier") for call in client.calls] == ["flex", None]
     assert all(call["json"]["model"] == model for call in client.calls)
     assert all(call["json"]["provider"]["data_collection"] == settings.rms_openrouter_data_collection for call in client.calls)
     assert all(call["json"]["response_format"] == {"type": "json_object"} for call in client.calls)
@@ -336,6 +336,6 @@ async def test_async_flex_recovery_keeps_model_and_privacy(settings) -> None:
     router._async_client = client  # type: ignore[assignment]
     model = "openai/gpt-6.1-terra"
     assert await router.complete_with_model_async(model, "prompt", json_mode=True) == "ok"
-    assert [call["json"]["service_tier"] for call in client.calls] == ["flex", "default"]
+    assert [call["json"].get("service_tier") for call in client.calls] == ["flex", None]
     assert all(call["json"]["model"] == model for call in client.calls)
     assert all(call["json"]["provider"]["data_collection"] == settings.rms_openrouter_data_collection for call in client.calls)
