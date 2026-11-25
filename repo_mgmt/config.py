@@ -94,10 +94,17 @@ class Settings(BaseSettings):
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str = ""
     openrouter_primary_model: str = "openai/gpt-5.6-luna"
-    openrouter_secondary_model: str = "anthropic/claude-sonnet-5.5"
+    openrouter_secondary_model: str = "openai/gpt-6.1-terra"
     openrouter_triage_model: str = "openai/gpt-5.6-luna"
     openrouter_http_referer: str = "https://jonathan-harris.online"
     openrouter_app_name: str = "RAMS"
+    openrouter_model_migration_enabled: bool = True
+    openrouter_secondary_model_test_override: str = ""
+    rms_engineering_council_architect_model_test_override: str = ""
+    rms_engineering_council_specialist_model_test_override: str = ""
+    rms_engineering_council_chair_model_test_override: str = ""
+    rms_openrouter_scheduled_flex_enabled: bool = True
+    rms_openrouter_flex_timeout_seconds: float = Field(default=240.0, ge=30.0, le=600.0)
 
     # eMicro-safe OpenRouter transport and generation controls.
     rms_openrouter_connect_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
@@ -233,9 +240,9 @@ class Settings(BaseSettings):
 
     # Autonomous engineering council / micro-surgery guardrails.
     rms_engineering_council_enabled: bool = True
-    rms_engineering_council_architect_model: str = "anthropic/claude-sonnet-5.5"
+    rms_engineering_council_architect_model: str = "openai/gpt-6.1-terra"
     rms_engineering_council_specialist_model: str = "openai/gpt-5.6-luna"
-    rms_engineering_council_chair_model: str = "openai/gpt-5.6-sol"
+    rms_engineering_council_chair_model: str = "openai/gpt-6.1-terra"
     rms_engineering_council_expert_enabled: bool = False
     rms_engineering_council_expert_justification_id: str = ""
     rms_engineering_council_review_confidence: int = Field(default=85, ge=0, le=100)
@@ -350,9 +357,30 @@ class Settings(BaseSettings):
         parsed, _ = _parse_bool(value, safe_default=safe_default)
         return parsed
 
+    def apply_model_migration(self) -> None:
+        """Apply approved role changes after ENV or persisted-state restoration."""
+        roles = {
+            "openrouter_secondary_model": {"anthropic/claude-sonnet-5.5": "openai/gpt-6.1-terra"},
+            "rms_engineering_council_architect_model": {"anthropic/claude-sonnet-5.5": "openai/gpt-6.1-terra"},
+            "rms_engineering_council_specialist_model": {"anthropic/claude-sonnet-5": "openai/gpt-5.6-luna"},
+            "rms_engineering_council_chair_model": {
+                "openai/gpt-5.6-sol": "openai/gpt-6.1-terra",
+                "anthropic/claude-opus-5": "openai/gpt-6.1-terra",
+                "anthropic/claude-opus-5.5": "openai/gpt-6.1-sol",
+            },
+        }
+        for field, replacements in roles.items():
+            override = getattr(self, f"{field}_test_override").strip()
+            if override:
+                setattr(self, field, override)
+            elif self.openrouter_model_migration_enabled:
+                current = getattr(self, field)
+                setattr(self, field, replacements.get(current, current))
+
     @model_validator(mode="after")
     def _check_required(self) -> "Settings":
         """Raise ConfigurationError listing all missing required fields."""
+        self.apply_model_migration()
         dry_raw = _env_get_case_insensitive("RMS_DRY_RUN")
         live_raw = _env_get_case_insensitive("RMS_LIVE_WRITE_ENABLED")
         self._rms_dry_run_env_raw = dry_raw

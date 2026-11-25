@@ -152,6 +152,7 @@ def restore_pinned_model_defaults(cfg: Settings, r2: R2Client) -> dict[str, Any]
         if not isinstance(decisions, dict):
             raise TypeError("persisted decisions must be an object")
         _apply_assignments(cfg, assignments)
+        cfg.apply_model_migration()
         _apply_premium_approvals(cfg, approvals, decisions)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
         logger.warning("model_defaults: invalid persisted state: %s", exc)

@@ -486,6 +486,27 @@ class ModelRouter:
         jitter = random.uniform(0.0, min(base * 0.2, 1.0))
         return float(min(base + jitter, self._cfg.rms_openrouter_retry_max_seconds))
 
+    def _flex_enabled(self, model: str) -> bool:
+        # RAMS is asynchronous maintenance/audit work. Only endpoint IDs whose
+        # Flex availability has been verified on OpenRouter enter this tier.
+        return self._cfg.rms_openrouter_scheduled_flex_enabled and model in {
+            "openai/gpt-5.6-luna", "openai/gpt-6.1-terra", "openai/gpt-6.1-sol",
+        }
+
+    def _flex_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=self._cfg.rms_openrouter_connect_timeout_seconds,
+            read=max(self._cfg.rms_openrouter_read_timeout_seconds, self._cfg.rms_openrouter_flex_timeout_seconds),
+            write=self._cfg.rms_openrouter_write_timeout_seconds,
+            pool=self._cfg.rms_openrouter_pool_timeout_seconds,
+        )
+
+    @staticmethod
+    def _flex_unavailable(exc: ModelError) -> bool:
+        return exc.status_code in {404, 408, 429, 502, 503, 504} or (
+            exc.status_code is None and exc.retryable
+        )
+
     def _call_sync(
         self,
         model: str,
@@ -495,9 +516,33 @@ class ModelRouter:
         json_mode: bool,
         temperature: float,
     ) -> str:
+        args = (model, prompt, system, max_tokens, json_mode, temperature)
+        if not self._flex_enabled(model):
+            return self._call_sync_once(*args)
+        try:
+            return self._call_sync_once(*args, service_tier="flex")
+        except ModelError as exc:
+            if not self._flex_unavailable(exc):
+                raise
+            claim_recovery()
+            logger.info("model_router: Flex unavailable; retrying same model on standard tier")
+            return self._call_sync_once(*args, service_tier="default")
+
+    def _call_sync_once(
+        self,
+        model: str,
+        prompt: str,
+        system: str,
+        max_tokens: int,
+        json_mode: bool,
+        temperature: float,
+        *, service_tier: str | None = None,
+    ) -> str:
         headers, payload = self._request_parts(
             model, prompt, system, max_tokens, json_mode, temperature
         )
+        if service_tier is not None:
+            payload["service_tier"] = service_tier
         exact_context = self._requires_exact_context(system)
         last_error: ModelError | None = None
         for route_name, url, route_headers, route_payload in self._context_attempts(
@@ -506,9 +551,14 @@ class ModelRouter:
             self._record_context_route(route_name, attempted=True)
             started = time.monotonic()
             try:
-                response = self._get_sync_client().post(
-                    url, headers=route_headers, json=route_payload
-                )
+                if service_tier == "flex":
+                    response = self._get_sync_client().post(
+                        url, headers=route_headers, json=route_payload, timeout=self._flex_timeout()
+                    )
+                else:
+                    response = self._get_sync_client().post(
+                        url, headers=route_headers, json=route_payload
+                    )
                 result = self._parse_response(
                     response, model, time.monotonic() - started, route_name=route_name
                 )
@@ -553,9 +603,33 @@ class ModelRouter:
         json_mode: bool,
         temperature: float,
     ) -> str:
+        args = (model, prompt, system, max_tokens, json_mode, temperature)
+        if not self._flex_enabled(model):
+            return await self._call_async_once(*args)
+        try:
+            return await self._call_async_once(*args, service_tier="flex")
+        except ModelError as exc:
+            if not self._flex_unavailable(exc):
+                raise
+            claim_recovery()
+            logger.info("model_router: Flex unavailable; retrying same model on standard tier")
+            return await self._call_async_once(*args, service_tier="default")
+
+    async def _call_async_once(
+        self,
+        model: str,
+        prompt: str,
+        system: str,
+        max_tokens: int,
+        json_mode: bool,
+        temperature: float,
+        *, service_tier: str | None = None,
+    ) -> str:
         headers, payload = self._request_parts(
             model, prompt, system, max_tokens, json_mode, temperature
         )
+        if service_tier is not None:
+            payload["service_tier"] = service_tier
         exact_context = self._requires_exact_context(system)
         last_error: ModelError | None = None
         for route_name, url, route_headers, route_payload in self._context_attempts(
@@ -564,9 +638,14 @@ class ModelRouter:
             self._record_context_route(route_name, attempted=True)
             started = time.monotonic()
             try:
-                response = await self._get_async_client().post(
-                    url, headers=route_headers, json=route_payload
-                )
+                if service_tier == "flex":
+                    response = await self._get_async_client().post(
+                        url, headers=route_headers, json=route_payload, timeout=self._flex_timeout()
+                    )
+                else:
+                    response = await self._get_async_client().post(
+                        url, headers=route_headers, json=route_payload
+                    )
                 result = self._parse_response(response, model, time.monotonic() - started)
                 self._record_context_route(route_name, success=True)
                 return result

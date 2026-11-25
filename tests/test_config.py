@@ -242,7 +242,7 @@ def test_default_model_route_uses_cost_effective_standard_models() -> None:
     with patch.dict(os.environ, env, clear=True):
         cfg = Settings()
     assert cfg.openrouter_primary_model == "openai/gpt-5.6-luna"
-    assert cfg.openrouter_secondary_model == "anthropic/claude-sonnet-5.5"
+    assert cfg.openrouter_secondary_model == "openai/gpt-6.1-terra"
 
 
 def test_headroom_protect_recent_defaults_to_one_and_accepts_override() -> None:
@@ -253,3 +253,23 @@ def test_headroom_protect_recent_defaults_to_one_and_accepts_override() -> None:
     env["RMS_HEADROOM_PROTECT_RECENT"] = "2"
     with patch.dict(os.environ, env, clear=True):
         assert Settings().rms_headroom_protect_recent == 2
+
+
+def test_model_migration_and_explicit_rollback_survive_stale_configuration() -> None:
+    env = _complete_env(
+        OPENROUTER_SECONDARY_MODEL="anthropic/claude-sonnet-5.5",
+        RMS_ENGINEERING_COUNCIL_ARCHITECT_MODEL="anthropic/claude-sonnet-5.5",
+        RMS_ENGINEERING_COUNCIL_CHAIR_MODEL="openai/gpt-5.6-sol",
+        RMS_ENGINEERING_COUNCIL_CHAIR_MODEL_TEST_OVERRIDE="openai/gpt-5.6-sol",
+        OPENROUTER_MODEL_MIGRATION_ENABLED="true",
+    )
+    with patch.dict(os.environ, env, clear=True):
+        cfg = Settings()
+    assert cfg.openrouter_secondary_model == "openai/gpt-6.1-terra"
+    assert cfg.rms_engineering_council_architect_model == "openai/gpt-6.1-terra"
+    assert cfg.rms_engineering_council_chair_model == "openai/gpt-5.6-sol"
+    cfg.openrouter_secondary_model = "anthropic/claude-sonnet-5.5"
+    cfg.rms_engineering_council_chair_model = "openai/gpt-6.1-terra"
+    cfg.apply_model_migration()
+    assert cfg.openrouter_secondary_model == "openai/gpt-6.1-terra"
+    assert cfg.rms_engineering_council_chair_model == "openai/gpt-5.6-sol"
