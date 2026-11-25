@@ -526,7 +526,7 @@ class ModelRouter:
                 raise
             claim_recovery()
             logger.info("model_router: Flex unavailable; retrying same model on standard tier")
-            return self._call_sync_once(*args, service_tier="default")
+            return self._call_sync_once(*args)
 
     def _call_sync_once(
         self,
@@ -613,7 +613,7 @@ class ModelRouter:
                 raise
             claim_recovery()
             logger.info("model_router: Flex unavailable; retrying same model on standard tier")
-            return await self._call_async_once(*args, service_tier="default")
+            return await self._call_async_once(*args)
 
     async def _call_async_once(
         self,
