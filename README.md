@@ -1,5 +1,5 @@
-# Repository Automation Management Service 
-,
+# Repository Automation Management Service (RAMS)
+
 RAMS is the controlled repository-remediation service for the website/AIMS estate. It is a Python/FastAPI application deployed on Koyeb with bounded model use, authenticated Cloudflare R2 evidence storage, branch-scoped repository mutation and fail-closed validation.
 
 RAMS accepts governed audit evidence, turns eligible findings into tightly bounded remediation work, materialises or refreshes the target repository, plans and validates changes, and publishes reports/evidence. It is deliberately not a general-purpose unattended code agent.
@@ -33,6 +33,10 @@ The current production profile permits governed changes only inside the ephemera
 For the `content` lane, autonomous work is restricted to confirmed findings with exact existing affected paths and approved fix classes such as content-prompt, validator, council, retry, metadata, scheduler-related configuration and link fixes. “Scheduler” findings are remediation categories; they do not re-enable the retired RAMS in-process scheduler. Anything ambiguous falls back to manual review.
 
 RAMS capability metadata is repository-local under `config/skills` and uses stable `RAMS-skNNN` identifiers. It describes native code only; there is no shared skills bucket, external descriptor fetch or runtime skill installer. See `RAMS_LOCAL_CAPABILITIES.md`.
+
+## Model routing and scheduled Flex
+
+The committed production defaults use OpenRouter GPT-5.6 Luna for primary and triage roles, and GPT-6.1 Terra for the secondary and engineering council architect/chair roles. Explicit role overrides remain governed by configuration. The legacy Claude-role migration is controlled by `OPENROUTER_MODEL_MIGRATION_ENABLED`; `RMS_OPENROUTER_SCHEDULED_FLEX_ENABLED` and `RMS_OPENROUTER_FLEX_TIMEOUT_SECONDS` govern eligible scheduled Flex work. If Flex is unavailable, one bounded same-model standard recovery omits the optional tier parameter, preserving privacy and response-format settings. Interactive work must not be forced onto a scheduled Flex route. Model Council promotion is retired; engineering review remains separate. See `repo_mgmt/config.py`, `repo_mgmt/model_router.py`, `tests/test_model_router.py` and [model governance](docs/MODEL_GOVERNANCE.md).
 
 ## R2 configuration and failure behaviour
 
@@ -148,10 +152,14 @@ Canonical runtime/deployment guidance is in `docs/OPERATIONS.md`, `docs/PRODUCTI
 
 Logs and operational events must remain redacted. Secret scanning, dependency-lock verification, dependency vulnerability auditing, Bandit, linting, typing, tests/coverage and Docker/API smoke checks are release gates.
 
-The automatic post-CI production watcher also fails closed: GitHub Actions must provide `KOYEB_TOKEN` and `KOYEB_SERVICE`, the triggering SHA must still be the current default-branch head, and the bounded Koyeb watch must observe that exact source SHA with healthy runtime status, deployment ID and immutable image digest before it retains a production attestation. Missing, stale or inconclusive evidence fails release verification. The separate OIDC readiness workflow is a GitHub token and claim smoke test; it does not prove cloud-provider federation or replace the ecosystem-wide trust policy. The credential-free contracts are covered by `tests/test_deployment_watch_workflow.py` and watcher fixture tests.
+The automatic post-CI production watcher also fails closed: GitHub Actions must provide `KOYEB_TOKEN` and `KOYEB_SERVICE`, the triggering SHA must still be the current default-branch head, and the bounded Koyeb watch must observe that exact source SHA with healthy runtime status, deployment ID and immutable image digest before it retains a production attestation. Missing, stale or inconclusive evidence fails release verification. The legacy OIDC readiness workflow and remaining legacy OIDC contracts have been removed; the current CI and exact-SHA deployment watcher provide release evidence. The credential-free contracts are covered by `tests/test_deployment_watch_workflow.py` and watcher fixture tests.
 
 ## Production evidence and roadmap status
 
 The repository contract for the final professional content-system audit and RAMS content hand-off is complete. Natural-run content evidence remains an operational monitoring activity in the separate content-production roadmap rows; it is not a missing RAMS implementation dependency.
 
 See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/MODEL_GOVERNANCE.md`, `docs/OPERATIONAL_ALERTING.md` and `docs/OPTIMISATION_ENGINE.md`.
+
+## Ecosystem integration and evidence
+
+The eight governed repositories are [HIVE](https://github.com/Jonathan-Harris1975/HIVE), [HIVE-UI](https://github.com/Jonathan-Harris1975/HIVE-UI), [AIMS](https://github.com/Jonathan-Harris1975/AIMS), [AIMS-UI](https://github.com/Jonathan-Harris1975/AIMS-UI), [MAST](https://github.com/Jonathan-Harris1975/MAST), [RAMS](https://github.com/Jonathan-Harris1975/RAMS), [IRS](https://github.com/Jonathan-Harris1975/IRS) and the [public website](https://github.com/Jonathan-Harris1975/jonathan-harris-website). MAST owns schedules; AIMS owns content and communications execution; HIVE and HIVE-UI provide governed intelligence and operator visibility; RAMS performs bounded remediation; IRS and the website own public delivery boundaries. Keep this README aligned with changes to those contracts. A merged change, a healthy HTTP process and verified live functional acceptance are separate evidence; preserve exact-SHA CI and deployment receipts and never report unverified provider delivery as success.
